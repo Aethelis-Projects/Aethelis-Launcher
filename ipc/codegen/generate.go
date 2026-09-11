@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"fmt"
@@ -34,6 +34,63 @@ type LaunchResponse struct {
 	Error   string ` + "`" + `json:"error,omitempty"` + "`" + `
 }
 
+type AccountDTO struct {
+	UUID     string ` + "`" + `json:"uuid"` + "`" + `
+	Username string ` + "`" + `json:"username"` + "`" + `
+	Type     string ` + "`" + `json:"type"` + "`" + `
+	IsActive bool   ` + "`" + `json:"is_active"` + "`" + `
+}
+
+type ModItemDTO struct {
+	ID         string   ` + "`" + `json:"id"` + "`" + `
+	Slug       string   ` + "`" + `json:"slug"` + "`" + `
+	Source     string   ` + "`" + `json:"source"` + "`" + `
+	Name       string   ` + "`" + `json:"name"` + "`" + `
+	Author     string   ` + "`" + `json:"author"` + "`" + `
+	Summary    string   ` + "`" + `json:"summary"` + "`" + `
+	IconURL    string   ` + "`" + `json:"icon_url,omitempty"` + "`" + `
+	Downloads  int64    ` + "`" + `json:"downloads"` + "`" + `
+	Categories []string ` + "`" + `json:"categories"` + "`" + `
+}
+
+type InstalledModDTO struct {
+	FileName  string ` + "`" + `json:"file_name"` + "`" + `
+	ModID     string ` + "`" + `json:"mod_id,omitempty"` + "`" + `
+	Name      string ` + "`" + `json:"name"` + "`" + `
+	Version   string ` + "`" + `json:"version,omitempty"` + "`" + `
+	Enabled   bool   ` + "`" + `json:"enabled"` + "`" + `
+	SizeBytes int64  ` + "`" + `json:"size_bytes"` + "`" + `
+}
+
+type CrashReportDTO struct {
+	Category      string   ` + "`" + `json:"category"` + "`" + `
+	Summary       string   ` + "`" + `json:"summary"` + "`" + `
+	Remedy        string   ` + "`" + `json:"remedy"` + "`" + `
+	Details       string   ` + "`" + `json:"details"` + "`" + `
+	RelevantLines []string ` + "`" + `json:"relevant_lines"` + "`" + `
+	ExitCode      int      ` + "`" + `json:"exit_code"` + "`" + `
+}
+
+type SearchModsRequest struct {
+	Query       string ` + "`" + `json:"query"` + "`" + `
+	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
+	Loader      string ` + "`" + `json:"loader"` + "`" + `
+	Source      string ` + "`" + `json:"source"` + "`" + `
+	Limit       int    ` + "`" + `json:"limit"` + "`" + `
+	Offset      int    ` + "`" + `json:"offset"` + "`" + `
+}
+
+type ToggleModRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+	Enable     bool   ` + "`" + `json:"enable"` + "`" + `
+}
+
+type DeleteModRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+}
+
 type DownloadProgressEvent struct {
 	TaskID     string  ` + "`" + `json:"task_id"` + "`" + `
 	FileName   string  ` + "`" + `json:"file_name"` + "`" + `
@@ -55,6 +112,8 @@ type LogLineEvent struct {
 
 export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
+export type AccountType = "microsoft" | "offline";
+export type ModSource = "modrinth" | "curseforge";
 
 export interface InstanceDTO {
   id: string;
@@ -77,6 +136,63 @@ export interface LaunchResponse {
   success: boolean;
   pid?: number;
   error?: string;
+}
+
+export interface AccountDTO {
+  uuid: string;
+  username: string;
+  type: AccountType;
+  is_active: boolean;
+}
+
+export interface ModItemDTO {
+  id: string;
+  slug: string;
+  source: ModSource;
+  name: string;
+  author: string;
+  summary: string;
+  icon_url?: string;
+  downloads: number;
+  categories: string[];
+}
+
+export interface InstalledModDTO {
+  file_name: string;
+  mod_id?: string;
+  name: string;
+  version?: string;
+  enabled: boolean;
+  size_bytes: number;
+}
+
+export interface CrashReportDTO {
+  category: string;
+  summary: string;
+  remedy: string;
+  details: string;
+  relevant_lines: string[];
+  exit_code: number;
+}
+
+export interface SearchModsRequest {
+  query: string;
+  game_version: string;
+  loader: string;
+  source: ModSource;
+  limit: number;
+  offset: number;
+}
+
+export interface ToggleModRequest {
+  instance_id: string;
+  file_name: string;
+  enable: boolean;
+}
+
+export interface DeleteModRequest {
+  instance_id: string;
+  file_name: string;
 }
 
 export interface DownloadProgressEvent {

@@ -2,6 +2,8 @@
 
 export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
+export type AccountType = "microsoft" | "offline";
+export type ModSource = "modrinth" | "curseforge";
 
 export interface InstanceDTO {
   id: string;
@@ -24,6 +26,63 @@ export interface LaunchResponse {
   success: boolean;
   pid?: number;
   error?: string;
+}
+
+export interface AccountDTO {
+  uuid: string;
+  username: string;
+  type: AccountType;
+  is_active: boolean;
+}
+
+export interface ModItemDTO {
+  id: string;
+  slug: string;
+  source: ModSource;
+  name: string;
+  author: string;
+  summary: string;
+  icon_url?: string;
+  downloads: number;
+  categories: string[];
+}
+
+export interface InstalledModDTO {
+  file_name: string;
+  mod_id?: string;
+  name: string;
+  version?: string;
+  enabled: boolean;
+  size_bytes: number;
+}
+
+export interface CrashReportDTO {
+  category: string;
+  summary: string;
+  remedy: string;
+  details: string;
+  relevant_lines: string[];
+  exit_code: number;
+}
+
+export interface SearchModsRequest {
+  query: string;
+  game_version: string;
+  loader: string;
+  source: ModSource;
+  limit: number;
+  offset: number;
+}
+
+export interface ToggleModRequest {
+  instance_id: string;
+  file_name: string;
+  enable: boolean;
+}
+
+export interface DeleteModRequest {
+  instance_id: string;
+  file_name: string;
 }
 
 export interface DownloadProgressEvent {
