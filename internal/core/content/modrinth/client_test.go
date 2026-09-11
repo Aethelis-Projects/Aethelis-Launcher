@@ -1,0 +1,132 @@
+package modrinth_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/nord-launcher/launcher/internal/core/content"
+	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
+)
+
+func TestModrinthClient_SearchMods(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/search" {
+			http.NotFound(w, r)
+			return
+		}
+
+		ua := r.Header.Get("User-Agent")
+		if ua == "" {
+			t.Error("expected User-Agent header")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"hits": []map[string]any{
+				{
+					"project_id":    "AANobbMI",
+					"slug":          "sodium",
+					"title":         "Sodium",
+					"description":   "Modern rendering engine for Minecraft",
+					"author":        "jellysquid3",
+					"icon_url":      "https://cdn.modrinth.com/sodium.png",
+					"downloads":     15000000,
+					"follows":       45000,
+					"categories":    []string{"fabric", "optimization"},
+					"versions":      []string{"1.21.1"},
+					"date_modified": time.Now().Format(time.RFC3339),
+				},
+			},
+			"total_hits": 1,
+			"offset":     0,
+			"limit":      20,
+		})
+	}))
+	defer server.Close()
+
+	client := modrinth.NewClient(server.URL, server.Client())
+
+	mods, total, err := client.SearchMods(context.Background(), "sodium", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("search mods failed: %v", err)
+	}
+
+	if total != 1 || len(mods) != 1 {
+		t.Fatalf("expected 1 mod hit, got %d (total %d)", len(mods), total)
+	}
+
+	mod := mods[0]
+	if mod.ID != "AANobbMI" || mod.Slug != "sodium" || mod.Name != "Sodium" {
+		t.Fatalf("unexpected mod hit: %+v", mod)
+	}
+	if mod.Source != content.SourceModrinth {
+		t.Fatalf("expected SourceModrinth, got %s", mod.Source)
+	}
+}
+
+func TestModrinthClient_GetProjectVersions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/project/sodium/version" {
+			http.NotFound(w, r)
+			return
+		}
+
+		pid := "P7dR8mSH"
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"id":             "ver-123",
+				"project_id":     "AANobbMI",
+				"version_number": "0.5.8",
+				"name":           "Sodium 0.5.8",
+				"game_versions":  []string{"1.21.1"},
+				"loaders":        []string{"fabric"},
+				"date_published": time.Now().Format(time.RFC3339),
+				"files": []map[string]any{
+					{
+						"filename": "sodium-fabric-0.5.8.jar",
+						"url":      "https://cdn.modrinth.com/sodium-fabric-0.5.8.jar",
+						"primary":  true,
+						"size":     1024000,
+						"hashes": map[string]string{
+							"sha1":   "da39a3ee5e6b4b0d3255bfef95601890afd80709",
+							"sha512": "cf83e1357eefb8bdf1542850d66d8007d620e4050b5715dc83f4a921d36ce9ce47d0d13c5d85f2b0ff8318d2877eec2f63b931bd47417a81a538327af927da3e",
+						},
+					},
+				},
+				"dependencies": []map[string]any{
+					{
+						"project_id":      &pid, // fabric-api
+						"dependency_type": "required",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := modrinth.NewClient(server.URL, server.Client())
+	versions, err := client.GetProjectVersions(context.Background(), "sodium", "1.21.1", "fabric")
+	if err != nil {
+		t.Fatalf("get project versions failed: %v", err)
+	}
+
+	if len(versions) != 1 {
+		t.Fatalf("expected 1 version, got %d", len(versions))
+	}
+
+	v := versions[0]
+	if v.VersionNum != "0.5.8" {
+		t.Fatalf("unexpected version number: %s", v.VersionNum)
+	}
+	if len(v.Files) != 1 || v.Files[0].FileName != "sodium-fabric-0.5.8.jar" {
+		t.Fatalf("unexpected files: %+v", v.Files)
+	}
+	if len(v.Dependencies) != 1 || v.Dependencies[0].ProjectID != "P7dR8mSH" {
+		t.Fatalf("unexpected dependencies: %+v", v.Dependencies)
+	}
+}
