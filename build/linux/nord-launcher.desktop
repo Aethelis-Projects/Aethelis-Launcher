@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Nord Launcher
+Comment=High-performance, anti-AI-slop Minecraft launcher
+Exec=nord-launcher %u
+Icon=nord-launcher
+Terminal=false
+Type=Application
+Categories=Game;ActionGame;AdventureGame;
+MimeType=x-scheme-handler/nord-launcher;
+Keywords=minecraft;launcher;fabric;quilt;neoforge;modpack;
+StartupWMClass=nord-launcher

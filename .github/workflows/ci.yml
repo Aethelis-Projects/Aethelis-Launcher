@@ -89,6 +89,27 @@ jobs:
             console.log("PASS: Bundle budget constraint respected.");
           '
 
+      - name: Build Launcher Binary & Check Size Budget (<= 40 MB)
+        shell: bash
+        run: |
+          go build -ldflags="-s -w" -o build/nord-launcher cmd/launcher/main.go
+          node -e '
+            const fs = require("fs");
+            const binPath = process.platform === "win32" ? "build/nord-launcher.exe" : "build/nord-launcher";
+            if (!fs.existsSync(binPath)) {
+              console.error("Binary not found at " + binPath);
+              process.exit(1);
+            }
+            const sizeBytes = fs.statSync(binPath).size;
+            const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(2);
+            console.log("Built launcher binary size: " + sizeMB + " MB");
+            if (sizeBytes > 40 * 1024 * 1024) {
+              console.error("VIOLATION: Binary exceeded 40 MB budget!");
+              process.exit(1);
+            }
+            console.log("PASS: Launcher binary size budget (<= 40 MB) respected.");
+          '
+
       - name: Anti-AI-Slop Pre-Flight Linter
         shell: bash
         run: |

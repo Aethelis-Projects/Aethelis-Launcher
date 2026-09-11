@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v3.json",
+  "name": "NordLauncher",
+  "version": "0.1.0",
+  "description": "High-performance, anti-AI-slop Minecraft launcher",
+  "author": {
+    "name": "Nord Launcher Team",
+    "email": "dev@nordlauncher.io"
+  },
+  "info": {
+    "companyName": "Nord Project",
+    "productName": "Nord Launcher",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright 2026 Nord Project. GPLv3 licensed."
+  },
+  "frontend:dir": "frontend",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm build",
+  "frontend:dev:watcher": "pnpm dev",
+  "frontend:dev:serverUrl": "http://localhost:5173"
+}
