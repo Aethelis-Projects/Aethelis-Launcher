@@ -92,7 +92,11 @@ jobs:
       - name: Build Launcher Binary & Check Size Budget (<= 40 MB)
         shell: bash
         run: |
-          go build -ldflags="-s -w" -o build/nord-launcher cmd/launcher/main.go
+          BIN_PATH="build/nord-launcher"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            BIN_PATH="build/nord-launcher.exe"
+          fi
+          go build -ldflags="-s -w" -o "$BIN_PATH" cmd/launcher/main.go
           node -e '
             const fs = require("fs");
             const binPath = process.platform === "win32" ? "build/nord-launcher.exe" : "build/nord-launcher";
