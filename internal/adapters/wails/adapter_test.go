@@ -154,3 +154,27 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 		t.Fatalf("unexpected crash report: %+v", report)
 	}
 }
+
+func BenchmarkWailsAdapter_IPCDispatch(b *testing.B) {
+	clk := clock.NewMockClock(time.Now())
+	fileSys := fs.NewOSFileSystem()
+	procMgr := process.NewProcessManager()
+	kr := keyring.NewMemoryKeyring()
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+	adapter := wails.NewWailsAdapter(svc)
+
+	req := wails.CreateInstanceRequest{
+		Name:        "Bench-Instance",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+	}
+	_, err := adapter.CreateInstance(req)
+	if err != nil {
+		b.Fatalf("create failed: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = adapter.ListInstances()
+	}
+}

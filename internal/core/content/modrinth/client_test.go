@@ -130,3 +130,45 @@ func TestModrinthClient_GetProjectVersions(t *testing.T) {
 		t.Fatalf("unexpected dependencies: %+v", v.Dependencies)
 	}
 }
+
+func TestModrinthClient_GetProject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/project/sodium" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":            "AANobbMI",
+			"slug":          "sodium",
+			"title":         "Sodium",
+			"description":   "Modern rendering engine",
+			"body":          "# Full markdown description here",
+			"icon_url":      "https://cdn.modrinth.com/sodium.png",
+			"downloads":     15000000,
+			"follows":       45000,
+			"categories":    []string{"fabric"},
+			"loaders":       []string{"fabric"},
+			"game_versions": []string{"1.21.1"},
+			"updated":       time.Now().Format(time.RFC3339),
+		})
+	}))
+	defer server.Close()
+
+	client := modrinth.NewClient(server.URL, server.Client())
+	item, err := client.GetProject(context.Background(), "sodium")
+	if err != nil {
+		t.Fatalf("GetProject failed: %v", err)
+	}
+
+	if item.ID != "AANobbMI" || item.Name != "Sodium" || item.Description != "# Full markdown description here" {
+		t.Fatalf("unexpected project: %+v", item)
+	}
+
+	// 404 test
+	_, err = client.GetProject(context.Background(), "unknown-mod")
+	if err == nil {
+		t.Fatalf("expected error on unknown mod 404, got nil")
+	}
+}

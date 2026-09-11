@@ -126,6 +126,34 @@ func TestStorage_SQLiteWALAndCRUD(t *testing.T) {
 		t.Fatal("expected uuid-1111 to be inactive")
 	}
 
+	// Test AccountRepository GetActive, ListAll, Delete, and errors
+	activeAcc, err := accRepo.GetActive(ctx)
+	if err != nil || activeAcc.UUID != "uuid-2222" {
+		t.Fatalf("expected active account uuid-2222, got %+v, err: %v", activeAcc, err)
+	}
+
+	allAccs, err := accRepo.ListAll(ctx)
+	if err != nil || len(allAccs) != 2 {
+		t.Fatalf("expected 2 accounts, got %d, err: %v", len(allAccs), err)
+	}
+
+	if err := accRepo.SetActive(ctx, "non-existent-uuid"); !errors.Is(err, domain.ErrAccountNotFound) {
+		t.Fatalf("expected ErrAccountNotFound, got %v", err)
+	}
+
+	_, err = accRepo.GetByUUID(ctx, "non-existent-uuid")
+	if !errors.Is(err, domain.ErrAccountNotFound) {
+		t.Fatalf("expected ErrAccountNotFound on non-existent get, got %v", err)
+	}
+
+	if err := accRepo.Delete(ctx, "uuid-1111"); err != nil {
+		t.Fatalf("failed to delete account: %v", err)
+	}
+	remainingAccs, err := accRepo.ListAll(ctx)
+	if err != nil || len(remainingAccs) != 1 {
+		t.Fatalf("expected 1 remaining account, got %d", len(remainingAccs))
+	}
+
 	// 4. Test SettingsRepository
 	settingsRepo := storage.NewSettingsRepository(db)
 	if err := settingsRepo.Set(ctx, "theme", "nordic-dark"); err != nil {
@@ -140,12 +168,27 @@ func TestStorage_SQLiteWALAndCRUD(t *testing.T) {
 		t.Fatalf("expected 'nordic-dark', got %q, err: %v", theme, err)
 	}
 
+	val, err := settingsRepo.Get(ctx, "non-existent-key")
+	if err != nil || val != "" {
+		t.Fatalf("expected empty string and nil error on non-existent setting get, got %q, err: %v", val, err)
+	}
+
 	allSettings, err := settingsRepo.GetAll(ctx)
 	if err != nil || len(allSettings) != 2 {
 		t.Fatalf("expected 2 settings, got %+v", allSettings)
 	}
 
-	// 5. Test Delete & Not Found
+	// 5. Test Instance with LastPlayedAt and Delete & Not Found
+	playedAt := now.Add(-1 * time.Hour)
+	testInst.LastPlayedAt = &playedAt
+	if err := instRepo.Save(ctx, testInst); err != nil {
+		t.Fatalf("failed to update instance with LastPlayedAt: %v", err)
+	}
+	fetchedWithPlayedAt, err := instRepo.GetByID(ctx, "test-inst-1")
+	if err != nil || fetchedWithPlayedAt.LastPlayedAt == nil {
+		t.Fatalf("expected instance with LastPlayedAt, got %+v, err: %v", fetchedWithPlayedAt, err)
+	}
+
 	if err := instRepo.Delete(ctx, "test-inst-1"); err != nil {
 		t.Fatalf("failed to delete instance: %v", err)
 	}

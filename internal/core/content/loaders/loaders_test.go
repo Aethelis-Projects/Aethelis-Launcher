@@ -87,3 +87,39 @@ func TestNeoForgeLoader_GetVersions(t *testing.T) {
 		t.Fatalf("unexpected release version: %+v", versions[1])
 	}
 }
+
+func TestQuiltLoader_GetVersions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v3/versions/loader/1.21.1" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"loader": map[string]any{
+					"version": "0.26.0",
+					"maven":   "org.quiltmc:quilt-loader:0.26.0",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := loaders.NewQuiltClient(server.URL, server.Client())
+	versions, err := client.GetLoadersForGameVersion(context.Background(), "1.21.1")
+	if err != nil {
+		t.Fatalf("fetch quilt loaders failed: %v", err)
+	}
+
+	if len(versions) != 1 || versions[0].Version != "0.26.0" {
+		t.Fatalf("unexpected quilt versions: %+v", versions)
+	}
+
+	// Error path
+	_, err = client.GetLoadersForGameVersion(context.Background(), "9.9.9")
+	if err == nil {
+		t.Fatalf("expected error on 404, got nil")
+	}
+}

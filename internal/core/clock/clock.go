@@ -1,4 +1,4 @@
-﻿package clock
+package clock
 
 import (
 	"time"

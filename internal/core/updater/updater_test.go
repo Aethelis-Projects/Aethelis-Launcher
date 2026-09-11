@@ -184,4 +184,48 @@ func TestAutoUpdater_DownloadAndApply(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected signature invalid error, got nil")
 	}
+
+	// 4. Failure: Bad base64 signature
+	corruptSigAsset := asset
+	corruptSigAsset.Signature = "!!!not-valid-base64!!!"
+	err = updater.DownloadAndApply(context.Background(), corruptSigAsset, dummyExe)
+	if err == nil {
+		t.Fatalf("expected error on bad base64 signature, got nil")
+	}
+
+	// 5. Failure: HTTP 500 error on download
+	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer errServer.Close()
+
+	errAsset := asset
+	errAsset.URL = errServer.URL
+	err = updater.DownloadAndApply(context.Background(), errAsset, dummyExe)
+	if err == nil {
+		t.Fatalf("expected error on HTTP 500 download, got nil")
+	}
+}
+
+func TestAutoUpdater_EdgeCases(t *testing.T) {
+	// Test nil http client defaults
+	u := NewAutoUpdater("0.1.0", "http://example.com", nil, nil)
+	if u.httpClient == nil {
+		t.Fatalf("expected default httpClient, got nil")
+	}
+
+	// Test manifest server error 500
+	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad manifest", http.StatusInternalServerError)
+	}))
+	defer errServer.Close()
+
+	uErr := NewAutoUpdater("0.1.0", errServer.URL, nil, errServer.Client())
+	_, err := uErr.CheckForUpdates(context.Background())
+	if err == nil {
+		t.Fatalf("expected error on 500 manifest, got nil")
+	}
+
+	// Test stale backup cleanup
+	CleanupStaleBackup()
 }

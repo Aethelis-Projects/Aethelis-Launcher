@@ -8,6 +8,8 @@ dist/
 
 # Go
 vendor/
+*.out
+coverage*
 
 # Node / Frontend
 frontend/node_modules/

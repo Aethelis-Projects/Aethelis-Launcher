@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/nord-launcher/launcher/internal/adapters/fs"
 	"github.com/nord-launcher/launcher/internal/adapters/keyring"
@@ -15,6 +16,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--idle-test" {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		fmt.Printf("IDLE_HEAP_ALLOC_MB: %.2f\n", float64(m.Alloc)/(1024*1024))
+		fmt.Printf("IDLE_SYS_MB: %.2f\n", float64(m.Sys)/(1024*1024))
+		return
+	}
 	// 1. Initialize Hexagonal Core Ports & Adapters
 	fileSys := fs.NewOSFileSystem()
 	procMgr := process.NewProcessManager()

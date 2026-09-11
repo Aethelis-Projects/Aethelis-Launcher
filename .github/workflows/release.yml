@@ -58,6 +58,11 @@ jobs:
             }
           '
 
+      - name: Windows Authenticode Code Signing
+        shell: pwsh
+        run: |
+          ./scripts/sign_windows.ps1 -TargetFile "dist/windows/NordLauncher.exe"
+
       - name: Build NSIS Installer
         uses: joncloud/makensis-action@v4
         with:

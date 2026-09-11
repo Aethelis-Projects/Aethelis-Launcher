@@ -38,7 +38,10 @@ if ($BinaryBytes -gt 40MB) {
     Write-Error "ERROR: Launcher binary exceeds 40 MB budget ($BinaryMB MB)!"
 }
 
-Write-Host "==> [4/5] Checking NSIS Installer availability..." -ForegroundColor Cyan
+Write-Host "==> [4/6] Applying Windows Authenticode Code Signing..." -ForegroundColor Cyan
+& (Join-Path $PSScriptRoot "sign_windows.ps1") -TargetFile $BinaryPath
+
+Write-Host "==> [5/6] Checking NSIS Installer availability..." -ForegroundColor Cyan
 $Makensis = Get-Command makensis -ErrorAction SilentlyContinue
 if ($Makensis) {
     Write-Host "Building NSIS installer..." -ForegroundColor Cyan
