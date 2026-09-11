@@ -1,0 +1,139 @@
+name: Production Release & Cross-Platform Packaging
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build & Package Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "12"
+
+      - name: Build Frontend
+        working-directory: frontend
+        run: |
+          pnpm install
+          pnpm build
+
+      - name: Compile Windows Executable
+        run: |
+          mkdir -p dist/windows
+          go build -ldflags="-s -w -H=windowsgui -X main.version=${{ github.ref_name }}" -o dist/windows/NordLauncher.exe cmd/launcher/main.go
+        shell: bash
+
+      - name: Check Binary Size Budget (<= 40 MB)
+        run: |
+          node -e '
+            const fs = require("fs");
+            const bin = "dist/windows/NordLauncher.exe";
+            const size = fs.statSync(bin).size;
+            console.log("Binary size: " + (size / 1048576).toFixed(2) + " MB");
+            if (size > 40 * 1024 * 1024) {
+              console.error("Binary exceeded 40 MB budget!");
+              process.exit(1);
+            }
+          '
+
+      - name: Build NSIS Installer
+        uses: joncloud/makensis-action@v4
+        with:
+          script-file: build/windows/installer.nsi
+          arguments: /DVERSION=${{ github.ref_name }}
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nord-launcher-windows
+          path: |
+            dist/windows/NordLauncher.exe
+            NordLauncher-Setup.exe
+
+  build-linux:
+    name: Build & Package Linux (x64)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "12"
+
+      - name: Build Release Tarball
+        run: |
+          chmod +x scripts/build_release.sh
+          ./scripts/build_release.sh ${{ github.ref_name }}
+        shell: bash
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nord-launcher-linux
+          path: dist/linux/nord-launcher-v*.tar.gz
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nord-launcher-windows
+          path: release-assets/
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: nord-launcher-linux
+          path: release-assets/
+
+      - name: Generate Checksums
+        working-directory: release-assets
+        run: |
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

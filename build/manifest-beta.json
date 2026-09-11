@@ -1,0 +1,19 @@
+{
+  "version": "0.1.1-beta.1",
+  "release_date": "2026-09-12T00:00:00Z",
+  "changelog": "- Beta channel preview\n- Experimental loader enhancements",
+  "platforms": {
+    "windows-amd64": {
+      "url": "https://github.com/nord-launcher/launcher/releases/download/v0.1.1-beta.1/NordLauncher.exe",
+      "sha256": "",
+      "signature": "",
+      "size": 9405952
+    },
+    "linux-amd64": {
+      "url": "https://github.com/nord-launcher/launcher/releases/download/v0.1.1-beta.1/nord-launcher-v0.1.1-beta.1-linux-amd64.tar.gz",
+      "sha256": "",
+      "signature": "",
+      "size": 9400000
+    }
+  }
+}
