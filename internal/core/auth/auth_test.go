@@ -287,6 +287,29 @@ func TestAuth_OfflineAccountCreation(t *testing.T) {
 	}
 }
 
+func TestAuth_OfflineUUIDV3_VanillaParity(t *testing.T) {
+	// Canonical vectors from Mojang Java client:
+	// UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8))
+	cases := []struct {
+		username     string
+		expectedUUID string
+	}{
+		{"Steve", "5627dd98e6be3c21b8a8e92344183641"},
+		{"Alex", "36532b5ec4423dbba24cc7e55d0f979a"},
+	}
+
+	authSvc := auth.NewAuthService("test-id", nil, nil, nil)
+	for _, tc := range cases {
+		acc, err := authSvc.CreateOfflineAccount(context.Background(), tc.username)
+		if err != nil {
+			t.Fatalf("failed to create account for %s: %v", tc.username, err)
+		}
+		if acc.UUID != tc.expectedUUID {
+			t.Errorf("vanilla parity failure for %s: expected %s, got %s", tc.username, tc.expectedUUID, acc.UUID)
+		}
+	}
+}
+
 func TestAuth_XSTSError_ChildAccount(t *testing.T) {
 	mockNet := setupMockAuthServers(t)
 	defer mockNet.server.Close()
