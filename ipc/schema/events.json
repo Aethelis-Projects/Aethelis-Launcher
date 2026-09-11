@@ -1,0 +1,29 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "StreamEvents",
+  "type": "object",
+  "definitions": {
+    "DownloadProgress": {
+      "type": "object",
+      "properties": {
+        "task_id": { "type": "string" },
+        "file_name": { "type": "string" },
+        "bytes_read": { "type": "integer" },
+        "total_bytes": { "type": "integer" },
+        "percentage": { "type": "number" },
+        "speed_bps": { "type": "integer" }
+      },
+      "required": ["task_id", "file_name", "bytes_read", "total_bytes", "percentage"]
+    },
+    "LogLine": {
+      "type": "object",
+      "properties": {
+        "instance_id": { "type": "string" },
+        "level": { "type": "string", "enum": ["info", "warn", "error", "debug"] },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["instance_id", "level", "message", "timestamp"]
+    }
+  }
+}

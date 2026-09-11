@@ -1,0 +1,99 @@
+name: CI Quality Gate & Anti-Slop Enforcement
+
+on:
+  push:
+    branches: [ master, main, "release/*" ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  core-and-frontend:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "12"
+
+      - name: Verify IPC Codegen Parity
+        run: |
+          go run ./ipc/codegen/generate.go
+          git diff --exit-code || (echo "IPC types are out of sync with schema. Run go run ./ipc/codegen/generate.go" && exit 1)
+        shell: bash
+
+      - name: Run Core Go Tests (Headless)
+        run: |
+          go test -v -race ./internal/...
+        shell: bash
+
+      - name: Install Frontend Dependencies
+        working-directory: frontend
+        run: pnpm install
+
+      - name: Frontend TypeScript Typecheck
+        working-directory: frontend
+        run: pnpm tsc --noEmit
+
+      - name: Frontend Vitest Unit Tests
+        working-directory: frontend
+        run: pnpm vitest run
+
+      - name: Frontend Build & Bundle Budget Gate (<= 250 KB gzip)
+        working-directory: frontend
+        run: |
+          pnpm build
+          node -e '
+            const fs = require("fs");
+            const zlib = require("zlib");
+            const path = require("path");
+            let totalGzip = 0;
+            const distDir = path.join(process.cwd(), "dist");
+            function walk(dir) {
+              const files = fs.readdirSync(dir);
+              for (const f of files) {
+                const full = path.join(dir, f);
+                if (fs.statSync(full).isDirectory()) walk(full);
+                else {
+                  const content = fs.readFileSync(full);
+                  totalGzip += zlib.gzipSync(content).length;
+                }
+              }
+            }
+            walk(distDir);
+            const totalKb = (totalGzip / 1024).toFixed(2);
+            console.log("Total Gzip bundle size: " + totalKb + " KB");
+            if (totalGzip > 250 * 1024) {
+              console.error("VIOLATION: Bundle exceeded 250 KB budget!");
+              process.exit(1);
+            }
+            console.log("PASS: Bundle budget constraint respected.");
+          '
+
+      - name: Anti-AI-Slop Pre-Flight Linter
+        shell: bash
+        run: |
+          echo "Running Anti-AI-Slop checks..."
+          # Check forbidden AI slop strings in frontend/src
+          ! grep -ri "<em>" frontend/src/components || (echo "FAILED: Italic header/emphasis slop detected" && exit 1)
+          ! grep -ri "as any" frontend/src || (echo "FAILED: 'as any' bypass detected" && exit 1)
+          echo "PASS: Zero AI-slop violations found."

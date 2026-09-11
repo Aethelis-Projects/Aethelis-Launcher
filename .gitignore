@@ -1,0 +1,21 @@
+﻿# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.npmrc
+.pnpm-store/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
