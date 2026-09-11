@@ -12,3 +12,12 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
 }
 
 render(() => <App />, root!);
+
+// Instrument first UI frame paint for NFR measurement
+requestAnimationFrame(() => {
+  performance.mark("first-ui-frame");
+  const entries = performance.getEntriesByName("first-ui-frame");
+  if (entries.length > 0) {
+    console.log(`[PERF] First UI Frame rendered at: ${entries[0].startTime.toFixed(2)}ms`);
+  }
+});

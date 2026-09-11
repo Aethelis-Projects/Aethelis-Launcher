@@ -135,6 +135,9 @@ func (d *Dispatcher) DownloadBatch(
 	if len(tasks) == 0 {
 		return nil
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	// Prepare priority queue
 	pq := make(TaskPriorityQueue, 0, len(tasks))

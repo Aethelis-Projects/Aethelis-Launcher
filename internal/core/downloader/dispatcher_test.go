@@ -340,3 +340,90 @@ func TestDownloader_PerHostConcurrencyLimiting(t *testing.T) {
 		t.Fatalf("exceeded maxConnsPerHost! Expected <= %d, observed %d", maxConns, maxObserved.Load())
 	}
 }
+
+func TestPriorityQueue_HeapOperations(t *testing.T) {
+	var pq downloader.TaskPriorityQueue
+	now := time.Now()
+
+	t1 := &downloader.DownloadTask{ID: "low", Priority: downloader.PriorityLow, CreatedAt: now}
+	t2 := &downloader.DownloadTask{ID: "high", Priority: downloader.PriorityHigh, CreatedAt: now}
+	t3 := &downloader.DownloadTask{ID: "critical", Priority: downloader.PriorityCritical, CreatedAt: now}
+	t4 := &downloader.DownloadTask{ID: "high-later", Priority: downloader.PriorityHigh, CreatedAt: now.Add(1 * time.Second)}
+
+	pq.Push(t1)
+	pq.Push(t2)
+	pq.Push(t3)
+	pq.Push(t4)
+
+	if pq.Len() != 4 {
+		t.Fatalf("expected len 4, got %d", pq.Len())
+	}
+
+	// Test Less
+	// t3 (critical) vs t2 (high)
+	if !pq.Less(2, 1) { // index 2 is critical, index 1 is high
+		t.Errorf("critical should be less (higher priority) than high")
+	}
+	// t2 (high, earlier) vs t4 (high, later)
+	if !pq.Less(1, 3) {
+		t.Errorf("earlier task should have priority over later task with same priority")
+	}
+
+	popped := pq.Pop().(*downloader.DownloadTask)
+	if popped.ID != "high-later" {
+		t.Errorf("expected high-later from raw slice pop, got %s", popped.ID)
+	}
+}
+
+func TestDispatcher_DefaultConfigFallbacks(t *testing.T) {
+	disp := downloader.NewDispatcher(downloader.Config{}, nil)
+	if disp == nil {
+		t.Fatalf("expected non-nil dispatcher")
+	}
+
+	// Invalid URL test in download
+	tempDir := t.TempDir()
+	task := &downloader.DownloadTask{
+		ID:       "bad-url",
+		URL:      "://invalid-url",
+		DestPath: filepath.Join(tempDir, "bad.bin"),
+	}
+	err := disp.DownloadBatch(context.Background(), []*downloader.DownloadTask{task}, nil)
+	if err == nil {
+		t.Fatalf("expected error on invalid URL, got nil")
+	}
+
+	// Server 500 error test
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	failTask := &downloader.DownloadTask{
+		ID:       "fail-500",
+		URL:      server.URL + "/error",
+		DestPath: filepath.Join(tempDir, "fail.bin"),
+	}
+	err = disp.DownloadBatch(context.Background(), []*downloader.DownloadTask{failTask}, nil)
+	if err == nil {
+		t.Fatalf("expected error on 500 download, got nil")
+	}
+
+	// Empty batch test
+	if err := disp.DownloadBatch(context.Background(), nil, nil); err != nil {
+		t.Fatalf("expected nil on empty task list, got %v", err)
+	}
+
+	// Existing file without hash test
+	noHashFile := filepath.Join(tempDir, "nohash.bin")
+	_ = os.WriteFile(noHashFile, []byte("some-data"), 0644)
+	noHashTask := &downloader.DownloadTask{
+		ID:           "nohash-task",
+		URL:          "http://example.com/file",
+		DestPath:     noHashFile,
+		ExpectedSize: 9, // len("some-data")
+	}
+	if err := disp.DownloadBatch(context.Background(), []*downloader.DownloadTask{noHashTask}, nil); err != nil {
+		t.Fatalf("expected skipped download for matching size without hash: %v", err)
+	}
+}
