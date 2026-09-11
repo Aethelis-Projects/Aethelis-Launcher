@@ -1,4 +1,4 @@
-﻿package wails_test
+package wails_test
 
 import (
 	"testing"
@@ -18,7 +18,7 @@ func TestWailsAdapter_IPCBridge(t *testing.T) {
 	procMgr := process.NewProcessManager()
 	kr := keyring.NewMemoryKeyring()
 
-	svc := launch.NewInstanceService(fileSys, procMgr, kr, clk)
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
 	adapter := wails.NewWailsAdapter(svc)
 
 	// Test create via IPC DTO

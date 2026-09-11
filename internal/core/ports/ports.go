@@ -1,10 +1,12 @@
-﻿package ports
+package ports
 
 import (
 	"context"
 	"io"
 	"os"
 	"time"
+
+	"github.com/nord-launcher/launcher/internal/core/domain"
 )
 
 // FileSystem defines file operations required by the core.
@@ -51,4 +53,30 @@ type Clock interface {
 	Now() time.Time
 	Since(t time.Time) time.Duration
 	Sleep(d time.Duration)
+}
+
+// InstanceRepository defines storage operations for instances.
+type InstanceRepository interface {
+	Save(ctx context.Context, inst *domain.Instance) error
+	GetByID(ctx context.Context, id string) (*domain.Instance, error)
+	ListAll(ctx context.Context) ([]*domain.Instance, error)
+	Delete(ctx context.Context, id string) error
+	UpdateState(ctx context.Context, id string, state domain.InstanceState) error
+}
+
+// AccountRepository defines storage operations for user accounts.
+type AccountRepository interface {
+	Save(ctx context.Context, acc *domain.Account) error
+	GetByUUID(ctx context.Context, uuid string) (*domain.Account, error)
+	GetActive(ctx context.Context) (*domain.Account, error)
+	ListAll(ctx context.Context) ([]*domain.Account, error)
+	SetActive(ctx context.Context, uuid string) error
+	Delete(ctx context.Context, uuid string) error
+}
+
+// SettingsRepository defines persistent key-value configuration.
+type SettingsRepository interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key, value string) error
+	GetAll(ctx context.Context) (map[string]string, error)
 }
