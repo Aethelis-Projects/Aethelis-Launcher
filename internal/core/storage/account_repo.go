@@ -70,6 +70,30 @@ func (r *AccountRepository) GetByUUID(ctx context.Context, uuid string) (*domain
 	}, nil
 }
 
+func (r *AccountRepository) GetActive(ctx context.Context) (*domain.Account, error) {
+	query := `SELECT uuid, username, type, expires_at, is_active FROM accounts WHERE is_active = 1 LIMIT 1;`
+	var (
+		u, username, accType, expiresAtStr string
+		isActiveInt                        int
+	)
+	err := r.db.QueryRowContext(ctx, query).Scan(&u, &username, &accType, &expiresAtStr, &isActiveInt)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, domain.ErrAccountNotFound
+		}
+		return nil, fmt.Errorf("get active account: %w", err)
+	}
+
+	expiresAt, _ := time.Parse(time.RFC3339, expiresAtStr)
+	return &domain.Account{
+		UUID:      u,
+		Username:  username,
+		Type:      domain.AccountType(accType),
+		ExpiresAt: expiresAt,
+		IsActive:  true,
+	}, nil
+}
+
 func (r *AccountRepository) ListAll(ctx context.Context) ([]*domain.Account, error) {
 	query := `SELECT uuid, username, type, expires_at, is_active FROM accounts ORDER BY is_active DESC;`
 	rows, err := r.db.QueryContext(ctx, query)

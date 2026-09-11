@@ -125,3 +125,75 @@ func TestInstanceService_SQLiteStorageIntegration(t *testing.T) {
 		t.Fatal("expected db last_played_at to be populated")
 	}
 }
+
+func TestInstanceService_LaunchWithSupervisor(t *testing.T) {
+	fileSys := fs.NewOSFileSystem()
+	procMgr := process.NewProcessManager()
+	kr := keyring.NewMemoryKeyring()
+	clk := clock.NewMockClock(time.Now())
+
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+
+	inst, err := svc.CreateInstance("Supervisor-Pack", "1.21.1", domain.LoaderVanilla)
+	if err != nil {
+		t.Fatalf("create instance failed: %v", err)
+	}
+
+	acc := &domain.Account{
+		UUID:        "test-uuid",
+		Username:    "SupervisorSteve",
+		Type:        domain.AccountOffline,
+		AccessToken: "0",
+	}
+
+	vMeta := &launch.VersionJSON{
+		ID:        "1.21.1",
+		MainClass: "net.minecraft.client.main.Main",
+	}
+
+	cfg := launch.LaunchConfig{
+		Instance:    inst,
+		Account:     acc,
+		VersionMeta: vMeta,
+		GameDir:     t.TempDir(),
+	}
+
+	// For headless unit testing, we use a command that exits cleanly and outputs simulated log line
+	var execName string
+	if filepath.Separator == '\\' {
+		execName = "cmd.exe"
+		// Inject a fake Java command via custom JVM args to avoid failing when java is not configured
+		inst.JVMArgs = []string{"/c", "echo [main/INFO]: Minecraft started successfully"}
+	} else {
+		execName = "echo"
+	}
+
+	handle, supervisor, err := svc.LaunchWithSupervisor(context.Background(), cfg, execName)
+	if err != nil {
+		t.Fatalf("LaunchWithSupervisor failed: %v", err)
+	}
+
+	if handle.PID() <= 0 {
+		t.Fatalf("invalid PID: %d", handle.PID())
+	}
+
+	exitCode, err := handle.Wait()
+	if err != nil {
+		t.Fatalf("handle.Wait error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", exitCode)
+	}
+
+	// Give log supervisor a brief moment to process the pipe
+	time.Sleep(50 * time.Millisecond)
+	report := supervisor.AnalyzeCrash(exitCode)
+	if report != nil {
+		t.Fatalf("expected nil crash report on clean exit, got: %+v", report)
+	}
+
+	updated, _ := svc.GetInstance(inst.ID)
+	if updated.State != domain.StateRunning {
+		t.Fatalf("expected StateRunning, got %s", updated.State)
+	}
+}

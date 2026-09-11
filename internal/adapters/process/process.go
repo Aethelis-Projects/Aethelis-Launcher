@@ -1,4 +1,4 @@
-﻿package process
+package process
 
 import (
 	"context"
@@ -32,6 +32,8 @@ func (m *DefaultProcessManager) StartProcess(
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+
+	postStartHook(cmd)
 
 	return &osProcessHandle{cmd: cmd}, nil
 }

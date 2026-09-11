@@ -3,6 +3,8 @@ package launch
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"sync"
 
 	"github.com/nord-launcher/launcher/internal/core/domain"
@@ -137,4 +139,65 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 	}
 
 	return 1337, nil
+}
+
+func (s *InstanceService) LaunchWithSupervisor(
+	ctx context.Context,
+	cfg LaunchConfig,
+	javaExec string,
+) (ports.ProcessHandle, *LogSupervisor, error) {
+	if javaExec == "" {
+		javaExec = "java"
+	}
+
+	args, err := BuildLaunchArguments(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("build launch args: %w", err)
+	}
+
+	supervisor := NewLogSupervisor(200)
+
+	stdoutR, stdoutW := io.Pipe()
+	stderrR, stderrW := io.Pipe()
+
+	supervisor.AttachPipes(stdoutR, stderrR)
+
+	s.mu.Lock()
+	cfg.Instance.State = domain.StateLaunching
+	if s.repo != nil {
+		_ = s.repo.UpdateState(ctx, cfg.Instance.ID, domain.StateLaunching)
+	}
+	s.mu.Unlock()
+
+	handle, err := s.proc.StartProcess(
+		ctx,
+		javaExec,
+		args,
+		cfg.GameDir,
+		os.Environ(),
+		stdoutW,
+		stderrW,
+	)
+	if err != nil {
+		s.mu.Lock()
+		cfg.Instance.State = domain.StateCrashed
+		if s.repo != nil {
+			_ = s.repo.UpdateState(ctx, cfg.Instance.ID, domain.StateCrashed)
+		}
+		s.mu.Unlock()
+		_ = stdoutW.Close()
+		_ = stderrW.Close()
+		return nil, nil, fmt.Errorf("start game process: %w", err)
+	}
+
+	s.mu.Lock()
+	cfg.Instance.State = domain.StateRunning
+	now := s.clock.Now()
+	cfg.Instance.LastPlayedAt = &now
+	if s.repo != nil {
+		_ = s.repo.Save(ctx, cfg.Instance)
+	}
+	s.mu.Unlock()
+
+	return handle, supervisor, nil
 }
