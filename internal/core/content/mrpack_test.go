@@ -115,4 +115,22 @@ func TestMrPack_InvalidZip(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected ErrInvalidMrPack, got nil")
 	}
+
+	// Unsupported game
+	badGameBuf := new(bytes.Buffer)
+	zwBad := zip.NewWriter(badGameBuf)
+	fBad, _ := zwBad.Create("modrinth.index.json")
+	_, _ = fBad.Write([]byte(`{"formatVersion": 1, "game": "othergame"}`))
+	_ = zwBad.Close()
+	badGameData := badGameBuf.Bytes()
+	_, err = content.ParseMrPack(bytes.NewReader(badGameData), int64(len(badGameData)))
+	if err == nil {
+		t.Fatalf("expected ErrUnsupportedGame, got nil")
+	}
+
+	// Extract overrides with invalid zip
+	err = content.ExtractMrPackOverrides(bytes.NewReader(badData), int64(len(badData)), t.TempDir())
+	if err == nil {
+		t.Fatalf("expected error on extract invalid zip, got nil")
+	}
 }
