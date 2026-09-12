@@ -45,6 +45,10 @@ func createTestMrPack(t *testing.T) ([]byte, int64) {
 	}
 	_, _ = fIndex.Write([]byte(indexJSON))
 
+	// Add overrides directory entries
+	_, _ = zw.Create("overrides/")
+	_, _ = zw.Create("overrides/config/")
+
 	// Add overrides/config/sodium-options.json
 	fOverride, err := zw.Create("overrides/config/sodium-options.json")
 	if err != nil {

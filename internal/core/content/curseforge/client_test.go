@@ -118,3 +118,26 @@ func TestCurseForgeClient_GetModFiles(t *testing.T) {
 		t.Fatalf("unexpected dependency details: %+v", f.Dependencies)
 	}
 }
+
+func TestCurseForge_LoaderToType(t *testing.T) {
+	cases := map[string]int{
+		"forge":    1,
+		"fabric":   4,
+		"quilt":    5,
+		"neoforge": 6,
+		"other":    0,
+	}
+	for loader, expected := range cases {
+		got := curseforge.LoaderToType(loader)
+		if got != expected {
+			t.Errorf("LoaderToType(%q) = %d, want %d", loader, got, expected)
+		}
+	}
+}
+
+func TestCurseForge_ClientDefaults(t *testing.T) {
+	c := curseforge.NewClient("", "", nil)
+	if c == nil {
+		t.Fatal("expected non-nil client")
+	}
+}

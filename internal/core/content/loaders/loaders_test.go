@@ -123,3 +123,18 @@ func TestQuiltLoader_GetVersions(t *testing.T) {
 		t.Fatalf("expected error on 404, got nil")
 	}
 }
+
+func TestLoaders_DefaultClients(t *testing.T) {
+	fc := loaders.NewFabricClient("", nil)
+	if fc == nil {
+		t.Fatal("expected non-nil fabric client")
+	}
+	nfc := loaders.NewNeoForgeClient("", nil)
+	if nfc == nil {
+		t.Fatal("expected non-nil neoforge client")
+	}
+	qc := loaders.NewQuiltClient("", nil)
+	if qc == nil {
+		t.Fatal("expected non-nil quilt client")
+	}
+}

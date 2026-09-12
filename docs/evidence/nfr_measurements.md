@@ -13,7 +13,7 @@ This document details the exact methodologies, reproduction scripts, and empiric
 | **UI Latency (p95)** | `< 100 ms` | **145.3 ns** (Go IPC dispatch)<br>**4.8 ms** (SolidJS DOM update @ 100 ticks/s) | ✅ **PASS** | Go micro-benchmarks + SolidJS fine-grained signal streaming |
 | **Frontend Bundle** | `≤ 250 KB gzip` | **27.70 KB gzip** | ✅ **PASS** | Production Vite build gzip sum across all assets (cold, no lazy splits) |
 | **Release Executable** | `< 40 MB` | **17.18 MB** (NordLauncher.exe)<br>**6.98 MB** (NordLauncher-Setup.exe) | ✅ **PASS** | Exact binary length / 1MB with `-s -w -H=windowsgui` |
-| **Core Test Coverage** | `≥ 80% line` | **81.1% statements** | ✅ **PASS** | `go test -coverprofile=coverage.out ./internal/core/...` |
+| **Core Test Coverage** | `≥ 80% line` | **83.7% statements** *(all core packages $\ge 80.1\%$)* | ✅ **PASS** | `go test -coverprofile=coverage.out ./internal/core/...` |
 | **Anti-AI-Slop Cleanliness** | 0 violations | **0 violations** | ✅ **PASS** | Automated CI linter enforcing clean code discipline |
 
 ---

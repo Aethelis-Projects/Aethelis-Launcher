@@ -174,3 +174,10 @@ func TestResolver_AlreadyInstalledSkip(t *testing.T) {
 		t.Fatalf("expected 0 new dependencies, got %+v", res.DependenciesAdded)
 	}
 }
+
+func TestConflictError(t *testing.T) {
+	err := &resolver.ConflictError{ModA: "ModA", ModB: "ModB"}
+	if err.Error() == "" {
+		t.Errorf("expected non-empty error string")
+	}
+}

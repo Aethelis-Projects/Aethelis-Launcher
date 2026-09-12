@@ -229,3 +229,10 @@ func TestAutoUpdater_EdgeCases(t *testing.T) {
 	// Test stale backup cleanup
 	CleanupStaleBackup()
 }
+
+func TestGetDefaultPublicKey(t *testing.T) {
+	pk := GetDefaultPublicKey()
+	if len(pk) != ed25519.PublicKeySize {
+		t.Fatalf("expected valid default public key size %d, got %d", ed25519.PublicKeySize, len(pk))
+	}
+}

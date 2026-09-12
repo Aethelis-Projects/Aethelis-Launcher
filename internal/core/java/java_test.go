@@ -96,3 +96,58 @@ func TestAdoptiumClient_GetLatestRelease(t *testing.T) {
 		t.Errorf("unexpected version: %s", asset.Version)
 	}
 }
+
+func TestMapGoPlatformToAdoptium(t *testing.T) {
+	cases := []struct {
+		goos, goarch string
+		wantOS       string
+		wantArch     string
+	}{
+		{"windows", "amd64", "windows", "x64"},
+		{"linux", "arm64", "linux", "aarch64"},
+		{"darwin", "amd64", "mac", "x64"},
+		{"freebsd", "riscv64", "freebsd", "riscv64"},
+	}
+
+	for _, c := range cases {
+		gotOS, gotArch := java.MapGoPlatformToAdoptium(c.goos, c.goarch)
+		if gotOS != c.wantOS || gotArch != c.wantArch {
+			t.Errorf("MapGoPlatformToAdoptium(%s, %s) = (%s, %s); want (%s, %s)",
+				c.goos, c.goarch, gotOS, gotArch, c.wantOS, c.wantArch)
+		}
+	}
+}
+
+func TestResolveJavaMajor_Invalid(t *testing.T) {
+	_, err := java.ResolveJavaMajor("")
+	if err == nil {
+		t.Errorf("expected error for empty version, got nil")
+	}
+}
+
+func TestAdoptiumClient_ErrorCases(t *testing.T) {
+	// 500 error
+	errSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "server error", http.StatusInternalServerError)
+	}))
+	defer errSrv.Close()
+
+	client := java.NewAdoptiumClient(errSrv.URL, errSrv.Client())
+	_, err := client.GetLatestRelease(context.Background(), 21)
+	if err == nil {
+		t.Errorf("expected error on 500 server response, got nil")
+	}
+
+	// Empty array
+	emptySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer emptySrv.Close()
+
+	emptyClient := java.NewAdoptiumClient(emptySrv.URL, emptySrv.Client())
+	_, err = emptyClient.GetLatestRelease(context.Background(), 21)
+	if err == nil {
+		t.Errorf("expected error on empty response array, got nil")
+	}
+}

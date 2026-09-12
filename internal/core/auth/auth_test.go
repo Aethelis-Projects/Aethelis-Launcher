@@ -352,3 +352,51 @@ func TestAuth_XSTSError_ChildAccount(t *testing.T) {
 		t.Fatalf("expected child account message, got: %s", xstsErr.Error())
 	}
 }
+
+func TestAuth_GetActiveSession_And_XSTSErrorBranches(t *testing.T) {
+	// 1. Test XSTSError branches
+	errNoProfile := &auth.XSTSError{Code: 2148916233, Message: "no profile"}
+	if !strings.Contains(errNoProfile.Error(), "does not have an Xbox profile") {
+		t.Errorf("unexpected error string: %s", errNoProfile.Error())
+	}
+
+	errChild := &auth.XSTSError{Code: 2148916238, Message: "child"}
+	if !strings.Contains(errChild.Error(), "child under 18") {
+		t.Errorf("unexpected error string: %s", errChild.Error())
+	}
+
+	errOther := &auth.XSTSError{Code: 99999, Message: "unknown failure"}
+	if !strings.Contains(errOther.Error(), "99999") {
+		t.Errorf("unexpected error string: %s", errOther.Error())
+	}
+
+	// 2. Test GetActiveSession
+	dbPath := filepath.Join(t.TempDir(), "auth_sess.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open storage: %v", err)
+	}
+	defer db.Close()
+	accountRepo := storage.NewAccountRepository(db)
+	kr := keyring.NewMemoryKeyring()
+
+	authSvc := auth.NewAuthService("test-client-id", nil, accountRepo, kr)
+
+	// Non-existent session
+	if _, ok := authSvc.GetActiveSession("non-existent"); ok {
+		t.Errorf("expected false for non-existent session, got true")
+	}
+
+	// Create offline account and verify active session
+	acc, err := authSvc.CreateOfflineAccount(context.Background(), "PlayerOne")
+	if err != nil {
+		t.Fatalf("failed to create offline account: %v", err)
+	}
+	sess, ok := authSvc.GetActiveSession(acc.UUID)
+	if !ok || sess == nil {
+		t.Fatalf("expected active session for offline account %s, got false", acc.UUID)
+	}
+	if sess.Account.Username != "PlayerOne" {
+		t.Errorf("expected username PlayerOne, got %s", sess.Account.Username)
+	}
+}

@@ -197,3 +197,18 @@ func TestStorage_SQLiteWALAndCRUD(t *testing.T) {
 		t.Fatalf("expected ErrInstanceNotFound, got %v", err)
 	}
 }
+
+func TestOpenDatabase_And_Migrate(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "migrate_test.db")
+
+	db, err := storage.OpenDatabase(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDatabase failed: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Migrate failed: %v", err)
+	}
+}

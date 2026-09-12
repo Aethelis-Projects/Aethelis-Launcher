@@ -89,3 +89,12 @@ func TestCrashAnalyzer_CleanExit(t *testing.T) {
 		t.Fatalf("expected nil report on clean exit, got %+v", report)
 	}
 }
+
+func TestCrashAnalyzer_DefaultSizeAndUnknown(t *testing.T) {
+	sup := launch.NewLogSupervisor(0)
+	sup.ProcessLine("[12:00:00] [main/INFO]: Random unknown output")
+	report := sup.AnalyzeCrash(1)
+	if report == nil || report.Category != launch.CrashCategoryUnknown {
+		t.Fatalf("expected CrashCategoryUnknown, got: %+v", report)
+	}
+}

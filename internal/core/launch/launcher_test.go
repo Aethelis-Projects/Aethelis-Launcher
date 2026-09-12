@@ -197,3 +197,24 @@ func TestInstanceService_LaunchWithSupervisor(t *testing.T) {
 		t.Fatalf("expected StateRunning, got %s", updated.State)
 	}
 }
+
+func TestInstanceService_ErrorsAndEdgeCases(t *testing.T) {
+	fileSys := fs.NewOSFileSystem()
+	procMgr := process.NewProcessManager()
+	kr := keyring.NewMemoryKeyring()
+	clk := clock.NewMockClock(time.Now())
+
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+
+	// 1. GetInstance Not Found
+	_, err := svc.GetInstance("non-existent-inst")
+	if !errors.Is(err, domain.ErrInstanceNotFound) {
+		t.Errorf("expected ErrInstanceNotFound, got %v", err)
+	}
+
+	// 2. Launch Not Found
+	_, err = svc.Launch(context.Background(), "non-existent-inst")
+	if !errors.Is(err, domain.ErrInstanceNotFound) {
+		t.Errorf("expected ErrInstanceNotFound, got %v", err)
+	}
+}
