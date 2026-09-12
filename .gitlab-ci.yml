@@ -1,0 +1,144 @@
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+default:
+  interruptible: true
+
+stages:
+  - lint
+  - test
+  - build
+
+variables:
+  GOPATH: "$CI_PROJECT_DIR/.go"
+  PNPM_HOME: "$CI_PROJECT_DIR/.pnpm-store"
+  PATH: "$PNPM_HOME:$GOPATH/bin:$PATH"
+
+cache:
+  key:
+    files:
+      - go.sum
+      - frontend/pnpm-lock.yaml
+  paths:
+    - .go/pkg/mod/
+    - .pnpm-store/
+
+code-hygiene:
+  stage: lint
+  image: node:22-alpine
+  script:
+    - node scripts/code_hygiene_lint.js
+
+frontend-quality-gate:
+  stage: test
+  image: node:22-bookworm
+  before_script:
+    - corepack enable
+    - corepack prepare pnpm@latest --activate
+    - pnpm config set store-dir "$PNPM_HOME"
+    - cd frontend
+    - pnpm install
+  script:
+    - pnpm typecheck
+    - pnpm test
+    - pnpm build
+    - |
+      node -e '
+        const fs = require("fs");
+        const zlib = require("zlib");
+        const path = require("path");
+        let totalGzip = 0;
+        const distDir = path.join(process.cwd(), "dist");
+        function walk(dir) {
+          const files = fs.readdirSync(dir);
+          for (const f of files) {
+            const full = path.join(dir, f);
+            if (fs.statSync(full).isDirectory()) walk(full);
+            else {
+              const content = fs.readFileSync(full);
+              totalGzip += zlib.gzipSync(content).length;
+            }
+          }
+        }
+        walk(distDir);
+        const totalKb = (totalGzip / 1024).toFixed(2);
+        console.log("Total Gzip bundle size: " + totalKb + " KB");
+        if (totalGzip > 250 * 1024) {
+          console.error("VIOLATION: Bundle exceeded 250 KB budget!");
+          process.exit(1);
+        }
+        console.log("PASS: Bundle budget constraint respected.");
+      '
+  artifacts:
+    name: "frontend-dist"
+    paths:
+      - frontend/dist/
+    expire_in: 1 hour
+
+backend-quality-gate:
+  stage: test
+  image: golang:bookworm
+  before_script:
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
+    - apt-get update
+    - apt-get install -y git libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config nodejs
+    - mkdir -p frontend/dist && touch frontend/dist/.gitkeep
+  script:
+    # 1. Verify IPC codegen parity
+    - go run ./ipc/codegen/generate.go
+    - git diff --exit-code || (echo "IPC types are out of sync with schema. Run go run ./ipc/codegen/generate.go" && exit 1)
+    # 2. Static analysis
+    - go vet ./...
+    # 3. Core Go tests & race condition check
+    - go test -v -race ./internal/...
+    # 4. Coverage gate (>= 80%)
+    - go test -coverprofile=coverage.out ./internal/core/...
+    - node scripts/check_coverage.js coverage.out
+    # 5. E2E Integration Suite (all 7 stages)
+    - go run ./cmd/e2e/main.go
+    # 6. Micro-Benchmark IPC Dispatch Latency (p95 NFR)
+    - go test -bench=BenchmarkWailsAdapter_IPCDispatch -run=^$ ./internal/adapters/wails | tee bench.log
+    - node scripts/check_bench.js bench.log
+    # 7. Security audit & Open Source license compliance
+    - go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+    - go run github.com/google/go-licenses@v1.6.0 check --ignore modernc.org/mathutil ./cmd/launcher
+
+build-launcher:
+  stage: build
+  image: golang:bookworm
+  needs:
+    - frontend-quality-gate
+    - backend-quality-gate
+  before_script:
+    - apt-get update
+    - apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config nodejs
+  script:
+    - mkdir -p build
+    - go build -ldflags="-s -w" -o build/nord-launcher cmd/launcher/main.go
+    - |
+      node -e '
+        const fs = require("fs");
+        const binPath = "build/nord-launcher";
+        if (!fs.existsSync(binPath)) {
+          console.error("Binary not found at " + binPath);
+          process.exit(1);
+        }
+        const sizeBytes = fs.statSync(binPath).size;
+        const sizeMB = (sizeBytes / (1024 * 1024)).toFixed(2);
+        console.log("Built launcher binary size: " + sizeMB + " MB");
+        if (sizeBytes > 40 * 1024 * 1024) {
+          console.error("VIOLATION: Binary exceeded 40 MB budget!");
+          process.exit(1);
+        }
+        console.log("PASS: Launcher binary size budget (<= 40 MB) respected.");
+      '
+  artifacts:
+    name: "nord-launcher-linux"
+    paths:
+      - build/nord-launcher
+    expire_in: 1 week
