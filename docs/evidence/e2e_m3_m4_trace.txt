@@ -1,24 +1,24 @@
-[16:05:12.267] === NORD LAUNCHER END-TO-END VERIFICATION RUNNER (M3/M4 GATE) ===
-[16:05:12.283] Operating System: windows (amd64)
-[16:05:12.283] 
+[16:26:14.344] === NORD LAUNCHER END-TO-END VERIFICATION RUNNER (M3/M4 GATE) ===
+[16:26:14.359] Operating System: windows (amd64)
+[16:26:14.359] 
 --- STEP 1: Keyring Persistence E2E ---
-[16:05:12.347] PASS: Refresh-token successfully retrieved across keyring instances (Credential Manager persistence verified).
-[16:05:12.348] 
+[16:26:14.388] PASS: Refresh-token successfully retrieved across keyring instances (Credential Manager persistence verified).
+[16:26:14.389] 
 --- STEP 2: Auth Offline UUID v3 Mojang Parity E2E ---
-[16:05:12.348] PASS: Canonical Mojang UUID v3 parity confirmed for Steve (5627dd98-e6be-3c21-b8a8-e92344183641) and Alex (36532b5e-c442-3dbb-a24c-c7e55d0f979a).
-[16:05:12.348] 
+[16:26:14.389] PASS: Canonical Mojang UUID v3 parity confirmed for Steve (5627dd98-e6be-3c21-b8a8-e92344183641) and Alex (36532b5e-c442-3dbb-a24c-c7e55d0f979a).
+[16:26:14.389] 
 --- STEP 3: Java Provisioning Matrix & Hermetic Detection E2E ---
-[16:05:12.348] PASS: Java version matrix mappings verified for all Minecraft epochs.
-[16:05:12.361] PASS: Hermetic JDK 21 discovery and release file parsing verified.
-[16:05:12.362] 
+[16:26:14.389] PASS: Java version matrix mappings verified for all Minecraft epochs.
+[16:26:14.401] PASS: Hermetic JDK 21 discovery and release file parsing verified.
+[16:26:14.401] 
 --- STEP 4: Content Engine (.mrpack & Range Downloader) E2E ---
-[16:05:12.379] PASS: .mrpack index parsing and overrides extraction succeeded.
-[16:05:12.390] PASS: Range-based HTTP 206 download verified with dispatcher.
-[16:05:12.390] 
+[16:26:14.406] PASS: .mrpack index parsing and overrides extraction succeeded.
+[16:26:14.410] PASS: Range-based HTTP 206 download verified with dispatcher.
+[16:26:14.410] 
 --- STEP 5: Process Supervision & Crash Diagnostics E2E ---
-[16:05:12.436] PASS: Supervised process lifecycle (PID: 25012) executed and captured successfully.
-[16:05:12.436] PASS: LogSupervisor correctly classified OutOfMemoryError from simulated game crash log.
-[16:05:12.436] 
+[16:26:14.449] PASS: Supervised process lifecycle (PID: 24792) executed and captured successfully.
+[16:26:14.449] PASS: LogSupervisor correctly classified OutOfMemoryError from simulated game crash log.
+[16:26:14.449] 
 =================================================================
-[16:05:12.436]  ALL E2E STAGES PASSED (M3/M4 VERIFIED)
-[16:05:12.436] =================================================================
+[16:26:14.449]  ALL E2E STAGES PASSED (M3/M4 VERIFIED)
+[16:26:14.449] =================================================================

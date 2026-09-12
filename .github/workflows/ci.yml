@@ -22,7 +22,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.26"
           cache: true
 
       - name: Install Linux GUI Dependencies (GTK4 & WebKitGTK)
@@ -71,7 +71,6 @@ jobs:
 
       - name: Open Source License Compliance (go-licenses)
         run: |
-          export GOROOT="$(go env GOROOT)"
           go run github.com/google/go-licenses@v1.6.0 check --ignore modernc.org/mathutil ./cmd/launcher
         shell: bash
 
