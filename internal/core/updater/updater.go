@@ -28,7 +28,7 @@ var (
 )
 
 // DefaultPublicKeyHex is the official release manifest Ed25519 public key.
-const DefaultPublicKeyHex = "a7dd59ba003395467e78b7bc21c3d329bc3e1bab778180624943805b0111f48a"
+const DefaultPublicKeyHex = "c11aa844849500fb8bc9d6dd006ee3fcafafecac638ae3fedcce6a4553be0af3"
 
 // GetDefaultPublicKey returns the decoded Ed25519 public key.
 func GetDefaultPublicKey() ed25519.PublicKey {
