@@ -110,11 +110,7 @@ func setupMockServer(t *testing.T, requestCounter *int64) (*httptest.Server, map
 					Rules: []domain.Rule{
 						{
 							Action: "allow",
-							OS: &struct {
-								Name    string `json:"name,omitempty"`
-								Version string `json:"version,omitempty"`
-								Arch    string `json:"arch,omitempty"`
-							}{Name: "windows"},
+							OS:     &domain.OSRule{Name: "windows"},
 						},
 					},
 					Downloads: domain.LibraryDownloads{
@@ -131,11 +127,7 @@ func setupMockServer(t *testing.T, requestCounter *int64) (*httptest.Server, map
 					Rules: []domain.Rule{
 						{
 							Action: "allow",
-							OS: &struct {
-								Name    string `json:"name,omitempty"`
-								Version string `json:"version,omitempty"`
-								Arch    string `json:"arch,omitempty"`
-							}{Name: "osx"},
+							OS:     &domain.OSRule{Name: "osx"},
 						},
 					},
 					Downloads: domain.LibraryDownloads{

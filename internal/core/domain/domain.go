@@ -82,14 +82,17 @@ type DownloadProgress struct {
 	SpeedBPS   int64   `json:"speed_bps"`
 }
 
+// OSRule describes operating system matching constraints.
+type OSRule struct {
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"`
+	Arch    string `json:"arch,omitempty"`
+}
+
 // Rule defines an OS or feature constraint on launch arguments or libraries.
 type Rule struct {
-	Action string `json:"action"` // "allow" or "disallow"
-	OS     *struct {
-		Name    string `json:"name,omitempty"`
-		Version string `json:"version,omitempty"`
-		Arch    string `json:"arch,omitempty"`
-	} `json:"os,omitempty"`
+	Action   string          `json:"action"` // "allow" or "disallow"
+	OS       *OSRule         `json:"os,omitempty"`
 	Features map[string]bool `json:"features,omitempty"`
 }
 

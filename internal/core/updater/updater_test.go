@@ -226,8 +226,26 @@ func TestAutoUpdater_EdgeCases(t *testing.T) {
 		t.Fatalf("expected error on 500 manifest, got nil")
 	}
 
+	// Test ApplyUpdate error cases
+	if err := uErr.ApplyUpdate(context.Background(), nil); err != ErrNoUpdateAvailable {
+		t.Errorf("expected ErrNoUpdateAvailable for nil info, got %v", err)
+	}
+	if err := uErr.ApplyUpdate(context.Background(), &UpdateInfo{Available: false}); err != ErrNoUpdateAvailable {
+		t.Errorf("expected ErrNoUpdateAvailable for unavailable update, got %v", err)
+	}
+
 	// Test stale backup cleanup
-	CleanupStaleBackup()
+	if exe, err := os.Executable(); err == nil {
+		oldPath := exe + ".old"
+		_ = os.WriteFile(oldPath, []byte("stale backup"), 0644)
+		CleanupStaleBackup()
+		if _, statErr := os.Stat(oldPath); statErr == nil {
+			t.Errorf("expected stale backup %s to be removed", oldPath)
+			_ = os.Remove(oldPath)
+		}
+	} else {
+		CleanupStaleBackup()
+	}
 }
 
 func TestGetDefaultPublicKey(t *testing.T) {
