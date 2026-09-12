@@ -426,4 +426,64 @@ func TestDispatcher_DefaultConfigFallbacks(t *testing.T) {
 	if err := disp.DownloadBatch(context.Background(), []*downloader.DownloadTask{noHashTask}, nil); err != nil {
 		t.Fatalf("expected skipped download for matching size without hash: %v", err)
 	}
+
+	// Test Status 403 / unexpected code
+	forbiddenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer forbiddenServer.Close()
+
+	forbiddenTask := &downloader.DownloadTask{
+		ID:       "forbidden",
+		URL:      forbiddenServer.URL,
+		DestPath: filepath.Join(tempDir, "forbidden.bin"),
+	}
+	if err := disp.DownloadBatch(context.Background(), []*downloader.DownloadTask{forbiddenTask}, nil); err == nil {
+		t.Fatalf("expected error on 403 response, got nil")
+	}
+
+	// Test Checksum mismatch failure
+	dataServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("some-corrupt-data"))
+	}))
+	defer dataServer.Close()
+
+	badChecksumTask := &downloader.DownloadTask{
+		ID:             "bad-checksum",
+		URL:            dataServer.URL,
+		DestPath:       filepath.Join(tempDir, "bad-checksum.bin"),
+		ExpectedSHA256: "0000000000000000000000000000000000000000000000000000000000000000",
+	}
+	if err := disp.DownloadBatch(context.Background(), []*downloader.DownloadTask{badChecksumTask}, nil); err == nil {
+		t.Fatalf("expected checksum mismatch error, got nil")
+	}
+
+	// Test Status 416 Range Not Satisfiable fallback
+	rangeAttempts := 0
+	rangeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rangeAttempts++
+		if r.Header.Get("Range") != "" {
+			w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("fresh-recovered-data"))
+	}))
+	defer rangeServer.Close()
+
+	dest416 := filepath.Join(tempDir, "file416.bin")
+	_ = os.WriteFile(dest416+".part", []byte("invalid-stale-partial-bytes"), 0644)
+
+	task416 := &downloader.DownloadTask{
+		ID:       "task-416",
+		URL:      rangeServer.URL,
+		DestPath: dest416,
+	}
+	if err := disp.DownloadBatch(context.Background(), []*downloader.DownloadTask{task416}, nil); err != nil {
+		t.Fatalf("expected 416 retry to recover and succeed, got error: %v", err)
+	}
+	recoveredBytes, _ := os.ReadFile(dest416)
+	if string(recoveredBytes) != "fresh-recovered-data" {
+		t.Fatalf("expected fresh-recovered-data, got %s", string(recoveredBytes))
+	}
 }

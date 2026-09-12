@@ -400,3 +400,43 @@ func TestAuth_GetActiveSession_And_XSTSErrorBranches(t *testing.T) {
 		t.Errorf("expected username PlayerOne, got %s", sess.Account.Username)
 	}
 }
+
+func TestAuth_RefreshSession(t *testing.T) {
+	mockNet := setupMockAuthServers(t)
+	defer mockNet.server.Close()
+
+	dbPath := filepath.Join(t.TempDir(), "refresh_auth.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open storage: %v", err)
+	}
+	defer db.Close()
+	accountRepo := storage.NewAccountRepository(db)
+	kr := keyring.NewMemoryKeyring()
+
+	apiClient := auth.NewAPIClient(mockNet.server.Client(), mockNet.endpoints)
+
+	// 1. Without keyring configured
+	noKrSvc := auth.NewAuthService("test-client-id", apiClient, accountRepo, nil)
+	_, err = noKrSvc.RefreshSession(context.Background(), "test-uuid")
+	if err == nil {
+		t.Fatal("expected error on nil keyring refresh, got nil")
+	}
+
+	// 2. Token not in keyring
+	authSvc := auth.NewAuthService("test-client-id", apiClient, accountRepo, kr)
+	_, err = authSvc.RefreshSession(context.Background(), "missing-uuid")
+	if err == nil {
+		t.Fatal("expected error on missing keyring token, got nil")
+	}
+
+	// 3. Successful session refresh
+	_ = kr.Set(auth.KeyringService, "existing-uuid", "valid-refresh-token")
+	acc, err := authSvc.RefreshSession(context.Background(), "existing-uuid")
+	if err != nil {
+		t.Fatalf("RefreshSession failed: %v", err)
+	}
+	if acc.Username != "NordPlayer" {
+		t.Errorf("expected username NordPlayer, got %s", acc.Username)
+	}
+}
