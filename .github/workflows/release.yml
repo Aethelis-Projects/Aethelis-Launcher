@@ -100,6 +100,11 @@ jobs:
         with:
           version: "12"
 
+      - name: Install Linux GUI Dependencies (GTK4 & WebKitGTK)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config
+
       - name: Build Release Tarball
         run: |
           chmod +x scripts/build_release.sh

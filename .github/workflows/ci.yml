@@ -89,6 +89,12 @@ jobs:
             console.log("PASS: Bundle budget constraint respected.");
           '
 
+      - name: Install Linux GUI Dependencies (GTK4 & WebKitGTK)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config
+
       - name: Build Launcher Binary & Check Size Budget (<= 40 MB)
         shell: bash
         run: |

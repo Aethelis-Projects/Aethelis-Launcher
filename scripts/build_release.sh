@@ -21,7 +21,7 @@ pnpm build
 echo "==> [3/5] Compiling Launcher Executable with Go..."
 cd "$ROOT_DIR"
 BIN_PATH="$DIST_LINUX/nord-launcher"
-CGO_ENABLED=0 go build -ldflags="-s -w -X main.version=$VERSION" -o "$BIN_PATH" ./cmd/launcher/main.go
+go build -ldflags="-s -w -X main.version=$VERSION" -o "$BIN_PATH" ./cmd/launcher/main.go
 
 BIN_SIZE=$(stat -c%s "$BIN_PATH" 2>/dev/null || stat -f%z "$BIN_PATH")
 BIN_MB=$(awk "BEGIN {printf \"%.2f\", $BIN_SIZE/1048576}")
