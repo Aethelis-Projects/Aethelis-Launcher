@@ -95,6 +95,11 @@ backend-quality-gate:
     - export PATH="/usr/local/go/bin:$GOPATH/bin:$PATH"
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
     - mkdir -p frontend/dist && touch frontend/dist/.gitkeep
+    # Bootstrap toolchain and synchronize GOROOT to resolve go-licenses standard library lookup
+    - go run ./ipc/codegen/generate.go
+    - TOOLCHAIN_DIR=$(go env GOROOT)
+    - export GOROOT="$TOOLCHAIN_DIR"
+    - export PATH="$TOOLCHAIN_DIR/bin:$PATH"
   script:
     # 1. Verify IPC codegen parity
     - go run ./ipc/codegen/generate.go
@@ -128,6 +133,9 @@ build-launcher:
     - apt-get install -y curl git gcc libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config nodejs ca-certificates
     - curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz | tar -C /usr/local -xz
     - export PATH="/usr/local/go/bin:$GOPATH/bin:$PATH"
+    - TOOLCHAIN_DIR=$(go env GOROOT)
+    - export GOROOT="$TOOLCHAIN_DIR"
+    - export PATH="$TOOLCHAIN_DIR/bin:$PATH"
   script:
     - mkdir -p build
     - go build -ldflags="-s -w" -o build/nord-launcher cmd/launcher/main.go
