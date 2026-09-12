@@ -1,6 +1,6 @@
 module github.com/nord-launcher/launcher
 
-go 1.23
+go 1.26.0
 
 require (
 	github.com/golangci/golangci-lint v1.64.8
