@@ -83,7 +83,7 @@
 - Зафиксирован канонический URL манифеста обновлений: `https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/latest/download/manifest-stable.json`.
 
 ### 2.6. Б4 & О1: Замер IPC Dispatch Latency p95
-- В `BenchmarkWailsAdapter_IPCDispatch` выборка из 10 000 вызовов сохраняется для расчёта реального 95-го перцентиля.
+- В `BenchmarkWailsAdapter_IPCDispatch` первоначально сохранялась выборка из 10 000 вызовов (в релизе v0.1.2 харнесс стандартизирован до $N=100$ батчей по 50 000 вызовов для устранения погрешности кванта системного таймера, см. §7).
 - В CI добавлен парсер `scripts/check_bench.js`, проверяющий выполнение SLA: $p95 \le 5000$ нс/оп (0.005 мс).
 
 ### 2.7. О2 & В1: Контроль аккаунтов и безопасность сессий
