@@ -104,6 +104,8 @@ export interface LogLineEvent {
 export interface UpdateInfoDTO {
   has_update: boolean;
   version: string;
+  current_version: string;
+  release_date: string;
   release_notes: string;
   download_url: string;
   sha256: string;

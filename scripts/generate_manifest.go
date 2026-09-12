@@ -24,8 +24,9 @@ func main() {
 		versionFlag   = flag.String("version", "0.1.0", "Release version")
 		channelFlag   = flag.String("channel", "stable", "Release channel: stable or beta")
 		distDirFlag   = flag.String("dist", "dist", "Directory containing build distribution artifacts")
-		outputFile    = flag.String("out", "", "Output manifest path (default: dist/manifest-{channel}.json)")
-		privKeyEnv    = flag.String("privkey-hex", "", "Hex-encoded Ed25519 private key (optional, falls back to ED25519_PRIVATE_KEY)")
+		outputFile          = flag.String("out", "", "Output manifest path (default: dist/manifest-{channel}.json)")
+		privKeyEnv          = flag.String("privkey-hex", "", "Hex-encoded Ed25519 private key (optional, falls back to ED25519_PRIVATE_KEY)")
+		allowInsecureDevKey = flag.Bool("allow-insecure-dev-key", false, "Allow fallback to insecure hardcoded staging private key for local development")
 	)
 	flag.Parse()
 
@@ -34,7 +35,19 @@ func main() {
 		privHex = os.Getenv("ED25519_PRIVATE_KEY")
 	}
 	if privHex == "" {
+		if !*allowInsecureDevKey {
+			fmt.Fprintf(os.Stderr, "Error: ED25519_PRIVATE_KEY environment variable or -privkey-hex flag is required to sign update manifests.\n")
+			fmt.Fprintf(os.Stderr, "For local development only, you must explicitly pass --allow-insecure-dev-key to use the staging key.\n")
+			os.Exit(1)
+		}
 		privHex = DefaultStagingPrivateKeyHex
+		fmt.Println("[SECURITY WARNING] Manifest signed with INSECURE dev key! Do not deploy to production.")
+	} else if strings.EqualFold(privHex, DefaultStagingPrivateKeyHex) {
+		if !*allowInsecureDevKey {
+			fmt.Fprintf(os.Stderr, "Error: DefaultStagingPrivateKeyHex cannot be used for signing without --allow-insecure-dev-key.\n")
+			os.Exit(1)
+		}
+		fmt.Println("[SECURITY WARNING] Manifest signed with INSECURE dev key! Do not deploy to production.")
 	}
 
 	privSeed, err := hex.DecodeString(privHex)

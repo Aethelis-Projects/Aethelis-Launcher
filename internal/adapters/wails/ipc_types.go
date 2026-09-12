@@ -100,12 +100,14 @@ type LogLineEvent struct {
 }
 
 type UpdateInfoDTO struct {
-	HasUpdate    bool   `json:"has_update"`
-	Version      string `json:"version"`
-	ReleaseNotes string `json:"release_notes"`
-	DownloadURL  string `json:"download_url"`
-	SHA256       string `json:"sha256"`
-	Size         int64  `json:"size"`
+	HasUpdate      bool      `json:"has_update"`
+	Version        string    `json:"version"`
+	CurrentVersion string    `json:"current_version"`
+	ReleaseDate    time.Time `json:"release_date"`
+	ReleaseNotes   string    `json:"release_notes"`
+	DownloadURL    string    `json:"download_url"`
+	SHA256         string    `json:"sha256"`
+	Size           int64     `json:"size"`
 }
 
 type UpdateApplyResultDTO struct {

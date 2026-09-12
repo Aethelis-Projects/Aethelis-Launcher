@@ -352,12 +352,14 @@ func (a *WailsAdapter) CheckForUpdates() (*UpdateInfoDTO, error) {
 		return nil, err
 	}
 	return &UpdateInfoDTO{
-		HasUpdate:    info.Available,
-		Version:      info.Version,
-		ReleaseNotes: info.Changelog,
-		DownloadURL:  info.Asset.URL,
-		SHA256:       info.Asset.SHA256,
-		Size:         info.Asset.Size,
+		HasUpdate:      info.Available,
+		Version:        info.Version,
+		CurrentVersion: info.CurrentVer,
+		ReleaseDate:    info.ReleaseDate,
+		ReleaseNotes:   info.Changelog,
+		DownloadURL:    info.Asset.URL,
+		SHA256:         info.Asset.SHA256,
+		Size:           info.Asset.Size,
 	}, nil
 }
 

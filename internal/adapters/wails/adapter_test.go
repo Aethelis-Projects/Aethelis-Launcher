@@ -2,9 +2,15 @@ package wails_test
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +29,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
+	"github.com/nord-launcher/launcher/internal/core/updater"
 )
 
 type mockProcHandle struct{}
@@ -218,6 +225,118 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 	})
 	if err := adapter.RestartApplication(); err == nil || err.Error() != "mock relaunch failure" {
 		t.Fatalf("expected mock relaunch failure, got %v", err)
+	}
+}
+
+func TestWailsAdapter_Updater(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+
+	// 1. Uninitialized updater returns error
+	_, err := adapter.CheckForUpdates()
+	if err == nil || !strings.Contains(err.Error(), "auto-updater not initialized") {
+		t.Fatalf("expected uninitialized updater error, got %v", err)
+	}
+	_, err = adapter.ApplyUpdate()
+	if err == nil || !strings.Contains(err.Error(), "auto-updater not initialized") {
+		t.Fatalf("expected uninitialized updater error on apply, got %v", err)
+	}
+
+	// 2. Setup mock server with UpdateManifest
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	payload := []byte("nord-launcher-binary-content-mock")
+	sig := ed25519.Sign(privKey, payload)
+	sigB64 := base64.StdEncoding.EncodeToString(sig)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	platKey := updater.CurrentPlatformKey()
+
+	var manifestServer *httptest.Server
+	manifest := updater.UpdateManifest{
+		Version:     "0.2.0",
+		ReleaseDate: now,
+		Changelog:   "Nord Launcher v0.2.0 release notes.",
+		Platforms: map[string]updater.PlatformAsset{
+			platKey: {
+				URL:       "",
+				Signature: sigB64,
+				Size:      int64(len(payload)),
+			},
+		},
+	}
+
+	manifestServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/binary" {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(payload)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(manifest)
+	}))
+	defer manifestServer.Close()
+
+	asset := manifest.Platforms[platKey]
+	asset.URL = manifestServer.URL + "/binary"
+	manifest.Platforms[platKey] = asset
+
+	u := updater.NewAutoUpdater("0.1.2", manifestServer.URL, pubKey, manifestServer.Client())
+	adapter.SetUpdater(u)
+
+	// 3. Check for updates -> update available
+	info, err := adapter.CheckForUpdates()
+	if err != nil {
+		t.Fatalf("check for updates failed: %v", err)
+	}
+	if !info.HasUpdate {
+		t.Fatalf("expected HasUpdate = true")
+	}
+	if info.Version != "0.2.0" {
+		t.Errorf("expected version 0.2.0, got %s", info.Version)
+	}
+	if info.CurrentVersion != "0.1.2" {
+		t.Errorf("expected current version 0.1.2, got %s", info.CurrentVersion)
+	}
+	if !info.ReleaseDate.Equal(now) {
+		t.Errorf("expected release date %v, got %v", now, info.ReleaseDate)
+	}
+	if info.ReleaseNotes != "Nord Launcher v0.2.0 release notes." {
+		t.Errorf("expected release notes match, got %s", info.ReleaseNotes)
+	}
+
+	// 4. Check for updates -> up to date
+	manifestUpToDate := manifest
+	manifestUpToDate.Version = "0.1.2"
+	serverUpToDate := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(manifestUpToDate)
+	}))
+	defer serverUpToDate.Close()
+
+	uSame := updater.NewAutoUpdater("0.1.2", serverUpToDate.URL, pubKey, serverUpToDate.Client())
+	adapter.SetUpdater(uSame)
+
+	infoSame, err := adapter.CheckForUpdates()
+	if err != nil {
+		t.Fatalf("check for updates on same version failed: %v", err)
+	}
+	if infoSame.HasUpdate {
+		t.Fatalf("expected HasUpdate = false")
+	}
+	if infoSame.CurrentVersion != "0.1.2" {
+		t.Errorf("expected CurrentVersion 0.1.2, got %s", infoSame.CurrentVersion)
+	}
+
+	// 5. Apply update when no update available
+	resNoUpdate, err := adapter.ApplyUpdate()
+	if err != nil {
+		t.Fatalf("unexpected error on apply without update: %v", err)
+	}
+	if resNoUpdate.Success || resNoUpdate.Message != "No update available" {
+		t.Errorf("expected success=false, message='No update available', got %+v", resNoUpdate)
 	}
 }
 

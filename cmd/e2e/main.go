@@ -4,8 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/md5"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,6 +31,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/updater"
 )
 
 func main() {
@@ -407,6 +413,140 @@ func main() {
 	}
 	logf("PASS: Crash exit (exit 1) transitioned instance to Crashed, and onCrash diagnosed %s (%s).",
 		lastReport.Category, lastReport.Summary)
+
+	// =========================================================================
+	// 7. Auto-Updater Cryptographic Lifecycle E2E
+	// =========================================================================
+	logf("\n--- STEP 7: Auto-Updater Cryptographic Lifecycle E2E ---")
+
+	// Dynamic runtime Ed25519 key generation (Decision D2: fresh in-memory keypair on each run)
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		logf("FAIL: GenerateKey failed: %v", err)
+		os.Exit(1)
+	}
+
+	payload := []byte("nord-launcher-v0.2.0-hermetic-e2e-payload")
+	payloadHasher := sha256.New()
+	_, _ = payloadHasher.Write(payload) // errcheck:ok hash computation
+	validSHA256 := hex.EncodeToString(payloadHasher.Sum(nil))
+
+	validSig := ed25519.Sign(privKey, payload)
+	validSigB64 := base64.StdEncoding.EncodeToString(validSig)
+
+	// Tampered signature (invert first byte)
+	tamperedSig := make([]byte, len(validSig))
+	copy(tamperedSig, validSig)
+	tamperedSig[0] ^= 0xFF
+	tamperedSigB64 := base64.StdEncoding.EncodeToString(tamperedSig)
+
+	platKey := updater.CurrentPlatformKey()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	var updaterServer *httptest.Server
+	updaterServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/manifest":
+			m := updater.UpdateManifest{
+				Version:     "0.2.0",
+				ReleaseDate: now,
+				Changelog:   "Nord Launcher v0.2.0 hermetic test release.",
+				Platforms: map[string]updater.PlatformAsset{
+					platKey: {
+						URL:       updaterServer.URL + "/payload",
+						SHA256:    validSHA256,
+						Signature: validSigB64,
+						Size:      int64(len(payload)),
+					},
+				},
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(m) // errcheck:ok mock server response
+		case "/payload":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(payload) // errcheck:ok mock server response
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer updaterServer.Close()
+
+	testUpdater := updater.NewAutoUpdater("0.1.2", updaterServer.URL+"/manifest", pubKey, updaterServer.Client())
+
+	// A. Check for updates
+	updateInfo, err := testUpdater.CheckForUpdates(context.Background())
+	if err != nil {
+		logf("FAIL: AutoUpdater.CheckForUpdates failed: %v", err)
+		os.Exit(1)
+	}
+	if !updateInfo.Available || updateInfo.Version != "0.2.0" {
+		logf("FAIL: Expected update 0.2.0 available, got %+v", updateInfo)
+		os.Exit(1)
+	}
+	if updateInfo.CurrentVer != "0.1.2" {
+		logf("FAIL: Expected CurrentVer 0.1.2, got %s", updateInfo.CurrentVer)
+		os.Exit(1)
+	}
+	logf("PASS: CheckForUpdates detected newer version %s (current: %s, release date: %s).",
+		updateInfo.Version, updateInfo.CurrentVer, updateInfo.ReleaseDate.Format(time.RFC3339))
+
+	// Prepare dummy executable in temp dir for atomic update testing
+	e2eTmpDir, err := os.MkdirTemp("", "nord-e2e-updater-*")
+	if err != nil {
+		logf("FAIL: Create temp dir failed: %v", err)
+		os.Exit(1)
+	}
+	defer func() { _ = os.RemoveAll(e2eTmpDir) }() // errcheck:ok cleanup temp dir
+
+	dummyExe := filepath.Join(e2eTmpDir, "nord-launcher.exe")
+	if runtime.GOOS != "windows" {
+		dummyExe = filepath.Join(e2eTmpDir, "nord-launcher")
+	}
+	initialBinary := []byte("nord-launcher-v0.1.2-initial-content")
+	if err := os.WriteFile(dummyExe, initialBinary, 0755); err != nil {
+		logf("FAIL: Write dummy executable failed: %v", err)
+		os.Exit(1)
+	}
+
+	// B. Tampered signature rejection
+	tamperedAsset := updateInfo.Asset
+	tamperedAsset.Signature = tamperedSigB64
+	err = testUpdater.DownloadAndApply(context.Background(), tamperedAsset, dummyExe)
+	if err == nil || !strings.Contains(err.Error(), "cryptographic signature verification failed") {
+		logf("FAIL: Expected signature verification error on tampered signature, got %v", err)
+		os.Exit(1)
+	}
+	logf("PASS: Tampered Ed25519 signature correctly rejected with ErrSignatureInvalid.")
+
+	// C. Checksum mismatch rejection
+	corruptedHashAsset := updateInfo.Asset
+	corruptedHashAsset.SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
+	err = testUpdater.DownloadAndApply(context.Background(), corruptedHashAsset, dummyExe)
+	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
+		logf("FAIL: Expected checksum mismatch error, got %v", err)
+		os.Exit(1)
+	}
+	logf("PASS: Corrupted SHA-256 hash correctly rejected with ErrChecksumMismatch.")
+
+	// D. Successful atomic apply
+	err = testUpdater.DownloadAndApply(context.Background(), updateInfo.Asset, dummyExe)
+	if err != nil {
+		logf("FAIL: DownloadAndApply failed on valid update: %v", err)
+		os.Exit(1)
+	}
+	appliedBytes, err := os.ReadFile(dummyExe)
+	if err != nil || !bytes.Equal(appliedBytes, payload) {
+		logf("FAIL: Applied binary content mismatch after update")
+		os.Exit(1)
+	}
+	logf("PASS: Valid update payload successfully applied via atomic replacement.")
+
+	// E. Stale backup cleanup
+	oldBackupPath := dummyExe + ".old"
+	if _, statErr := os.Stat(oldBackupPath); statErr == nil {
+		_ = os.Remove(oldBackupPath) // errcheck:ok stale backup cleanup
+		logf("PASS: Stale executable backup (.old) verified and cleaned up.")
+	}
 
 	logf("\n=================================================================")
 	logf(" ALL E2E STAGES PASSED")

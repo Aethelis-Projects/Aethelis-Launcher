@@ -175,6 +175,15 @@ jobs:
             echo "prerelease=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Validate Ed25519 Secret Guard
+        run: |
+          if [ -z "${{ secrets.ED25519_PRIVATE_KEY }}" ]; then
+            echo "CRITICAL ERROR: ED25519_PRIVATE_KEY repository secret is not configured!"
+            echo "Official releases cannot be signed without a secure cryptographic key."
+            exit 1
+          fi
+        shell: bash
+
       - name: Generate Signed Ed25519 Update Manifest
         env:
           ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}

@@ -57,6 +57,7 @@ type UpdateInfo struct {
 	Available   bool           `json:"available"`
 	Version     string         `json:"version"`
 	CurrentVer  string         `json:"current_version"`
+	ReleaseDate time.Time      `json:"release_date"`
 	Changelog   string         `json:"changelog"`
 	Asset       PlatformAsset  `json:"asset"`
 }
@@ -109,9 +110,10 @@ func (u *AutoUpdater) CheckForUpdates(ctx context.Context) (*UpdateInfo, error) 
 
 	if !isVersionNewer(u.currentVersion, manifest.Version) {
 		return &UpdateInfo{
-			Available:  false,
-			CurrentVer: u.currentVersion,
-			Version:    manifest.Version,
+			Available:   false,
+			CurrentVer:  u.currentVersion,
+			Version:     manifest.Version,
+			ReleaseDate: manifest.ReleaseDate,
 		}, nil
 	}
 
@@ -122,11 +124,12 @@ func (u *AutoUpdater) CheckForUpdates(ctx context.Context) (*UpdateInfo, error) 
 	}
 
 	return &UpdateInfo{
-		Available:  true,
-		Version:    manifest.Version,
-		CurrentVer: u.currentVersion,
-		Changelog:  manifest.Changelog,
-		Asset:      asset,
+		Available:   true,
+		Version:     manifest.Version,
+		CurrentVer:  u.currentVersion,
+		ReleaseDate: manifest.ReleaseDate,
+		Changelog:   manifest.Changelog,
+		Asset:       asset,
 	}, nil
 }
 

@@ -142,7 +142,50 @@ const mockModCatalog: ModItemDTO[] = [
   },
 ];
 
+let mockUpdateInfo: UpdateInfoDTO = {
+  has_update: false,
+  version: "0.1.2",
+  current_version: "0.1.2",
+  release_date: "2026-09-12T12:00:00Z",
+  release_notes: "Nord Launcher v0.1.2 (stable channel) release.",
+  download_url: "",
+  sha256: "",
+  size: 0,
+};
+
+let mockApplyResult: UpdateApplyResultDTO = {
+  success: true,
+  message: "Update applied successfully. Restart required for changes to take effect.",
+  restart_required: true,
+};
+
 export const launcherAPI = {
+  setMockUpdateInfo(info: UpdateInfoDTO): void {
+    mockUpdateInfo = { ...info };
+  },
+
+  setMockApplyResult(res: UpdateApplyResultDTO): void {
+    mockApplyResult = { ...res };
+  },
+
+  resetMockUpdater(): void {
+    mockUpdateInfo = {
+      has_update: false,
+      version: "0.1.2",
+      current_version: "0.1.2",
+      release_date: "2026-09-12T12:00:00Z",
+      release_notes: "Nord Launcher v0.1.2 (stable channel) release.",
+      download_url: "",
+      sha256: "",
+      size: 0,
+    };
+    mockApplyResult = {
+      success: true,
+      message: "Update applied successfully. Restart required for changes to take effect.",
+      restart_required: true,
+    };
+  },
+
   async listInstances(): Promise<InstanceDTO[]> {
     return [...mockInstances];
   },
@@ -266,14 +309,7 @@ export const launcherAPI = {
     if (typeof fn === "function") {
       return await fn();
     }
-    return {
-      has_update: false,
-      version: "0.1.1",
-      release_notes: "",
-      download_url: "",
-      sha256: "",
-      size: 0,
-    };
+    return { ...mockUpdateInfo };
   },
 
   async applyUpdate(): Promise<UpdateApplyResultDTO> {
@@ -281,11 +317,7 @@ export const launcherAPI = {
     if (typeof fn === "function") {
       return await fn();
     }
-    return {
-      success: true,
-      message: "Update applied successfully",
-      restart_required: true,
-    };
+    return { ...mockApplyResult };
   },
 
   async restartApplication(): Promise<void> {

@@ -1,5 +1,5 @@
 import { Component, createSignal, onCleanup, onMount, Show } from "solid-js";
-import { LayoutGrid, Layers, Package, User, Terminal, Cpu, AlertTriangle } from "lucide-solid";
+import { LayoutGrid, Layers, Package, User, Settings, Terminal, Cpu, AlertTriangle } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
@@ -7,9 +7,11 @@ import { ModCatalog } from "./components/mods/ModCatalog";
 import { InstalledModsManager } from "./components/mods/InstalledModsManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
-import type { InstanceDTO, CrashReportDTO } from "./bindings/ipc_types";
+import { UpdatePanel } from "./components/updater/UpdatePanel";
+import { launcherAPI } from "./services/api";
+import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
-type NavTab = "instances" | "mods_catalog" | "mods_manager" | "accounts";
+type NavTab = "instances" | "mods_catalog" | "mods_manager" | "accounts" | "settings";
 
 export const App: Component = () => {
   // Navigation
@@ -41,22 +43,38 @@ export const App: Component = () => {
   const [launchError, setLaunchError] = createSignal<string | undefined>();
   const [searchQuery, setSearchQuery] = createSignal("");
   const [crashReport, setCrashReport] = createSignal<CrashReportDTO | null>(null);
+  const [availableUpdate, setAvailableUpdate] = createSignal<UpdateInfoDTO | null>(null);
 
   // 100-tick fine-grained progress benchmark
   const [tickProgress, setTickProgress] = createSignal(0);
   const [tickCount, setTickCount] = createSignal(0);
   const [renderCount] = createSignal(1);
 
-  let timer: any;
+  let timer: ReturnType<typeof setInterval>;
+  let updateTimer: ReturnType<typeof setTimeout>;
+
   onMount(() => {
     timer = setInterval(() => {
       setTickProgress((prev) => (prev >= 100 ? 0 : prev + 1));
       setTickCount((prev) => prev + 1);
     }, 10);
+
+    // Quiet background update check 3 seconds after mounting (Decision D1)
+    updateTimer = setTimeout(async () => {
+      try {
+        const info = await launcherAPI.checkForUpdates();
+        if (info.has_update) {
+          setAvailableUpdate(info);
+        }
+      } catch (_ignored: unknown) {
+        // Quiet failure for background check (Decision D1)
+      }
+    }, 3000);
   });
 
   onCleanup(() => {
     clearInterval(timer);
+    clearTimeout(updateTimer);
   });
 
   const activeInstance = () =>
@@ -170,10 +188,30 @@ export const App: Component = () => {
                   ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
                   : "text-zinc-400 hover:text-white hover:bg-white/5"
               }`}
-              title="Аккаунты"
+              title="Accounts"
               data-testid="nav-accounts"
             >
               <User class="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrentNav("settings")}
+              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all relative ${
+                currentNav() === "settings"
+                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+              title="Settings & Updates"
+              data-testid="nav-settings"
+            >
+              <Settings class="w-5 h-5" />
+              <Show when={availableUpdate()?.has_update}>
+                <span
+                  class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-nord-cyan ring-2 ring-nord-surface"
+                  data-testid="nav-settings-update-dot"
+                />
+              </Show>
             </button>
           </nav>
         </div>
@@ -195,13 +233,27 @@ export const App: Component = () => {
       <main class="flex-1 flex flex-col min-w-0 bg-nord-dark overflow-hidden">
         {/* Top Command Bar */}
         <header class="h-14 px-6 flex items-center justify-between border-b border-white/5 bg-nord-surface/40 backdrop-blur-md z-10">
-          <div class="w-80">
-            <ModSearchInput
-              value={searchQuery()}
-              matchCount={filteredInstances().length}
-              onSearch={setSearchQuery}
-              onClear={() => setSearchQuery("")}
-            />
+          <div class="flex items-center gap-4">
+            <div class="w-80">
+              <ModSearchInput
+                value={searchQuery()}
+                matchCount={filteredInstances().length}
+                onSearch={setSearchQuery}
+                onClear={() => setSearchQuery("")}
+              />
+            </div>
+
+            <Show when={availableUpdate()?.has_update}>
+              <button
+                type="button"
+                onClick={() => setCurrentNav("settings")}
+                class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-nord-cyan/10 text-nord-cyan border border-nord-cyan/30 text-xs font-mono font-semibold hover:bg-nord-cyan/20 transition-all cursor-pointer select-none"
+                data-testid="header-update-badge"
+              >
+                <span class="w-1.5 h-1.5 rounded-full bg-nord-cyan animate-pulse" />
+                <span>Update v{availableUpdate()?.version} available</span>
+              </button>
+            </Show>
           </div>
 
           {/* Spike Metrics Indicator */}
@@ -333,6 +385,16 @@ export const App: Component = () => {
           <Show when={currentNav() === "accounts"}>
             <div class="max-w-3xl mx-auto">
               <AccountManager />
+            </div>
+          </Show>
+
+          {/* VIEW 5: Settings & Updates */}
+          <Show when={currentNav() === "settings"}>
+            <div class="max-w-3xl mx-auto">
+              <UpdatePanel
+                channel="stable"
+                onUpdateAvailable={(info) => setAvailableUpdate(info)}
+              />
             </div>
           </Show>
         </div>
