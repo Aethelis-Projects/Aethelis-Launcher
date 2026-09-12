@@ -64,15 +64,29 @@ jobs:
           ./scripts/sign_windows.ps1 -TargetFile "dist/windows/NordLauncher.exe"
 
       - name: Build NSIS Installer
-        uses: joncloud/makensis-action@v4
-        with:
-          script-file: build/windows/installer.nsi
-          arguments: /DVERSION=${{ github.ref_name }}
+        shell: pwsh
+        run: |
+          $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          if (-not (Test-Path $makensis)) {
+            $cmd = Get-Command makensis -ErrorAction SilentlyContinue
+            if ($cmd) {
+              $makensis = $cmd.Source
+            } else {
+              choco install nsis -y --no-progress
+              $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+            }
+          }
+          & $makensis "/DVERSION=${{ github.ref_name }}" build/windows/installer.nsi
+          if (Test-Path "build/windows/NordLauncher-Setup.exe") {
+            Move-Item -Force build/windows/NordLauncher-Setup.exe dist/windows/NordLauncher-Setup.exe
+          } elseif (Test-Path "NordLauncher-Setup.exe") {
+            Move-Item -Force NordLauncher-Setup.exe dist/windows/NordLauncher-Setup.exe
+          }
 
       - name: Sign NSIS Installer (Authenticode)
         shell: pwsh
         run: |
-          ./scripts/sign_windows.ps1 -TargetFile "NordLauncher-Setup.exe"
+          ./scripts/sign_windows.ps1 -TargetFile "dist/windows/NordLauncher-Setup.exe"
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
@@ -80,7 +94,7 @@ jobs:
           name: nord-launcher-windows
           path: |
             dist/windows/NordLauncher.exe
-            NordLauncher-Setup.exe
+            dist/windows/NordLauncher-Setup.exe
 
   build-linux:
     name: Build & Package Linux (x64)

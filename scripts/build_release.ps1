@@ -7,8 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-Write-Host "==> [1/5] Setting up build environment..." -ForegroundColor Cyan
-$env:Path = "C:\Program Files\Go\bin;C:\Users\Home\AppData\Roaming\npm;$env:Path"
+# Keep existing environment PATH intact
 
 # Ensure output directory
 $DistWin = Join-Path $PSScriptRoot "..\dist\windows"

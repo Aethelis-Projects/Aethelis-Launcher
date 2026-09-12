@@ -41,7 +41,7 @@ tar -czf "$TAR_PATH" -C "$DIST_LINUX" nord-launcher nord-launcher.desktop
 
 echo "==> [5/5] Generating SHA256 Checksums..."
 cd "$DIST_LINUX"
-sha256sum nord-launcher "nord-launcher-v${VERSION}-linux-amd64.tar.gz" > SHA256SUMS.txt
+sha256sum nord-launcher "nord-launcher-v${CLEAN_VERSION}-linux-amd64.tar.gz" > SHA256SUMS.txt
 
 echo "=================================================================="
 echo " Production Release Built Successfully for Linux x64"
