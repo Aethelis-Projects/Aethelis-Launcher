@@ -26,6 +26,18 @@ var (
 	ErrUnsupportedPlatform = errors.New("current platform is not supported in update manifest")
 )
 
+// DefaultPublicKeyHex is the official release manifest Ed25519 public key.
+const DefaultPublicKeyHex = "a7dd59ba003395467e78b7bc21c3d329bc3e1bab778180624943805b0111f48a"
+
+// GetDefaultPublicKey returns the decoded Ed25519 public key.
+func GetDefaultPublicKey() ed25519.PublicKey {
+	b, err := hex.DecodeString(DefaultPublicKeyHex)
+	if err != nil || len(b) != ed25519.PublicKeySize {
+		panic("invalid default ed25519 public key")
+	}
+	return ed25519.PublicKey(b)
+}
+
 type PlatformAsset struct {
 	URL       string `json:"url"`
 	SHA256    string `json:"sha256"`

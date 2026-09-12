@@ -3,14 +3,17 @@ package main
 import (
 	"fmt"
 	iofs "io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/nord-launcher/launcher/frontend"
 	"github.com/nord-launcher/launcher/internal/adapters/fs"
+	javaadapter "github.com/nord-launcher/launcher/internal/adapters/java"
 	"github.com/nord-launcher/launcher/internal/adapters/keyring"
 	"github.com/nord-launcher/launcher/internal/adapters/process"
 	"github.com/nord-launcher/launcher/internal/adapters/wails"
@@ -20,24 +23,36 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/storage"
+	"github.com/nord-launcher/launcher/internal/core/updater"
+)
+
+var (
+	version           = "0.1.0"
+	CurseForgeKey     = ""
+	MicrosoftClientID = auth.DefaultClientID
+	UpdateChannel     = "stable"
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--idle-test" {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		fmt.Printf("IDLE_HEAP_ALLOC_MB: %.2f\n", float64(m.Alloc)/(1024*1024))
-		fmt.Printf("IDLE_SYS_MB: %.2f\n", float64(m.Sys)/(1024*1024))
-		return
-	}
+	startInit := time.Now()
 
 	// 1. Initialize Hexagonal Core Ports & Adapters
 	fileSys := fs.NewOSFileSystem()
 	procMgr := process.NewProcessManager()
-	keyRing := keyring.NewMemoryKeyring()
+	keyRing := keyring.NewSystemKeyring()
 	sysClock := clock.NewRealClock()
 
-	// 2. Initialize Database & Migrations
+	// 2. Tuned Shared HTTP Client with Connection Pooling
+	sharedHTTPClient := &http.Client{
+		Transport: &http.Transport{
+			MaxIdleConns:        50,
+			MaxIdleConnsPerHost: 10,
+			IdleConnTimeout:     90 * time.Second,
+		},
+		Timeout: 30 * time.Second,
+	}
+
+	// 3. Initialize Database & Migrations
 	appData, err := os.UserConfigDir()
 	if err != nil {
 		appData = "."
@@ -63,24 +78,54 @@ func main() {
 		accRepo = storage.NewAccountRepository(db)
 	}
 
-	// 3. Initialize Core Domain Services
-	instanceSvc := launch.NewInstanceService(instRepo, fileSys, procMgr, keyRing, sysClock)
-	authSvc := auth.NewAuthService("", nil, accRepo, keyRing)
-	mrClient := modrinth.NewClient("", nil)
-	cfClient := curseforge.NewClient("", "", nil)
+	// 4. Initialize Core Domain Services with Injected Configuration
+	cfKey := CurseForgeKey
+	if cfKey == "" {
+		cfKey = os.Getenv("CURSEFORGE_API_KEY")
+	}
 
-	// 4. Initialize Wails IPC Adapter
+	msClientID := MicrosoftClientID
+	if envClientID := os.Getenv("MICROSOFT_CLIENT_ID"); envClientID != "" {
+		msClientID = envClientID
+	}
+
+	instanceSvc := launch.NewInstanceService(instRepo, fileSys, procMgr, keyRing, sysClock)
+	authAPIClient := auth.NewAPIClient(sharedHTTPClient, auth.DefaultEndpoints())
+	authSvc := auth.NewAuthService(msClientID, authAPIClient, accRepo, keyRing)
+	mrClient := modrinth.NewClient(modrinth.DefaultBaseURL, sharedHTTPClient)
+	cfClient := curseforge.NewClient(curseforge.DefaultBaseURL, cfKey, sharedHTTPClient)
+
+	// Java detector with local instance and runtime directory scanning
+	_ = javaadapter.NewJavaDetector(filepath.Join(dbDir, "runtimes"))
+
+	// Auto-updater wired with configured channel and embedded Ed25519 public key
+	manifestURL := fmt.Sprintf("https://raw.githubusercontent.com/Aethelis-Projects/Aethelis-Launcher/master/dist/manifest-%s.json", UpdateChannel)
+	_ = updater.NewAutoUpdater(version, manifestURL, updater.GetDefaultPublicKey(), sharedHTTPClient)
+
+	// 5. Initialize Wails IPC Adapter
 	adapter := wails.NewWailsAdapter(instanceSvc)
 	adapter.SetAuth(authSvc, accRepo)
 	adapter.SetContent(mrClient, cfClient)
 	adapter.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
 
-	if len(os.Args) > 1 && os.Args[1] == "--headless" {
-		fmt.Printf("Nord Launcher core initialized. Database: %s. Instances registered: %d\n", dbPath, len(adapter.ListInstances()))
+	coreInitDuration := time.Since(startInit)
+
+	if len(os.Args) > 1 && os.Args[1] == "--idle-test" {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		fmt.Printf("CORE_INIT_TIME_MS: %d\n", coreInitDuration.Milliseconds())
+		fmt.Printf("IDLE_HEAP_ALLOC_MB: %.2f\n", float64(m.Alloc)/(1024*1024))
+		fmt.Printf("IDLE_SYS_MB: %.2f\n", float64(m.Sys)/(1024*1024))
 		return
 	}
 
-	// 5. Initialize Embedded Assets & Wails v3 Desktop Window
+	if len(os.Args) > 1 && os.Args[1] == "--headless" {
+		fmt.Printf("Nord Launcher core initialized in %d ms. Database: %s. Instances registered: %d\n",
+			coreInitDuration.Milliseconds(), dbPath, len(adapter.ListInstances()))
+		return
+	}
+
+	// 6. Initialize Embedded Assets & Wails v3 Desktop Window
 	assetsSub, err := iofs.Sub(frontend.Dist, "dist")
 	if err != nil {
 		panic(fmt.Sprintf("failed to load embedded frontend: %v", err))

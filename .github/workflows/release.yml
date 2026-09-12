@@ -58,7 +58,7 @@ jobs:
             }
           '
 
-      - name: Windows Authenticode Code Signing
+      - name: Sign Windows Executable (Authenticode)
         shell: pwsh
         run: |
           ./scripts/sign_windows.ps1 -TargetFile "dist/windows/NordLauncher.exe"
@@ -68,6 +68,11 @@ jobs:
         with:
           script-file: build/windows/installer.nsi
           arguments: /DVERSION=${{ github.ref_name }}
+
+      - name: Sign NSIS Installer (Authenticode)
+        shell: pwsh
+        run: |
+          ./scripts/sign_windows.ps1 -TargetFile "NordLauncher-Setup.exe"
 
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
@@ -123,6 +128,15 @@ jobs:
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+
       - name: Download Windows Artifacts
         uses: actions/download-artifact@v4
         with:
@@ -135,6 +149,28 @@ jobs:
           name: nord-launcher-linux
           path: release-assets/
 
+      - name: Determine Channel & Prerelease Status
+        id: meta
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" =~ -(beta|alpha|rc) ]]; then
+            echo "channel=beta" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "channel=stable" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Signed Ed25519 Update Manifest
+        env:
+          ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
+        run: |
+          go run scripts/generate_manifest.go \
+            -version "${{ github.ref_name }}" \
+            -channel "${{ steps.meta.outputs.channel }}" \
+            -dist release-assets \
+            -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json"
+
       - name: Generate Checksums
         working-directory: release-assets
         run: |
@@ -145,5 +181,5 @@ jobs:
         with:
           files: release-assets/*
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           generate_release_notes: true

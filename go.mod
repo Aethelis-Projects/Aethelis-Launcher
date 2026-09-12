@@ -1,12 +1,14 @@
 module github.com/nord-launcher/launcher
 
-go 1.27.0
+go 1.26.0
 
 require (
 	github.com/golangci/golangci-lint v1.64.8
 	github.com/google/go-licenses v1.6.0
 	github.com/pressly/goose/v3 v3.28.0
 	github.com/wailsapp/wails/v3 v3.0.0-beta.20
+	github.com/zalando/go-keyring v0.2.8
+	golang.org/x/sys v0.48.0
 	golang.org/x/vuln v1.8.0
 	modernc.org/sqlite v1.58.0
 )
@@ -53,6 +55,7 @@ require (
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/curioswitch/go-reassign v0.3.0 // indirect
 	github.com/daixiang0/gci v0.13.5 // indirect
+	github.com/danieljoos/wincred v1.2.3 // indirect
 	github.com/denis-tingaikin/go-header v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emirpasic/gods v1.18.1 // indirect
@@ -210,7 +213,6 @@ require (
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
-	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260908163034-4bcc4b2ee518 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect

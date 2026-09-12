@@ -1,0 +1,20 @@
+{
+  "rules": [
+    {
+      "min_version": "1.20.5",
+      "java_major": 21,
+      "description": "Minecraft 1.20.5 and newer requires Java 21"
+    },
+    {
+      "min_version": "1.17",
+      "max_version": "1.20.4",
+      "java_major": 17,
+      "description": "Minecraft 1.17 through 1.20.4 requires Java 17"
+    },
+    {
+      "max_version": "1.16.5",
+      "java_major": 8,
+      "description": "Minecraft 1.16.5 and older requires Java 8"
+    }
+  ]
+}

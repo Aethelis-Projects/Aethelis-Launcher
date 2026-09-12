@@ -41,9 +41,31 @@ jobs:
           git diff --exit-code || (echo "IPC types are out of sync with schema. Run go run ./ipc/codegen/generate.go" && exit 1)
         shell: bash
 
-      - name: Run Core Go Tests (Headless)
+      - name: Run Core Go Tests & Coverage Gate (>= 80%)
         run: |
           go test -v -race ./internal/...
+          go test -coverprofile=coverage.out ./internal/core/...
+          node scripts/check_coverage.js coverage.out
+        shell: bash
+
+      - name: Run Autonomous E2E Runner (M3/M4 Gate)
+        run: |
+          go run ./cmd/e2e/main.go
+        shell: bash
+
+      - name: Micro-Benchmark IPC Dispatch Latency (p95 NFR)
+        run: |
+          go test -bench=BenchmarkWailsAdapter_IPCDispatch -run=^$ ./internal/adapters/wails
+        shell: bash
+
+      - name: Security & Vulnerability Audit (govulncheck)
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        shell: bash
+
+      - name: Open Source License Compliance (go-licenses)
+        run: |
+          go run github.com/google/go-licenses@v1.6.0 check --ignore modernc.org/mathutil ./...
         shell: bash
 
       - name: Install Frontend Dependencies
@@ -120,11 +142,13 @@ jobs:
             console.log("PASS: Launcher binary size budget (<= 40 MB) respected.");
           '
 
+      - name: Measure Windows NFR Idle & Core Init
+        if: runner.os == 'Windows'
+        run: |
+          ./build/nord-launcher.exe --idle-test
+        shell: bash
+
       - name: Anti-AI-Slop Pre-Flight Linter
         shell: bash
         run: |
-          echo "Running Anti-AI-Slop checks..."
-          # Check forbidden AI slop strings in frontend/src
-          ! grep -ri "<em>" frontend/src/components || (echo "FAILED: Italic header/emphasis slop detected" && exit 1)
-          ! grep -ri "as any" frontend/src || (echo "FAILED: 'as any' bypass detected" && exit 1)
-          echo "PASS: Zero AI-slop violations found."
+          node scripts/anti_slop_lint.js

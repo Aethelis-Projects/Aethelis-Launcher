@@ -1,0 +1,24 @@
+[15:56:42.639] === NORD LAUNCHER END-TO-END VERIFICATION RUNNER (M3/M4 GATE) ===
+[15:56:42.654] Operating System: windows (amd64)
+[15:56:42.654] 
+--- STEP 1: Keyring Persistence E2E ---
+[15:56:42.683] PASS: Refresh-token successfully retrieved across keyring instances (Credential Manager persistence verified).
+[15:56:42.683] 
+--- STEP 2: Auth Offline UUID v3 Mojang Parity E2E ---
+[15:56:42.683] PASS: Canonical Mojang UUID v3 parity confirmed for Steve (5627dd98-e6be-3c21-b8a8-e92344183641) and Alex (36532b5e-c442-3dbb-a24c-c7e55d0f979a).
+[15:56:42.683] 
+--- STEP 3: Java Provisioning Matrix & Hermetic Detection E2E ---
+[15:56:42.683] PASS: Java version matrix mappings verified for all Minecraft epochs.
+[15:56:42.702] PASS: Hermetic JDK 21 discovery and release file parsing verified.
+[15:56:42.702] 
+--- STEP 4: Content Engine (.mrpack & Range Downloader) E2E ---
+[15:56:42.716] PASS: .mrpack index parsing and overrides extraction succeeded.
+[15:56:42.727] PASS: Range-based HTTP 206 download verified with dispatcher.
+[15:56:42.727] 
+--- STEP 5: Process Supervision & Crash Diagnostics E2E ---
+[15:56:42.764] PASS: Supervised process lifecycle (PID: 5412) executed and captured successfully.
+[15:56:42.764] PASS: LogSupervisor correctly classified OutOfMemoryError from simulated game crash log.
+[15:56:42.764] 
+=================================================================
+[15:56:42.764]  ALL E2E STAGES PASSED (M3/M4 VERIFIED)
+[15:56:42.764] =================================================================

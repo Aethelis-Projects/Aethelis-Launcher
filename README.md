@@ -1,0 +1,156 @@
+# Nord Launcher
+
+[![CI Quality Gate](https://github.com/Aethelis-Projects/Aethelis-Launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/Aethelis-Projects/Aethelis-Launcher/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/nord-launcher/launcher)](https://goreportcard.com/report/github.com/nord-launcher/launcher)
+[![SolidJS](https://img.shields.io/badge/SolidJS-1.9-2c4f7c.svg)](https://www.solidjs.com/)
+[![Wails v3](https://img.shields.io/badge/Wails-v3.0.0--beta.20-df1a22.svg)](https://wails.io/)
+
+**Nord Launcher** is an open-source, high-performance, resource-efficient Minecraft launcher built with Go and SolidJS, running inside a native desktop shell powered by Wails v3.
+
+It is engineered from first principles with a strict hexagonal architecture, contract-first IPC, fine-grained UI reactivity (without virtual DOM overhead), and zero tolerance for AI-generated boilerplate ("Anti-AI-Slop" discipline).
+
+---
+
+## Key Features
+
+- **Hexagonal Core**: Completely decoupled business logic in pure Go (`internal/core`) with testable ports and swappable adapters (`internal/adapters`).
+- **Native Desktop Shell**: Integrated Wails v3 (`v3.0.0-beta.20`) with native OS windowing, serving an embedded SolidJS single-page application from memory.
+- **Contract-First IPC**: Strongly-typed JSON schema definitions in `ipc/schema` with deterministic codegen (`ipc/codegen`) enforced by CI gates (`git diff --exit-code`).
+- **Resilient Content Engine**: Parallel Range-based downloader (`downloader.Dispatcher`) supporting HTTP 206 resume, multi-mirror failover, SHA-1 / SHA-256 verification, and `.mrpack` modpack extraction.
+- **Modloader Matrix**: Native metadata resolvers for Vanilla, Fabric, Quilt, and NeoForge.
+- **Secure Credential Storage**: Persistent refresh-token management via OS Credential Manager (Windows DPAPI / Credential Manager, Linux Secret Service) with safe in-memory fallback.
+- **Robust Process Supervision**: Windows Job Objects (`KILL_ON_JOB_CLOSE`) to eliminate orphaned background Java processes, paired with a Log4j crash classifier for diagnostics.
+- **Cryptographic Auto-Updater**: Ed25519-signed update manifests (`manifest-stable.json`, `manifest-beta.json`) guarding binary authenticity before payload execution.
+
+---
+
+## Target Platforms & System Requirements
+
+- **Windows**: Windows 10 (version 1809+, Build 17763 or newer) and Windows 11 (64-bit x64). Legacy Windows (7, 8, 8.1) is explicitly rejected at the installer level.
+- **Linux**: Ubuntu 22.04 LTS or newer (64-bit x64) with GTK4 and WebKitGTK 6.0.
+- **macOS**: Deferred to M7 (see `docs/backlog.md`).
+
+---
+
+## Architecture Overview
+
+Nord Launcher follows strict Hexagonal Architecture (Ports & Adapters):
+
+```
++-------------------------------------------------------------+
+|                     SolidJS Frontend UI                     |
+|           (Tailwind CSS, Lucide, Fine-Grained Signals)      |
++------------------------------+------------------------------+
+                               | Wails v3 IPC (JSON-RPC)
++------------------------------v------------------------------+
+|                   Adapters Layer (`adapters/`)              |
+|   - wails:      IPC Dispatcher (145 ns latency)             |
+|   - keyring:    OS Credential Manager (WinCred / SecretSvc) |
+|   - process:    Win32 Job Objects / POSIX Supervision       |
+|   - java:       Registry & Path Scanner                     |
+|   - fs & http:  OS Filesystem & Connection-Pooled HTTP      |
++------------------------------+------------------------------+
+                               | Ports Interfaces
++------------------------------v------------------------------+
+|                     Core Domain (`core/`)                   |
+|   - auth:       Microsoft OAuth2 PKCE & Offline UUID v3     |
+|   - content:    Modrinth, CurseForge, Loaders, Resolver     |
+|   - downloader: Parallel Range 206, Mirror Failover         |
+|   - java:       Adoptium Client & Version Matrix            |
+|   - launch:     JVM Arguments & Crash Classification        |
+|   - storage:    Pure-Go SQLite WAL (modernc.org/sqlite)     |
+|   - updater:    Ed25519 Cryptographic Manifest Verifier     |
++-------------------------------------------------------------+
+```
+
+---
+
+## Quick Start & Development
+
+### Prerequisites
+
+- **Go**: 1.23 or newer
+- **Node.js**: 20 or newer
+- **pnpm**: 9 or newer
+- **Linux dependencies** (if building on Ubuntu):
+  ```bash
+  sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config
+  ```
+
+### Local Setup
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/Aethelis-Projects/Aethelis-Launcher.git
+   cd Aethelis-Launcher
+   ```
+
+2. **Verify IPC contract parity**:
+   ```bash
+   go run ./ipc/codegen/generate.go
+   ```
+
+3. **Install frontend dependencies & build UI**:
+   ```bash
+   cd frontend
+   pnpm install
+   pnpm build
+   cd ..
+   ```
+
+4. **Run core tests**:
+   ```bash
+   go test -v -race ./internal/...
+   ```
+
+5. **Launch in development mode**:
+   ```bash
+   go run ./cmd/launcher/main.go
+   ```
+
+6. **Run headless verification**:
+   ```bash
+   go run ./cmd/launcher/main.go --headless
+   ```
+
+---
+
+## Building Production Releases
+
+### Windows (EXE + NSIS Setup)
+
+Run the automated release builder script:
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -Version 0.1.0
+```
+This produces:
+- `dist/windows/NordLauncher.exe` (Production binary with `-H=windowsgui`)
+- `dist/windows/NordLauncher-Setup.exe` (Signed modern NSIS installer)
+- `dist/windows/SHA256SUMS.txt` (Cryptographic verification checksums)
+
+### Linux (tar.gz)
+
+```bash
+chmod +x ./scripts/build_release.sh
+./scripts/build_release.sh 0.1.0
+```
+
+---
+
+## Quality Gates & Verification
+
+Every pull request and push to `master` and `main` must pass the automated CI Quality Gate:
+
+- **IPC Parity**: Schema matching Go DTOs and TypeScript models.
+- **Unit & Race Tests**: `go test -v -race ./internal/...`.
+- **Security & Linters**: `govulncheck`, `golangci-lint`, and `go-licenses`.
+- **Bundle Budget**: SolidJS frontend $\le 250$ KB gzip.
+- **Binary Budget**: Release launcher $\le 40$ MB.
+- **Anti-AI-Slop Linter**: Strict prohibition of synthetic AI markers, empty catch blocks, and untyped escapes.
+
+---
+
+## License
+
+Nord Launcher is licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
