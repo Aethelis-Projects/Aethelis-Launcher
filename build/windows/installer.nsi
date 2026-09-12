@@ -18,10 +18,8 @@ InstallDirRegKey HKCU "Software\NordLauncher" "InstallDir"
 
 ; Interface Settings
 !define MUI_ABORTWARNING
-!iffileexists "appicon.ico"
-    !define MUI_ICON "appicon.ico"
-    !define MUI_UNICON "appicon.ico"
-!endif
+!define MUI_ICON "appicon.ico"
+!define MUI_UNICON "appicon.ico"
 
 ; Pages
 !insertmacro MUI_PAGE_WELCOME

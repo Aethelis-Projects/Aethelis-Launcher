@@ -42,21 +42,43 @@ Write-Host "==> [4/6] Applying Windows Authenticode Code Signing..." -Foreground
 & (Join-Path $PSScriptRoot "sign_windows.ps1") -TargetFile $BinaryPath
 
 Write-Host "==> [5/6] Checking NSIS Installer availability..." -ForegroundColor Cyan
-$Makensis = Get-Command makensis -ErrorAction SilentlyContinue
-if ($Makensis) {
-    Write-Host "Building NSIS installer..." -ForegroundColor Cyan
-    & makensis /DVERSION=$Version (Join-Path $PSScriptRoot "..\build\windows\installer.nsi")
+$MakensisCmd = Get-Command makensis -ErrorAction SilentlyContinue
+$MakensisPath = if ($MakensisCmd) { $MakensisCmd.Source } elseif (Test-Path "$env:TEMP\nsis\nsis-3.10\makensis.exe") { "$env:TEMP\nsis\nsis-3.10\makensis.exe" } else { $null }
+
+$InstallerPath = Join-Path $DistWin "NordLauncher-Setup.exe"
+if ($MakensisPath) {
+    Write-Host "Building NSIS installer via $MakensisPath..." -ForegroundColor Cyan
+    $NsiScript = Join-Path $PSScriptRoot "..\build\windows\installer.nsi"
+    & $MakensisPath "/DVERSION=$Version" $NsiScript
+    $DefaultOut = Join-Path $PSScriptRoot "..\build\windows\NordLauncher-Setup.exe"
+    if (Test-Path $DefaultOut) {
+        Move-Item -Force $DefaultOut $InstallerPath
+    }
+    if (Test-Path $InstallerPath) {
+        Write-Host "Applying Windows Authenticode Code Signing to Installer..." -ForegroundColor Cyan
+        & (Join-Path $PSScriptRoot "sign_windows.ps1") -TargetFile $InstallerPath
+        $InstallerBytes = (Get-Item $InstallerPath).Length
+        $InstallerMB = [math]::Round($InstallerBytes / 1MB, 2)
+        Write-Host "Installer compiled: $InstallerPath ($InstallerMB MB)" -ForegroundColor Green
+    }
 } else {
     Write-Host "Notice: makensis not in PATH. Skipping NSIS packaging step." -ForegroundColor Yellow
 }
 
-Write-Host "==> [5/5] Generating SHA256 Checksum..." -ForegroundColor Cyan
-$Hash = (Get-FileHash -Algorithm SHA256 $BinaryPath).Hash.ToLower()
-$ChecksumContent = "$Hash  NordLauncher.exe`n"
+Write-Host "==> [6/6] Generating SHA256 Checksums..." -ForegroundColor Cyan
+$HashBin = (Get-FileHash -Algorithm SHA256 $BinaryPath).Hash.ToLower()
+$ChecksumContent = "$HashBin  NordLauncher.exe`n"
+if (Test-Path $InstallerPath) {
+    $HashInst = (Get-FileHash -Algorithm SHA256 $InstallerPath).Hash.ToLower()
+    $ChecksumContent += "$HashInst  NordLauncher-Setup.exe`n"
+}
 Set-Content -Path (Join-Path $DistWin "SHA256SUMS.txt") -Value $ChecksumContent -NoNewline
 
 Write-Host "==================================================================" -ForegroundColor Green
 Write-Host " Production Release Built Successfully for Windows x64" -ForegroundColor Green
 Write-Host " Executable: $BinaryPath ($BinaryMB MB)" -ForegroundColor Green
-Write-Host " SHA256:     $Hash" -ForegroundColor Green
+if (Test-Path $InstallerPath) {
+    Write-Host " Installer:  $InstallerPath ($InstallerMB MB)" -ForegroundColor Green
+}
+Write-Host " SHA256SUMS:`n$ChecksumContent" -ForegroundColor Green
 Write-Host "==================================================================" -ForegroundColor Green
