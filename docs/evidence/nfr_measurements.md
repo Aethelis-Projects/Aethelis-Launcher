@@ -10,10 +10,10 @@ This document details the exact methodologies, reproduction scripts, and empiric
 |---|---|---|---|---|
 | **Cold Start (Total)** | `< 2.0 s` | **~1.03–1.05 s** (Model estimate on NVMe / Ryzen 5700X)<br>**~1.75 s** (Throttled / Low-spec estimate) | ✅ **PASS** | Two-layer measurement: Core init (25–35 ms) + WebView2 first frame (~1000 ms) |
 | **Idle RAM (WorkingSet)** | `< 150 MB` | **~82 MB** (Tree total:<br>~10 MB Go + ~72 MB WebView2) | ✅ **PASS** | External WorkingSet aggregation across process tree at $t = 10\text{ s}$ |
-| **IPC Dispatch Latency** | `≤ 5000 ns` | **~176–192 ns** (p95 средних по батчам 50k операций)<br>**4.8 ms** (SolidJS DOM update @ 100 ticks/s) | ✅ **PASS** | Go batched micro-benchmarks (`check_bench.js`) + SolidJS fine-grained signal streaming |
+| **IPC Dispatch Latency** | `≤ 5000 ns` | **297 ns** (CI EPYC 7763) / **~176–192 ns** (Local Ryzen 5700X)<br>*(p95 средних по батчам 50k операций)*<br>**4.8 ms** (SolidJS DOM update @ 100 ticks/s) | ✅ **PASS** | Go batched micro-benchmarks (`check_bench.js`) + SolidJS fine-grained signal streaming |
 | **Frontend Bundle** | `≤ 250 KB gzip` | **27.70 KB gzip** | ✅ **PASS** | Production Vite build gzip sum across all assets (cold, no lazy splits) |
-| **Release Executable** | `< 40 MB` | **17.48 MB** (17,484,928 B, NordLauncher.exe)<br>**7.07 MB** (7,069,536 B, NordLauncher-Setup.exe) | ✅ **PASS** | Published release binary length with `-s -w -H=windowsgui` |
-| **Core Test Coverage** | `≥ 80% statements` | **84.6% statements** *(all core packages $\ge 79.1\%$)* | ✅ **PASS** | `go test -coverprofile=coverage.out ./internal/core/...` (local, до CI v0.1.2) |
+| **Release Executable** | `< 40 MB` | **17.49 MB** (17,489,024 B, NordLauncher.exe)<br>**7.07 MB** (7,071,456 B, NordLauncher-Setup.exe) | ✅ **PASS** | Published release v0.1.2 binary length with `-s -w -H=windowsgui` |
+| **Core Test Coverage** | `≥ 80% statements` | **80.9% statements** in CI *(84.6% statements local, all core packages $\ge 79.1\%$)* | ✅ **PASS** | `go test -coverprofile=coverage.out ./internal/core/...` (CI Run #34702530953) |
 | **Anti-AI-Slop Cleanliness** | 0 violations | **0 violations** | ✅ **PASS** | Automated CI linter enforcing clean code discipline |
 
 ---

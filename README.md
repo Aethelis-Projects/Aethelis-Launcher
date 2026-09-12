@@ -128,7 +128,7 @@ Official releases and artifacts are available on GitHub Releases:
 
 Run the automated release builder script:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -Version 0.1.1
+powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -Version 0.1.2
 ```
 This produces:
 - `dist/windows/NordLauncher.exe` (Production binary with `-H=windowsgui`)
@@ -139,7 +139,7 @@ This produces:
 
 ```bash
 chmod +x ./scripts/build_release.sh
-./scripts/build_release.sh 0.1.1
+./scripts/build_release.sh 0.1.2
 ```
 
 ---

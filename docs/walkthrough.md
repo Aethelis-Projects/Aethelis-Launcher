@@ -109,11 +109,11 @@
 |---|---|---|---|---|
 | **Холодный старт окна** | `< 2.0 с` | **~1.03–1.05 с** | 25–35 мс инициализация ядра Go (`--idle-test`) + ~1000 мс рендеринг первого кадра WebView2 (модельная оценка на NVMe / Ryzen 5700X, low-spec оценка ~1.75 с) | ✅ **PASS** |
 | **Idle RAM (покой)** | `< 150 МБ` | **~82 МБ** | Суммарный WorkingSet процессов `NordLauncher.exe` (10 МБ) и `msedgewebview2.exe` (~72 МБ) | ✅ **PASS** |
-| **Отклик IPC (диспатч)** | `≤ 5000 нс` | **~176–192 нс/оп** | Микро-бенчмарк `BenchmarkWailsAdapter_IPCDispatch` (p95 средних по батчам 50k операций, $N=100$) с валидацией через `check_bench.js` | ✅ **PASS** |
+| **Отклик IPC (диспатч)** | `≤ 5000 нс` | **297 нс** (CI) / **~176–192 нс/оп** (Local) | Микро-бенчмарк `BenchmarkWailsAdapter_IPCDispatch` (p95 средних по батчам 50k операций, $N=100$; 297 нс в GitHub Actions CI на AMD EPYC 7763, ~176–192 нс на локальном Ryzen 5700X) с валидацией через `check_bench.js` | ✅ **PASS** |
 | **DOM Update (p95)** | `< 100 мс` | **4.8 мс** | Fine-grained реактивность SolidJS под стримом 100 событий/с без VDOM | ✅ **PASS** |
 | **Initial Bundle Size** | `≤ 250 КБ gzip` | **27.70 КБ gzip** | Сумма всех сгенерированных ассетов `dist/` в сжатом виде | ✅ **PASS** |
-| **Размер исполняемого файла** | `< 40 МБ` | **17.48 МБ** (17,484,928 B, Portable)<br>**7.07 МБ** (7,069,536 B, NSIS Setup) | Скомпилировано с `-ldflags="-s -w -H=windowsgui"`, сверено с опубликованными ассетами v0.1.1 | ✅ **PASS** |
-| **Покрытие ядра тестами** | `≥ 80.0% statements` | **84.6% statements** | `go test -coverprofile=coverage.out ./internal/core/...` (все пакеты ядра $\ge 79.1\%$, local до подтверждения CI v0.1.2) | ✅ **PASS** |
+| **Размер исполняемого файла** | `< 40 МБ` | **17.49 МБ** (17,489,024 B, Portable)<br>**7.07 МБ** (7,071,456 B, NSIS Setup) | Скомпилировано с `-ldflags="-s -w -H=windowsgui"`, сверено с опубликованными ассетами v0.1.2 (17,489,024 B / 7,071,456 B) | ✅ **PASS** |
+| **Покрытие ядра тестами** | `≥ 80.0% statements` | **80.9% statements** (CI) / **84.6%** (Local) | `go test -coverprofile=coverage.out ./internal/core/...` (CI Run #34702530953: 80.9% statements; локально: 84.6%, все пакеты ядра $\ge 79.1\%$) | ✅ **PASS** |
 | **Anti-AI-Slop чистота** | 0 нарушений | **0 нарушений** | Проверка `scripts/anti_slop_lint.js` по TypeScript и Go коду | ✅ **PASS** |
 
 ---
@@ -136,12 +136,13 @@
 | `internal/core/security` | Hexagonal Core | ✅ PASS | 86.9% | Аудит открытых токенов в SQLite, PII-санитизация логов |
 | `internal/core/storage` | Hexagonal Core | ✅ PASS | 82.4% | Pure-Go SQLite WAL (`modernc.org/sqlite`) + Goose миграции |
 | `internal/core/updater` | Hexagonal Core | ✅ PASS | 79.1% | Ed25519 криптографический верификатор обновлений, Relaunch |
-| `internal/adapters/wails` | Adapters | ✅ PASS | 85.4% | Wails v3 IPC адаптер (~176–192 нс/оп batch-average p95) |
+| `internal/adapters/wails` | Adapters | ✅ PASS | 85.4% | Wails v3 IPC адаптер (297 нс CI / ~176–192 нс local batch-average p95) |
 | `internal/adapters/process` | Adapters | ✅ PASS | 82.1% | Win32 Job Objects (`KILL_ON_JOB_CLOSE`) |
 | `internal/adapters/java` | Adapters | ✅ PASS | 84.6% | Детектор установленных JDK (Реестр Windows / POSIX) |
 | `internal/adapters/keyring` | Adapters | ✅ PASS | 77.8% | Windows Credential Manager / Secret Service Keyring |
 
-**Итог по ядру**: суммарное покрытие `internal/core/...` составляет **84.6% statements** (local, до подтверждения CI v0.1.2), что с запасом превышает норматив $\ge 80.0\%$.
+**Итог по ядру**: суммарное покрытие `internal/core/...` составляет **80.9% statements** в подтверждённом CI-ране #34702530953 на коммите `5c299db` (локально — 84.6%), что с запасом удовлетворяет нормативу $\ge 80.0\%$.
+
 
 ---
 
