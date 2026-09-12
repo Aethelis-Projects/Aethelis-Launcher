@@ -1,6 +1,6 @@
 # Binaries
 bin/
-dist/
+/dist/
 *.exe
 *.dll
 *.so
@@ -14,7 +14,8 @@ coverage*
 
 # Node / Frontend
 frontend/node_modules/
-frontend/dist/
+frontend/dist/*
+!frontend/dist/.gitkeep
 frontend/.npmrc
 .pnpm-store/
 

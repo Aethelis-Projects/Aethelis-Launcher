@@ -48,7 +48,9 @@ jobs:
         shell: bash
 
       - name: Run Go Static Analysis (go vet)
-        run: go vet ./...
+        run: |
+          mkdir -p frontend/dist && touch frontend/dist/.gitkeep
+          go vet ./...
         shell: bash
 
       - name: Run Core Go Tests & Coverage Gate (>= 80%)
