@@ -294,7 +294,7 @@ func MonitorProcess(
 	repo ports.InstanceRepository,
 	mu *sync.RWMutex,
 ) {
-	exitCode, _ := handle.Wait() // slop:ok wait error handled via exit code diagnostics
+	exitCode, _ := handle.Wait() // errcheck:ok wait error handled via exit code diagnostics
 
 	if mu != nil {
 		mu.Lock()
@@ -385,8 +385,8 @@ func (s *InstanceService) LaunchWithSupervisor(
 			}
 		}
 		s.mu.Unlock()
-		_ = stdoutW.Close() // slop:ok best-effort pipe cleanup on process launch failure
-		_ = stderrW.Close() // slop:ok best-effort pipe cleanup on process launch failure
+		_ = stdoutW.Close() // errcheck:ok best-effort pipe cleanup on process launch failure
+		_ = stderrW.Close() // errcheck:ok best-effort pipe cleanup on process launch failure
 		return nil, nil, fmt.Errorf("start game process: %w", err)
 	}
 

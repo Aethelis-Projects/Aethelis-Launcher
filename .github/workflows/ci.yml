@@ -1,4 +1,4 @@
-name: CI Quality Gate & Anti-Slop Enforcement
+name: CI Quality Gate
 
 on:
   push:
@@ -63,7 +63,7 @@ jobs:
           node scripts/check_coverage.js coverage.out
         shell: bash
 
-      - name: Run Autonomous E2E Runner (M3/M4 Gate)
+      - name: Run E2E Integration Runner
         run: |
           go run ./cmd/e2e/main.go
         shell: bash
@@ -170,7 +170,7 @@ jobs:
             console.log("PASS: Core init time within budget (<= 500 ms).");
           '
 
-      - name: Anti-AI-Slop Pre-Flight Linter
+      - name: Code Hygiene Linter (TypeScript + Go)
         shell: bash
         run: |
-          node scripts/anti_slop_lint.js
+          node scripts/code_hygiene_lint.js

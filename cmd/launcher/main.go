@@ -29,7 +29,7 @@ import (
 )
 
 var (
-	version           = "0.1.1"
+	version           = "0.1.2"
 	CurseForgeKey     = ""
 	MicrosoftClientID = auth.DefaultClientID
 	UpdateChannel     = "stable"
@@ -150,7 +150,7 @@ func main() {
 
 	app := application.New(application.Options{
 		Name:        "Nord Launcher",
-		Description: "High-performance anti-AI-slop Minecraft launcher",
+		Description: "High-performance, resource-efficient Minecraft launcher",
 		Services: []application.Service{
 			application.NewService(adapter),
 		},

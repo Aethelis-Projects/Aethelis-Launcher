@@ -253,7 +253,7 @@ func (s *GameService) Provision(
 							return nil, fmt.Errorf("%w: download native %s: %v", domain.ErrDownloadFailed, classifier, err)
 						}
 					}
-					_ = s.extractNatives(nativePath, nativesDir) // slop:ok best-effort unpack of platform native libraries
+					_ = s.extractNatives(nativePath, nativesDir) // errcheck:ok best-effort unpack of platform native libraries
 				}
 			}
 		}

@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Nord Launcher
-Comment=High-performance, anti-AI-slop Minecraft launcher
+Comment=High-performance, resource-efficient Minecraft launcher
 Exec=nord-launcher %u
 Icon=nord-launcher
 Terminal=false

@@ -24,3 +24,6 @@ frontend/.npmrc
 .idea/
 .DS_Store
 Thumbs.db
+
+# Build artifacts & E2E traces
+build/e2e/

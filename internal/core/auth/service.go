@@ -124,7 +124,7 @@ func (s *AuthService) StartInteractiveLogin(
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		// slop:ok HTTP response write in OAuth loopback handler
+		// errcheck:ok HTTP response write in OAuth loopback handler
 		_, _ = w.Write([]byte(`<!DOCTYPE html>
 <html>
 <head><title>Nord Launcher - Authorized</title>
@@ -139,12 +139,12 @@ h1{color:#00D4B2;margin-bottom:0.5rem;}p{color:#a1a1aa;}</style></head>
 
 	srv := &http.Server{Handler: mux}
 	go func() {
-		_ = srv.Serve(listener) // slop:ok server expected to close via shutdown below
+		_ = srv.Serve(listener) // errcheck:ok server expected to close via shutdown below
 	}()
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx) // slop:ok best-effort server shutdown
+		_ = srv.Shutdown(shutdownCtx) // errcheck:ok best-effort server shutdown
 	}()
 
 	// 4. Trigger browser open

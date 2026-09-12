@@ -7,25 +7,25 @@ let violations = 0;
 function checkTypeScriptFile(full, content) {
   // 1. Check for prohibited emoji characters
   if (emojiRegex.test(content)) {
-    console.error(`[ANTI-SLOP VIOLATION] Prohibited emoji detected in ${full}`);
+    console.error(`[HYGIENE VIOLATION] Prohibited emoji detected in ${full}`);
     violations++;
   }
 
   // 2. Check for empty catch blocks
   if (/catch\s*(\([^)]*\))?\s*\{\s*\}/.test(content)) {
-    console.error(`[ANTI-SLOP VIOLATION] Empty catch block detected in ${full}`);
+    console.error(`[HYGIENE VIOLATION] Empty catch block detected in ${full}`);
     violations++;
   }
 
   // 3. Check for 'as any' bypasses
   if (/\bas\s+any\b/.test(content)) {
-    console.error(`[ANTI-SLOP VIOLATION] 'as any' type bypass detected in ${full}`);
+    console.error(`[HYGIENE VIOLATION] 'as any' type bypass detected in ${full}`);
     violations++;
   }
 
-  // 4. Check for <em> emphasis slop
+  // 4. Check for <em> emphasis tags
   if (/<em>/i.test(content)) {
-    console.error(`[ANTI-SLOP VIOLATION] <em> tag detected in ${full}`);
+    console.error(`[HYGIENE VIOLATION] <em> tag detected in ${full}`);
     violations++;
   }
 }
@@ -33,11 +33,11 @@ function checkTypeScriptFile(full, content) {
 function checkGoFile(full, content) {
   // 1. Check for prohibited emoji characters
   if (emojiRegex.test(content)) {
-    console.error(`[ANTI-SLOP VIOLATION] Prohibited emoji detected in ${full}`);
+    console.error(`[HYGIENE VIOLATION] Prohibited emoji detected in ${full}`);
     violations++;
   }
 
-  // 2. In non-test Go code, check for blank error discards without // slop:ok justification
+  // 2. In non-test Go code, check for blank error discards without // errcheck:ok justification
   if (!full.endsWith("_test.go")) {
     const lines = content.split("\n");
     for (let i = 0; i < lines.length; i++) {
@@ -47,9 +47,9 @@ function checkGoFile(full, content) {
       // Blank discards like `_ = ...` or `_, _ = ...`
       if (/^\s*(_\s*=|_\s*,\s*_\s*=)\s*/.test(line)) {
         // Exempt interface assertions: `var _ Interface = (*Impl)(nil)`
-        if (!line.includes("var _") && !line.includes("// slop:ok") && !prevLine.includes("// slop:ok")) {
+        if (!line.includes("var _") && !line.includes("// errcheck:ok") && !prevLine.includes("// errcheck:ok")) {
           console.error(
-            `[ANTI-SLOP VIOLATION] Unhandled blank discard at ${full}:${i + 1}: ${line.trim()} (must handle error or annotate with '// slop:ok <reason>')`
+            `[HYGIENE VIOLATION] Unhandled blank discard at ${full}:${i + 1}: ${line.trim()} (must handle error or annotate with '// errcheck:ok <reason>')`
           );
           violations++;
         }
@@ -57,9 +57,9 @@ function checkGoFile(full, content) {
 
       // Empty error check blocks: if err != nil { }
       if (/if\s+err\s*!=\s*nil\s*\{\s*\}/.test(line)) {
-        if (!line.includes("// slop:ok") && !prevLine.includes("// slop:ok")) {
+        if (!line.includes("// errcheck:ok") && !prevLine.includes("// errcheck:ok")) {
           console.error(
-            `[ANTI-SLOP VIOLATION] Empty error check at ${full}:${i + 1}: ${line.trim()} (must handle error or annotate with '// slop:ok <reason>')`
+            `[HYGIENE VIOLATION] Empty error check at ${full}:${i + 1}: ${line.trim()} (must handle error or annotate with '// errcheck:ok <reason>')`
           );
           violations++;
         }
@@ -85,8 +85,8 @@ function walk(dir) {
   }
 }
 
-console.log("==> Running Anti-AI-Slop Pre-Flight Verification...");
-console.log("--> Scanning frontend/src (TypeScript / React)...");
+console.log("==> Running Code Hygiene Pre-Flight Verification...");
+console.log("--> Scanning frontend/src (TypeScript / SolidJS)...");
 walk(path.join(process.cwd(), "frontend", "src"));
 
 console.log("--> Scanning internal & cmd (Go)...");
@@ -94,7 +94,7 @@ walk(path.join(process.cwd(), "internal"));
 walk(path.join(process.cwd(), "cmd"));
 
 if (violations > 0) {
-  console.error(`\nFAILED: Found ${violations} Anti-AI-Slop violations!`);
+  console.error(`\nFAILED: Found ${violations} code hygiene violations!`);
   process.exit(1);
 }
 

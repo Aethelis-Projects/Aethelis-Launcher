@@ -118,7 +118,7 @@ func BuildLaunchArguments(cfg LaunchConfig) ([]string, error) {
 				// Rule-conditional argument
 				var rules []Rule
 				if rBytes, err := json.Marshal(val["rules"]); err == nil {
-					_ = json.Unmarshal(rBytes, &rules) // slop:ok best-effort unmarshal of rule objects
+					_ = json.Unmarshal(rBytes, &rules) // errcheck:ok best-effort unmarshal of rule objects
 				}
 				if EvaluateRules(rules, currentOS, currentArch, features) {
 					switch value := val["value"].(type) {
@@ -163,7 +163,7 @@ func BuildLaunchArguments(cfg LaunchConfig) ([]string, error) {
 			case map[string]any:
 				var rules []Rule
 				if rBytes, err := json.Marshal(val["rules"]); err == nil {
-					_ = json.Unmarshal(rBytes, &rules) // slop:ok best-effort unmarshal of rule objects
+					_ = json.Unmarshal(rBytes, &rules) // errcheck:ok best-effort unmarshal of rule objects
 				}
 				if EvaluateRules(rules, currentOS, currentArch, features) {
 					switch value := val["value"].(type) {

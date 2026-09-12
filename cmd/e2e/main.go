@@ -34,10 +34,10 @@ func main() {
 
 	logf := func(format string, a ...interface{}) {
 		msg := fmt.Sprintf("[%s] ", time.Now().Format("15:04:05.000")) + fmt.Sprintf(format, a...) + "\n"
-		_, _ = mw.Write([]byte(msg)) // slop:ok log trace write
+		_, _ = mw.Write([]byte(msg)) // errcheck:ok log trace write
 	}
 
-	logf("=== NORD LAUNCHER END-TO-END VERIFICATION RUNNER (M3/M4 GATE) ===")
+	logf("=== NORD LAUNCHER END-TO-END VERIFICATION RUNNER ===")
 	logf("Operating System: %s (%s)", runtime.GOOS, runtime.GOARCH)
 
 	// =========================================================================
@@ -71,7 +71,7 @@ func main() {
 		}
 		logf("PASS: Refresh-token successfully retrieved across keyring instances (Credential Manager persistence verified).")
 	}
-	_ = kr2.Delete(testSvc, testUser) // slop:ok test credential cleanup
+	_ = kr2.Delete(testSvc, testUser) // errcheck:ok test credential cleanup
 
 	// =========================================================================
 	// 2. Auth E2E: Mojang Canonical Offline UUID v3 Parity (§5.4)
@@ -130,14 +130,14 @@ func main() {
 	defer os.RemoveAll(tempDir)
 
 	mockRelease := "IMPLEMENTOR=\"Eclipse Adoptium\"\nJAVA_VERSION=\"21.0.2\"\n"
-	_ = os.WriteFile(filepath.Join(tempDir, "release"), []byte(mockRelease), 0644) // slop:ok test release file write
+	_ = os.WriteFile(filepath.Join(tempDir, "release"), []byte(mockRelease), 0644) // errcheck:ok test release file write
 	binDir := filepath.Join(tempDir, "bin")
-	_ = os.MkdirAll(binDir, 0755) // slop:ok test bin dir creation
+	_ = os.MkdirAll(binDir, 0755) // errcheck:ok test bin dir creation
 	javaExeName := "java"
 	if runtime.GOOS == "windows" {
 		javaExeName = "java.exe"
 	}
-	_ = os.WriteFile(filepath.Join(binDir, javaExeName), []byte("mock binary"), 0755) // slop:ok test binary write
+	_ = os.WriteFile(filepath.Join(binDir, javaExeName), []byte("mock binary"), 0755) // errcheck:ok test binary write
 
 	detector := javaadapter.NewJavaDetector(filepath.Dir(tempDir))
 	installations, err := detector.DetectInstallations(context.Background())
@@ -178,13 +178,13 @@ func main() {
 		"files": []
 	}`
 	fIndex, _ := zw.Create("modrinth.index.json")
-	_, _ = fIndex.Write([]byte(indexJSON)) // slop:ok write test index
+	_, _ = fIndex.Write([]byte(indexJSON)) // errcheck:ok write test index
 	fOverride, _ := zw.Create("overrides/config/nord-test.txt")
-	_, _ = fOverride.Write([]byte("custom config value")) // slop:ok write test override
-	_ = zw.Close() // slop:ok close zip writer
+	_, _ = fOverride.Write([]byte("custom config value")) // errcheck:ok write test override
+	_ = zw.Close() // errcheck:ok close zip writer
 
 	mrpackFile := filepath.Join(tempDir, "test.mrpack")
-	_ = os.WriteFile(mrpackFile, mrpackBuf.Bytes(), 0644) // slop:ok write test mrpack
+	_ = os.WriteFile(mrpackFile, mrpackBuf.Bytes(), 0644) // errcheck:ok write test mrpack
 
 	fMrPack, err := os.Open(mrpackFile)
 	if err != nil {
@@ -208,7 +208,7 @@ func main() {
 		logf("FAIL: Failed to extract .mrpack overrides: %v", err)
 		os.Exit(1)
 	}
-	_ = fMrPack.Close() // slop:ok close test mrpack file
+	_ = fMrPack.Close() // errcheck:ok close test mrpack file
 
 	extractedContent, err := os.ReadFile(filepath.Join(extractTarget, "config", "nord-test.txt"))
 	if err != nil || string(extractedContent) != "custom config value" {
@@ -226,7 +226,7 @@ func main() {
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-		_, _ = w.Write(payloadData) // slop:ok mock server payload write
+		_, _ = w.Write(payloadData) // errcheck:ok mock server payload write
 	}))
 	defer server.Close()
 
@@ -334,7 +334,7 @@ func main() {
 		cleanInst.JavaPath = "cmd.exe"
 	} else {
 		cleanScript := filepath.Join(tempDir, "fake-clean.sh")
-		_ = os.WriteFile(cleanScript, []byte("#!/bin/sh\nexit 0\n"), 0755) // slop:ok write fake clean java runner
+		_ = os.WriteFile(cleanScript, []byte("#!/bin/sh\nexit 0\n"), 0755) // errcheck:ok write fake clean java runner
 		cleanInst.JavaPath = cleanScript
 		cleanInst.JVMArgs = nil
 	}
@@ -376,7 +376,7 @@ func main() {
 		crashInst.JavaPath = "cmd.exe"
 	} else {
 		crashScript := filepath.Join(tempDir, "fake-crash.sh")
-		_ = os.WriteFile(crashScript, []byte("#!/bin/sh\necho 'java.lang.OutOfMemoryError: Java heap space' >&2\nexit 1\n"), 0755) // slop:ok write fake crash java runner
+		_ = os.WriteFile(crashScript, []byte("#!/bin/sh\necho 'java.lang.OutOfMemoryError: Java heap space' >&2\nexit 1\n"), 0755) // errcheck:ok write fake crash java runner
 		crashInst.JavaPath = crashScript
 		crashInst.JVMArgs = nil
 	}
@@ -409,13 +409,13 @@ func main() {
 		lastReport.Category, lastReport.Summary)
 
 	logf("\n=================================================================")
-	logf(" ALL E2E STAGES PASSED (M3/M4 VERIFIED)")
+	logf(" ALL E2E STAGES PASSED")
 	logf("=================================================================")
 
-	// Save trace to docs/evidence/e2e_m3_m4_trace.txt
-	evidenceDir := filepath.Join(".", "docs", "evidence")
-	_ = os.MkdirAll(evidenceDir, 0755) // slop:ok create evidence directory
-	traceFile := filepath.Join(evidenceDir, "e2e_m3_m4_trace.txt")
+	// Save trace to build/e2e/e2e_trace.txt
+	traceDir := filepath.Join(".", "build", "e2e")
+	_ = os.MkdirAll(traceDir, 0755) // errcheck:ok create e2e build directory
+	traceFile := filepath.Join(traceDir, "e2e_trace.txt")
 	if err := os.WriteFile(traceFile, traceBuf.Bytes(), 0644); err != nil {
 		logf("WARNING: Failed to save trace log: %v", err)
 	} else {
