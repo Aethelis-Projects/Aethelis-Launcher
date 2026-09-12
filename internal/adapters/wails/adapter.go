@@ -29,6 +29,7 @@ type WailsAdapter struct {
 	fileSys      ports.FileSystem
 	instancesDir string
 	updater      *updater.AutoUpdater
+	relauncher   updater.RelauncherFunc
 	javaDetector ports.JavaDetector
 
 	lastCrashes map[string]*CrashReportDTO
@@ -38,6 +39,7 @@ type WailsAdapter struct {
 func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 	a := &WailsAdapter{
 		svc:         svc,
+		relauncher:  updater.DefaultRelauncher,
 		lastCrashes: make(map[string]*CrashReportDTO),
 	}
 	if svc != nil {
@@ -50,6 +52,12 @@ func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 
 func (a *WailsAdapter) SetUpdater(u *updater.AutoUpdater) {
 	a.updater = u
+}
+
+func (a *WailsAdapter) SetRelauncher(fn updater.RelauncherFunc) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.relauncher = fn
 }
 
 func (a *WailsAdapter) SetJavaDetector(jd ports.JavaDetector) {
@@ -374,7 +382,18 @@ func (a *WailsAdapter) ApplyUpdate() (*UpdateApplyResultDTO, error) {
 		}, nil
 	}
 	return &UpdateApplyResultDTO{
-		Success: true,
-		Message: fmt.Sprintf("Successfully applied update %s", info.Version),
+		Success:         true,
+		Message:         fmt.Sprintf("Update %s applied successfully. Restart required for changes to take effect.", info.Version),
+		RestartRequired: true,
 	}, nil
+}
+
+func (a *WailsAdapter) RestartApplication() error {
+	a.mu.RLock()
+	fn := a.relauncher
+	a.mu.RUnlock()
+	if fn != nil {
+		return fn()
+	}
+	return updater.Relaunch()
 }

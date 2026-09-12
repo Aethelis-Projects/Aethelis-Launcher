@@ -254,3 +254,21 @@ func TestGetDefaultPublicKey(t *testing.T) {
 		t.Fatalf("expected valid default public key size %d, got %d", ed25519.PublicKeySize, len(pk))
 	}
 }
+
+func TestRelaunch_Mock(t *testing.T) {
+	orig := DefaultRelauncher
+	defer func() { DefaultRelauncher = orig }()
+
+	called := false
+	DefaultRelauncher = func() error {
+		called = true
+		return nil
+	}
+
+	if err := Relaunch(); err != nil {
+		t.Fatalf("unexpected relaunch error: %v", err)
+	}
+	if !called {
+		t.Errorf("expected DefaultRelauncher to be called")
+	}
+}

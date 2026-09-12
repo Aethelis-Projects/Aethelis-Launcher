@@ -2,6 +2,7 @@ package wails_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -197,6 +198,27 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 	if report == nil || report.Category != "out_of_memory" {
 		t.Fatalf("unexpected crash report: %+v", report)
 	}
+
+	// 5. RestartApplication with mock relauncher
+	relaunchCalled := false
+	adapter.SetRelauncher(func() error {
+		relaunchCalled = true
+		return nil
+	})
+	if err := adapter.RestartApplication(); err != nil {
+		t.Fatalf("unexpected relaunch error: %v", err)
+	}
+	if !relaunchCalled {
+		t.Errorf("expected relauncher to be invoked")
+	}
+
+	// Error propagation
+	adapter.SetRelauncher(func() error {
+		return errors.New("mock relaunch failure")
+	})
+	if err := adapter.RestartApplication(); err == nil || err.Error() != "mock relaunch failure" {
+		t.Fatalf("expected mock relaunch failure, got %v", err)
+	}
 }
 
 var benchOnce sync.Once
@@ -225,14 +247,17 @@ func BenchmarkWailsAdapter_IPCDispatch(b *testing.B) {
 	}
 	b.StopTimer()
 
-	// Calculate and report true p95 percentile over 10,000 iterations (O1)
+	// Calculate and report true p95 percentile over 100 batches of 50,000 calls (O1 / P3)
 	benchOnce.Do(func() {
-		const sampleCount = 10000
+		const sampleCount = 100
+		const batch = 50000
 		samples := make([]int64, sampleCount)
 		for i := 0; i < sampleCount; i++ {
 			t0 := time.Now()
-			_ = adapter.ListInstances()
-			samples[i] = time.Since(t0).Nanoseconds()
+			for j := 0; j < batch; j++ {
+				_ = adapter.ListInstances()
+			}
+			samples[i] = time.Since(t0).Nanoseconds() / batch
 		}
 		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
 		p95 := samples[int(float64(sampleCount)*0.95)]

@@ -113,4 +113,5 @@ export interface UpdateInfoDTO {
 export interface UpdateApplyResultDTO {
   success: boolean;
   message?: string;
+  restart_required?: boolean;
 }

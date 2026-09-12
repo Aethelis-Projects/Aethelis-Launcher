@@ -45,7 +45,7 @@ Nord Launcher follows strict Hexagonal Architecture (Ports & Adapters):
                                | Wails v3 IPC (JSON-RPC)
 +------------------------------v------------------------------+
 |                   Adapters Layer (`adapters/`)              |
-|   - wails:      IPC Dispatcher (145 ns latency)             |
+|   - wails:      IPC Dispatcher (~170 ns batch-p95 latency)  |
 |   - keyring:    OS Credential Manager (WinCred / SecretSvc) |
 |   - process:    Win32 Job Objects / POSIX Supervision       |
 |   - java:       Registry & Path Scanner                     |

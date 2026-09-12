@@ -196,4 +196,8 @@ jobs:
           files: release-assets/*
           draft: false
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-          generate_release_notes: true
+          name: ${{ github.ref_name }}
+          body: |
+            Nord Launcher ${{ github.ref_name }} (${{ steps.meta.outputs.channel }} channel release).
+
+            **Full Changelog**: https://github.com/Aethelis-Projects/Aethelis-Launcher/compare/v0.1.0...${{ github.ref_name }}

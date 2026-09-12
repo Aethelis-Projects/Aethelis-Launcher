@@ -154,26 +154,17 @@ func setupMockServer(t *testing.T, requestCounter *int64) (*httptest.Server, map
 				SHA1: hashes["client_1_12_2"],
 				Size: int64(len(clientJar112Data)),
 			}
-			// Library with native classifiers and Maven fallback
+			// Pure legacy Minecraft 1.12.2 libraries without modern downloads block
 			ver.Libraries = []domain.Library{
 				{
-					Name: "net.minecraft:legacy-maven-lib:1.0",
-					// No artifact URL -> triggers maven fallback URL
+					Name: "org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209",
 				},
 				{
 					Name: "org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209",
 					Natives: map[string]string{
 						"windows": "natives-windows",
-					},
-					Downloads: domain.LibraryDownloads{
-						Classifiers: map[string]domain.LibraryArtifact{
-							"natives-windows": {
-								Path: "org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-natives-windows.jar",
-								URL:  ts.URL + "/libraries/org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-natives-windows.jar",
-								SHA1: hashes["native_zip"],
-								Size: int64(len(nativeZipData)),
-							},
-						},
+						"linux":   "natives-linux",
+						"osx":     "natives-osx",
 					},
 				},
 			}
@@ -203,9 +194,11 @@ func setupMockServer(t *testing.T, requestCounter *int64) (*httptest.Server, map
 			_, _ = w.Write(libWindowsData)
 		case path == "/libraries/org/lwjgl/lwjgl-osx/3.3.3/lwjgl-osx-3.3.3.jar":
 			_, _ = w.Write(libOsxData)
-		case path == "/libraries/net/minecraft/legacy-maven-lib/1.0/legacy-maven-lib-1.0.jar":
-			_, _ = w.Write([]byte("LEGACY-MAVEN-DATA"))
-		case path == "/libraries/org/lwjgl/lwjgl-platform/2.9.4/lwjgl-platform-2.9.4-natives-windows.jar":
+		case path == "/libraries/org/lwjgl/lwjgl/lwjgl/2.9.4-nightly-20150209/lwjgl-2.9.4-nightly-20150209.jar":
+			_, _ = w.Write([]byte("LWJGL-LEGACY-JAR"))
+		case path == "/libraries/org/lwjgl/lwjgl/lwjgl-platform/2.9.4-nightly-20150209/lwjgl-platform-2.9.4-nightly-20150209.jar":
+			_, _ = w.Write([]byte("LWJGL-PLATFORM-JAR"))
+		case path == "/libraries/org/lwjgl/lwjgl/lwjgl-platform/2.9.4-nightly-20150209/lwjgl-platform-2.9.4-nightly-20150209-natives-windows.jar":
 			_, _ = w.Write(nativeZipData)
 
 		case strings.HasPrefix(path, "/resources/"):
@@ -312,7 +305,24 @@ func TestGameService_Provision_Legacy_1_12_2(t *testing.T) {
 		t.Fatalf("legacy provision failed: %v", err)
 	}
 
-	// Verify native dll extracted into nativesDir
+	// 1. Verify legacy Maven library jars were downloaded and added to classpath
+	if len(cfg.LibraryJarList) != 2 {
+		t.Fatalf("expected 2 library jars in classpath, got %d (%v)", len(cfg.LibraryJarList), cfg.LibraryJarList)
+	}
+	hasLwjgl := false
+	for _, libPath := range cfg.LibraryJarList {
+		if strings.Contains(libPath, "lwjgl-2.9.4-nightly-20150209.jar") {
+			hasLwjgl = true
+		}
+		if !fsys.Exists(libPath) {
+			t.Errorf("expected library jar file to exist at %s", libPath)
+		}
+	}
+	if !hasLwjgl {
+		t.Errorf("expected legacy lwjgl jar in classpath, got %v", cfg.LibraryJarList)
+	}
+
+	// 2. Verify native dll extracted from legacy Maven classifier jar into nativesDir
 	extractedNative := filepath.Join(cfg.NativesDir, "lwjgl.dll")
 	if !fsys.Exists(extractedNative) {
 		t.Errorf("expected extracted native at %s", extractedNative)

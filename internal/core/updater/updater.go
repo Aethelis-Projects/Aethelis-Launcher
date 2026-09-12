@@ -222,8 +222,13 @@ func (u *AutoUpdater) ApplyUpdate(ctx context.Context, info *UpdateInfo) error {
 	return u.DownloadAndApply(ctx, info.Asset, "")
 }
 
-// Relaunch restarts the current application executable.
-func Relaunch() error {
+// RelauncherFunc defines the signature for application restart functions.
+type RelauncherFunc func() error
+
+// DefaultRelauncher is the standard relaunch implementation using os/exec and os.Exit(0).
+var DefaultRelauncher RelauncherFunc = defaultRelaunch
+
+func defaultRelaunch() error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("determine executable: %w", err)
@@ -234,6 +239,11 @@ func Relaunch() error {
 	}
 	os.Exit(0)
 	return nil
+}
+
+// Relaunch restarts the current application executable using DefaultRelauncher.
+func Relaunch() error {
+	return DefaultRelauncher()
 }
 
 // CleanupStaleBackup removes <exe>.old left over from previous updates.

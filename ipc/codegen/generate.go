@@ -117,8 +117,9 @@ type UpdateInfoDTO struct {
 }
 
 type UpdateApplyResultDTO struct {
-	Success bool   ` + "`" + `json:"success"` + "`" + `
-	Message string ` + "`" + `json:"message,omitempty"` + "`" + `
+	Success         bool   ` + "`" + `json:"success"` + "`" + `
+	Message         string ` + "`" + `json:"message,omitempty"` + "`" + `
+	RestartRequired bool   ` + "`" + `json:"restart_required,omitempty"` + "`" + `
 }
 `
 
@@ -237,6 +238,7 @@ export interface UpdateInfoDTO {
 export interface UpdateApplyResultDTO {
   success: boolean;
   message?: string;
+  restart_required?: boolean;
 }
 `
 

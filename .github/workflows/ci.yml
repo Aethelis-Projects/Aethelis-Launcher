@@ -48,6 +48,9 @@ jobs:
         shell: bash
 
       - name: Run Go Static Analysis (go vet)
+        # Note: frontend/embed.go requires //go:embed all:dist. On a fresh clone, frontend/dist is gitignored
+        # and doesn't exist yet, causing go vet to abort with "no matching files found". Creating a stub directory
+        # with .gitkeep satisfies the compiler's embed directive prior to running frontend build.
         run: |
           mkdir -p frontend/dist && touch frontend/dist/.gitkeep
           go vet ./...

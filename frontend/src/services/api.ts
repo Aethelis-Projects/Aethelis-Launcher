@@ -17,6 +17,7 @@ interface WailsAdapterBindings {
   LoginMicrosoft?: () => Promise<AccountDTO>;
   CheckForUpdates?: () => Promise<UpdateInfoDTO>;
   ApplyUpdate?: () => Promise<UpdateApplyResultDTO>;
+  RestartApplication?: () => Promise<void>;
 }
 
 declare global {
@@ -283,6 +284,14 @@ export const launcherAPI = {
     return {
       success: true,
       message: "Update applied successfully",
+      restart_required: true,
     };
+  },
+
+  async restartApplication(): Promise<void> {
+    const fn = window.go?.wails?.WailsAdapter?.RestartApplication;
+    if (typeof fn === "function") {
+      await fn();
+    }
   },
 };

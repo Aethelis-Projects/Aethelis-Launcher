@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -200,7 +201,8 @@ func (s *GameService) Provision(
 			relPath = lib.Downloads.Artifact.Path
 			url = lib.Downloads.Artifact.URL
 			expectedSHA1 = lib.Downloads.Artifact.SHA1
-		} else if len(lib.Natives) == 0 && lib.Name != "" {
+		} else if lib.Name != "" {
+			// Legacy pre-1.14 library without modern downloads object
 			relPath = MavenCoordinatesToPath(lib.Name)
 			url = fmt.Sprintf("%s/%s", strings.TrimRight(s.librariesBaseURL, "/"), relPath)
 		}
@@ -230,13 +232,24 @@ func (s *GameService) Provision(
 					archKey = "32"
 				}
 				classifier := strings.ReplaceAll(classifierTemplate, "${arch}", archKey)
+				var nativeRelPath, nativeURL, nativeSHA1 string
 				if nativeArt, ok := lib.Downloads.Classifiers[classifier]; ok && nativeArt.URL != "" {
-					nativePath := filepath.Join(librariesDir, filepath.FromSlash(nativeArt.Path))
-					if !s.verifyFileSHA1(nativePath, nativeArt.SHA1) {
+					nativeRelPath = nativeArt.Path
+					nativeURL = nativeArt.URL
+					nativeSHA1 = nativeArt.SHA1
+				} else if lib.Name != "" {
+					// Legacy pre-1.14 maven natives fallback via classifier coordinate
+					nativeRelPath = MavenCoordinatesToPath(lib.Name + ":" + classifier)
+					nativeURL = fmt.Sprintf("%s/%s", strings.TrimRight(s.librariesBaseURL, "/"), nativeRelPath)
+				}
+
+				if nativeRelPath != "" {
+					nativePath := filepath.Join(librariesDir, filepath.FromSlash(nativeRelPath))
+					if !s.verifyFileSHA1(nativePath, nativeSHA1) {
 						if err := s.fs.MkdirAll(filepath.Dir(nativePath), 0755); err != nil {
 							return nil, fmt.Errorf("mkdir native lib dir: %w", err)
 						}
-						if err := s.http.DownloadFile(ctx, nativeArt.URL, nativePath, nativeArt.SHA1, nil); err != nil {
+						if err := s.http.DownloadFile(ctx, nativeURL, nativePath, nativeSHA1, nil); err != nil {
 							return nil, fmt.Errorf("%w: download native %s: %v", domain.ErrDownloadFailed, classifier, err)
 						}
 					}
@@ -272,7 +285,9 @@ func (s *GameService) Provision(
 					objURL := fmt.Sprintf("%s/%s/%s", strings.TrimRight(s.resourcesBaseURL, "/"), sub, obj.Hash)
 					if !s.verifyFileSHA1(objPath, obj.Hash) {
 						if err := s.fs.MkdirAll(filepath.Dir(objPath), 0755); err == nil {
-							_ = s.http.DownloadFile(ctx, objURL, objPath, obj.Hash, nil) // slop:ok non-fatal individual asset object download
+							if dlErr := s.http.DownloadFile(ctx, objURL, objPath, obj.Hash, nil); dlErr != nil {
+								log.Printf("[WARN] Failed to download asset object %s: %v", obj.Hash, dlErr)
+							}
 						}
 					}
 				}
