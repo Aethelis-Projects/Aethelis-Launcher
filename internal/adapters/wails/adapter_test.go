@@ -1,8 +1,14 @@
 package wails_test
 
 import (
+	"context"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,14 +18,35 @@ import (
 	"github.com/nord-launcher/launcher/internal/adapters/wails"
 	"github.com/nord-launcher/launcher/internal/core/auth"
 	"github.com/nord-launcher/launcher/internal/core/clock"
+	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 )
+
+type mockProcHandle struct{}
+
+func (m *mockProcHandle) PID() int           { return 12345 }
+func (m *mockProcHandle) Wait() (int, error) { return 0, nil }
+func (m *mockProcHandle) Kill() error        { return nil }
+
+type mockProcMgr struct{}
+
+func (m *mockProcMgr) StartProcess(
+	ctx context.Context,
+	executable string,
+	args []string,
+	dir string,
+	env []string,
+	stdout, stderr io.Writer,
+) (ports.ProcessHandle, error) {
+	return &mockProcHandle{}, nil
+}
 
 func TestWailsAdapter_IPCBridge(t *testing.T) {
 	clk := clock.NewMockClock(time.Now())
 	fileSys := fs.NewOSFileSystem()
-	procMgr := process.NewProcessManager()
+	procMgr := &mockProcMgr{}
 	kr := keyring.NewMemoryKeyring()
 
 	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
@@ -46,12 +73,29 @@ func TestWailsAdapter_IPCBridge(t *testing.T) {
 		t.Fatalf("expected 1 instance, got %d", len(list))
 	}
 
-	// Test launch via IPC
+	// Test launch without active account -> fails cleanly
 	res, err := adapter.LaunchInstance(dto.ID)
 	if err != nil {
 		t.Fatalf("launch error: %v", err)
 	}
-	if !res.Success || res.PID <= 0 {
+	if res.Success || !strings.Contains(res.Error, "no active account") {
+		t.Fatalf("expected failure without account, got: %+v", res)
+	}
+
+	// Set active account and launch again -> succeeds
+	svc.SetActiveAccount(&domain.Account{
+		UUID:        "test-uuid",
+		Username:    "Steve",
+		Type:        domain.AccountMicrosoft,
+		AccessToken: "mock-token",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+	})
+
+	res, err = adapter.LaunchInstance(dto.ID)
+	if err != nil {
+		t.Fatalf("launch error: %v", err)
+	}
+	if !res.Success || res.PID != 12345 {
 		t.Fatalf("launch failed: %+v", res)
 	}
 }
@@ -155,6 +199,8 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 	}
 }
 
+var benchOnce sync.Once
+
 func BenchmarkWailsAdapter_IPCDispatch(b *testing.B) {
 	clk := clock.NewMockClock(time.Now())
 	fileSys := fs.NewOSFileSystem()
@@ -177,4 +223,19 @@ func BenchmarkWailsAdapter_IPCDispatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = adapter.ListInstances()
 	}
+	b.StopTimer()
+
+	// Calculate and report true p95 percentile over 10,000 iterations (O1)
+	benchOnce.Do(func() {
+		const sampleCount = 10000
+		samples := make([]int64, sampleCount)
+		for i := 0; i < sampleCount; i++ {
+			t0 := time.Now()
+			_ = adapter.ListInstances()
+			samples[i] = time.Since(t0).Nanoseconds()
+		}
+		sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+		p95 := samples[int(float64(sampleCount)*0.95)]
+		fmt.Printf("# p95: %d ns\n", p95)
+	})
 }

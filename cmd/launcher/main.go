@@ -13,6 +13,7 @@ import (
 
 	"github.com/nord-launcher/launcher/frontend"
 	"github.com/nord-launcher/launcher/internal/adapters/fs"
+	httpadapter "github.com/nord-launcher/launcher/internal/adapters/http"
 	javaadapter "github.com/nord-launcher/launcher/internal/adapters/java"
 	"github.com/nord-launcher/launcher/internal/adapters/keyring"
 	"github.com/nord-launcher/launcher/internal/adapters/process"
@@ -21,13 +22,14 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
+	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
 )
 
 var (
-	version           = "0.1.0"
+	version           = "0.1.1"
 	CurseForgeKey     = ""
 	MicrosoftClientID = auth.DefaultClientID
 	UpdateChannel     = "stable"
@@ -35,6 +37,9 @@ var (
 
 func main() {
 	startInit := time.Now()
+
+	// 0. Clean up stale backup executable from previous update
+	updater.CleanupStaleBackup()
 
 	// 1. Initialize Hexagonal Core Ports & Adapters
 	fileSys := fs.NewOSFileSystem()
@@ -58,7 +63,9 @@ func main() {
 		appData = "."
 	}
 	dbDir := filepath.Join(appData, "nord-launcher")
-	_ = os.MkdirAll(dbDir, 0755)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		fmt.Printf("Warning: Failed to create database directory %s: %v\n", dbDir, err)
+	}
 	dbPath := filepath.Join(dbDir, "nord.db")
 
 	db, err := storage.OpenDatabase(dbPath)
@@ -96,17 +103,27 @@ func main() {
 	cfClient := curseforge.NewClient(curseforge.DefaultBaseURL, cfKey, sharedHTTPClient)
 
 	// Java detector with local instance and runtime directory scanning
-	_ = javaadapter.NewJavaDetector(filepath.Join(dbDir, "runtimes"))
+	javaDetector := javaadapter.NewJavaDetector(filepath.Join(dbDir, "runtimes"))
+	instanceSvc.SetJavaDetector(javaDetector)
+	instanceSvc.SetAccountRepository(accRepo)
+	instanceSvc.SetSessionRefresher(authSvc)
+
+	// Game provisioner
+	httpAdapter := httpadapter.NewHTTPClient(30 * time.Second)
+	gameProvisioner := game.NewGameService(httpAdapter, fileSys, dbDir)
+	instanceSvc.SetProvisioner(gameProvisioner)
 
 	// Auto-updater wired with configured channel and embedded Ed25519 public key
-	manifestURL := fmt.Sprintf("https://raw.githubusercontent.com/Aethelis-Projects/Aethelis-Launcher/master/dist/manifest-%s.json", UpdateChannel)
-	_ = updater.NewAutoUpdater(version, manifestURL, updater.GetDefaultPublicKey(), sharedHTTPClient)
+	manifestURL := fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/latest/download/manifest-%s.json", UpdateChannel)
+	autoUpdater := updater.NewAutoUpdater(version, manifestURL, updater.GetDefaultPublicKey(), sharedHTTPClient)
 
 	// 5. Initialize Wails IPC Adapter
 	adapter := wails.NewWailsAdapter(instanceSvc)
 	adapter.SetAuth(authSvc, accRepo)
 	adapter.SetContent(mrClient, cfClient)
 	adapter.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
+	adapter.SetUpdater(autoUpdater)
+	adapter.SetJavaDetector(javaDetector)
 
 	coreInitDuration := time.Since(startInit)
 

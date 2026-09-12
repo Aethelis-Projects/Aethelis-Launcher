@@ -80,3 +80,9 @@ type SettingsRepository interface {
 	Set(ctx context.Context, key, value string) error
 	GetAll(ctx context.Context) (map[string]string, error)
 }
+
+// GameProvisioner resolves, downloads, and validates game files, returning a complete LaunchConfig.
+type GameProvisioner interface {
+	Provision(ctx context.Context, inst *domain.Instance, acc *domain.Account) (*domain.LaunchConfig, error)
+}
+

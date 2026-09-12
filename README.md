@@ -2,7 +2,6 @@
 
 [![CI Quality Gate](https://github.com/Aethelis-Projects/Aethelis-Launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/Aethelis-Projects/Aethelis-Launcher/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/nord-launcher/launcher)](https://goreportcard.com/report/github.com/nord-launcher/launcher)
 [![SolidJS](https://img.shields.io/badge/SolidJS-1.9-2c4f7c.svg)](https://www.solidjs.com/)
 [![Wails v3](https://img.shields.io/badge/Wails-v3.0.0--beta.20-df1a22.svg)](https://wails.io/)
 
@@ -17,9 +16,10 @@ It is engineered from first principles with a strict hexagonal architecture, con
 - **Hexagonal Core**: Completely decoupled business logic in pure Go (`internal/core`) with testable ports and swappable adapters (`internal/adapters`).
 - **Native Desktop Shell**: Integrated Wails v3 (`v3.0.0-beta.20`) with native OS windowing, serving an embedded SolidJS single-page application from memory.
 - **Contract-First IPC**: Strongly-typed JSON schema definitions in `ipc/schema` with deterministic codegen (`ipc/codegen`) enforced by CI gates (`git diff --exit-code`).
+- **Game Provisioning Pipeline**: Automated resolution of Mojang Version Manifest V2, `version.json`, `client.jar` with SHA-1 validation, OS-rule library filtering, assets downloads, and native extraction.
 - **Resilient Content Engine**: Parallel Range-based downloader (`downloader.Dispatcher`) supporting HTTP 206 resume, multi-mirror failover, SHA-1 / SHA-256 verification, and `.mrpack` modpack extraction.
 - **Modloader Matrix**: Native metadata resolvers for Vanilla, Fabric, Quilt, and NeoForge.
-- **Secure Credential Storage**: Persistent refresh-token management via OS Credential Manager (Windows DPAPI / Credential Manager, Linux Secret Service) with safe in-memory fallback.
+- **Secure Credential Storage**: Persistent refresh-token management via OS Credential Manager (Windows Credential Manager / Linux Secret Service) with safe in-memory fallback.
 - **Robust Process Supervision**: Windows Job Objects (`KILL_ON_JOB_CLOSE`) to eliminate orphaned background Java processes, paired with a Log4j crash classifier for diagnostics.
 - **Cryptographic Auto-Updater**: Ed25519-signed update manifests (`manifest-stable.json`, `manifest-beta.json`) guarding binary authenticity before payload execution.
 
@@ -70,9 +70,9 @@ Nord Launcher follows strict Hexagonal Architecture (Ports & Adapters):
 
 ### Prerequisites
 
-- **Go**: 1.23 or newer
-- **Node.js**: 20 or newer
-- **pnpm**: 9 or newer
+- **Go**: 1.26 or newer
+- **Node.js**: 22 or newer
+- **pnpm**: 12 or newer
 - **Linux dependencies** (if building on Ubuntu):
   ```bash
   sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config
@@ -116,24 +116,30 @@ Nord Launcher follows strict Hexagonal Architecture (Ports & Adapters):
 
 ---
 
-## Building Production Releases
+## Releases & Downloads
 
-### Windows (EXE + NSIS Setup)
+Official releases and artifacts are available on GitHub Releases:
+- **Latest Release**: [Aethelis-Launcher Releases](https://github.com/Aethelis-Projects/Aethelis-Launcher/releases)
+- **Stable Update Manifest**: [manifest-stable.json](https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/latest/download/manifest-stable.json)
+
+### Building Production Releases Locally
+
+#### Windows (EXE + NSIS Setup)
 
 Run the automated release builder script:
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -Version 0.1.0
+powershell -ExecutionPolicy Bypass -File .\scripts\build_release.ps1 -Version 0.1.1
 ```
 This produces:
 - `dist/windows/NordLauncher.exe` (Production binary with `-H=windowsgui`)
 - `dist/windows/NordLauncher-Setup.exe` (Signed modern NSIS installer)
 - `dist/windows/SHA256SUMS.txt` (Cryptographic verification checksums)
 
-### Linux (tar.gz)
+#### Linux (tar.gz)
 
 ```bash
 chmod +x ./scripts/build_release.sh
-./scripts/build_release.sh 0.1.0
+./scripts/build_release.sh 0.1.1
 ```
 
 ---
@@ -142,12 +148,15 @@ chmod +x ./scripts/build_release.sh
 
 Every pull request and push to `master` and `main` must pass the automated CI Quality Gate:
 
-- **IPC Parity**: Schema matching Go DTOs and TypeScript models.
+- **IPC Parity**: Schema matching Go DTOs and TypeScript models (`ipc/codegen`).
 - **Unit & Race Tests**: `go test -v -race ./internal/...`.
-- **Security & Linters**: `govulncheck`, `golangci-lint`, and `go-licenses`.
+- **Coverage Gate**: Statement coverage $\ge 80.0\%$ on `internal/core/...`.
+- **Static Analysis & Security**: Native `go vet ./...`, `govulncheck@v1.8.0`, and `go-licenses`.
+- **E2E Integration Gate**: Standalone multi-step runner (`cmd/e2e/main.go`) testing Keyring, Auth, Java, Downloader, Update signature, and Instance launch lifecycle.
 - **Bundle Budget**: SolidJS frontend $\le 250$ KB gzip.
 - **Binary Budget**: Release launcher $\le 40$ MB.
-- **Anti-AI-Slop Linter**: Strict prohibition of synthetic AI markers, empty catch blocks, and untyped escapes.
+- **Latency SLA**: In-process IPC dispatch p95 $\le 5000$ ns.
+- **Anti-AI-Slop Linter**: Zero tolerance for synthetic AI markers, unhandled blank discards (`_ = err`), and untyped escapes across TypeScript and Go.
 
 ---
 

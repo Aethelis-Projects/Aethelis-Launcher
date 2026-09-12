@@ -47,6 +47,10 @@ jobs:
           git diff --exit-code || (echo "IPC types are out of sync with schema. Run go run ./ipc/codegen/generate.go" && exit 1)
         shell: bash
 
+      - name: Run Go Static Analysis (go vet)
+        run: go vet ./...
+        shell: bash
+
       - name: Run Core Go Tests & Coverage Gate (>= 80%)
         run: |
           go test -v -race ./internal/...
@@ -61,7 +65,8 @@ jobs:
 
       - name: Micro-Benchmark IPC Dispatch Latency (p95 NFR)
         run: |
-          go test -bench=BenchmarkWailsAdapter_IPCDispatch -run=^$ ./internal/adapters/wails
+          go test -bench=BenchmarkWailsAdapter_IPCDispatch -run=^$ ./internal/adapters/wails | tee bench.log
+          node scripts/check_bench.js bench.log
         shell: bash
 
       - name: Security & Vulnerability Audit (govulncheck)
@@ -70,6 +75,8 @@ jobs:
         shell: bash
 
       - name: Open Source License Compliance (go-licenses)
+        # modernc.org/mathutil is BSD-3-Clause licensed (pure Go SQLite dependency),
+        # but ignored here because go-licenses cannot resolve its sub-module license file.
         run: |
           go run github.com/google/go-licenses@v1.6.0 check --ignore modernc.org/mathutil ./cmd/launcher
         shell: bash
@@ -144,9 +151,19 @@ jobs:
 
       - name: Measure Windows NFR Idle & Core Init
         if: runner.os == 'Windows'
-        run: |
-          ./build/nord-launcher.exe --idle-test
         shell: bash
+        run: |
+          ./build/nord-launcher.exe --idle-test | tee idle_test.log
+          node -e '
+            const fs = require("fs");
+            const log = fs.readFileSync("idle_test.log", "utf8");
+            const match = log.match(/CORE_INIT_TIME_MS:\s*(\d+)/);
+            if (!match) { console.error("Could not parse CORE_INIT_TIME_MS"); process.exit(1); }
+            const ms = parseInt(match[1], 10);
+            console.log("Measured core init time: " + ms + " ms");
+            if (ms > 500) { console.error("VIOLATION: Core init exceeded 500 ms threshold!"); process.exit(1); }
+            console.log("PASS: Core init time within budget (<= 500 ms).");
+          '
 
       - name: Anti-AI-Slop Pre-Flight Linter
         shell: bash

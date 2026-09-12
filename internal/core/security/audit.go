@@ -210,7 +210,7 @@ func (a *SecurityAuditor) AuditKeyring(accountUUID string) ([]SecurityFinding, e
 	}
 
 	// Clean up
-	_ = a.keyring.Delete(service, key)
+	_ = a.keyring.Delete(service, key) // slop:ok cleanup verified test secret from keyring
 
 	return []SecurityFinding{
 		{

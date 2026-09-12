@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -171,14 +172,14 @@ func (u *AutoUpdater) DownloadAndApply(ctx context.Context, asset PlatformAsset,
 	payloadBytes, err := io.ReadAll(io.TeeReader(resp.Body, writer))
 	outFile.Close()
 	if err != nil {
-		_ = os.Remove(newExePath)
+		_ = os.Remove(newExePath) // slop:ok cleanup failed download target
 		return fmt.Errorf("read update payload: %w", err)
 	}
 
 	// 2. Verify SHA-256
 	actualSHA256 := hex.EncodeToString(hasher.Sum(nil))
 	if asset.SHA256 != "" && !strings.EqualFold(actualSHA256, asset.SHA256) {
-		_ = os.Remove(newExePath)
+		_ = os.Remove(newExePath) // slop:ok cleanup failed download target
 		return fmt.Errorf("%w: expected %s, got %s", ErrChecksumMismatch, asset.SHA256, actualSHA256)
 	}
 
@@ -186,30 +187,52 @@ func (u *AutoUpdater) DownloadAndApply(ctx context.Context, asset PlatformAsset,
 	if len(u.publicKey) > 0 && asset.Signature != "" {
 		sigBytes, err := base64.StdEncoding.DecodeString(asset.Signature)
 		if err != nil {
-			_ = os.Remove(newExePath)
+			_ = os.Remove(newExePath) // slop:ok cleanup failed download target
 			return fmt.Errorf("decode signature: %w", err)
 		}
 
 		if !ed25519.Verify(u.publicKey, payloadBytes, sigBytes) {
-			_ = os.Remove(newExePath)
+			_ = os.Remove(newExePath) // slop:ok cleanup failed download target
 			return ErrSignatureInvalid
 		}
 	}
 
 	// 4. Atomic replacement (Windows and Unix compatible)
 	// On Windows, a running executable can be renamed, but not overwritten or deleted.
-	_ = os.Remove(oldExePath) // Clean up any stale previous backup
+	_ = os.Remove(oldExePath) // slop:ok clean up any stale previous backup
 	if err := os.Rename(currentExePath, oldExePath); err != nil {
-		_ = os.Remove(newExePath)
+		_ = os.Remove(newExePath) // slop:ok cleanup failed download target
 		return fmt.Errorf("backup running executable: %w", err)
 	}
 
 	if err := os.Rename(newExePath, currentExePath); err != nil {
 		// Rollback
-		_ = os.Rename(oldExePath, currentExePath)
+		_ = os.Rename(oldExePath, currentExePath) // slop:ok best-effort rollback to original binary
 		return fmt.Errorf("stage new executable: %w", err)
 	}
 
+	return nil
+}
+
+// ApplyUpdate downloads the asset for an update info and stages replacement.
+func (u *AutoUpdater) ApplyUpdate(ctx context.Context, info *UpdateInfo) error {
+	if info == nil || !info.Available {
+		return ErrNoUpdateAvailable
+	}
+	return u.DownloadAndApply(ctx, info.Asset, "")
+}
+
+// Relaunch restarts the current application executable.
+func Relaunch() error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("determine executable: %w", err)
+	}
+	cmd := exec.Command(exe, os.Args[1:]...)
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("relaunch executable: %w", err)
+	}
+	os.Exit(0)
 	return nil
 }
 
@@ -221,7 +244,7 @@ func CleanupStaleBackup() {
 	}
 	oldPath := exe + ".old"
 	if _, err := os.Stat(oldPath); err == nil {
-		_ = os.Remove(oldPath)
+		_ = os.Remove(oldPath) // slop:ok best-effort stale backup cleanup
 	}
 }
 

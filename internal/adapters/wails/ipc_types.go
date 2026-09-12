@@ -98,3 +98,17 @@ type LogLineEvent struct {
 	Message    string    `json:"message"`
 	Timestamp  time.Time `json:"timestamp"`
 }
+
+type UpdateInfoDTO struct {
+	HasUpdate    bool   `json:"has_update"`
+	Version      string `json:"version"`
+	ReleaseNotes string `json:"release_notes"`
+	DownloadURL  string `json:"download_url"`
+	SHA256       string `json:"sha256"`
+	Size         int64  `json:"size"`
+}
+
+type UpdateApplyResultDTO struct {
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+}

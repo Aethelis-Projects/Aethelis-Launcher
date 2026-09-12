@@ -105,7 +105,7 @@ func (c *DefaultHTTPClient) DownloadFile(
 	if expectedSHA1 != "" {
 		actualHash := hex.EncodeToString(hasher.Sum(nil))
 		if actualHash != expectedSHA1 {
-			_ = os.Remove(partPath)
+			_ = os.Remove(partPath) // slop:ok best-effort cleanup of corrupted download part
 			return fmt.Errorf("sha1 mismatch: expected %s, got %s", expectedSHA1, actualHash)
 		}
 	}

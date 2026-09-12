@@ -211,7 +211,7 @@ func (c *APIClient) AuthorizeXSTS(ctx context.Context, xblToken string) (*XSTSRe
 			XErr    int64  `json:"XErr"`
 			Message string `json:"Message"`
 		}
-		_ = json.Unmarshal(bodyBytes, &errResp)
+		_ = json.Unmarshal(bodyBytes, &errResp) // slop:ok best-effort error decoding, fallback follows below
 		if errResp.XErr != 0 {
 			return nil, &XSTSError{Code: errResp.XErr, Message: errResp.Message}
 		}

@@ -55,41 +55,79 @@ func main() {
 		Platforms:   make(map[string]updater.PlatformAsset),
 	}
 
-	// 1. Process Windows installer (check root of distDir, windows/, and dist/windows/)
-	winCandidates := []string{
-		filepath.Join(*distDirFlag, "NordLauncher-Setup.exe"),
-		filepath.Join(*distDirFlag, "windows", "NordLauncher-Setup.exe"),
-		filepath.Join(*distDirFlag, "dist", "windows", "NordLauncher-Setup.exe"),
+	// 1. Process Windows portable binary (windows-amd64)
+	portableCandidates := []string{
 		filepath.Join(*distDirFlag, "NordLauncher.exe"),
 		filepath.Join(*distDirFlag, "windows", "NordLauncher.exe"),
 		filepath.Join(*distDirFlag, "dist", "windows", "NordLauncher.exe"),
 	}
 
-	var winInstaller string
-	for _, candidate := range winCandidates {
+	var winPortable string
+	for _, candidate := range portableCandidates {
 		if _, err := os.Stat(candidate); err == nil {
-			winInstaller = candidate
+			winPortable = candidate
 			break
 		}
 	}
 
-	if winInstaller != "" {
-		if fi, err := os.Stat(winInstaller); err == nil {
-			hash, err := calcSHA256(winInstaller)
+	if winPortable != "" {
+		if fi, err := os.Stat(winPortable); err == nil {
+			hash, err := calcSHA256(winPortable)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to hash %s: %v\n", winInstaller, err)
+				fmt.Fprintf(os.Stderr, "Failed to hash %s: %v\n", winPortable, err)
 				os.Exit(1)
 			}
 			sig := ed25519.Sign(privKey, []byte(hash))
 			manifest.Platforms["windows-amd64"] = updater.PlatformAsset{
-				URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winInstaller)),
+				URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winPortable)),
 				SHA256:    hash,
 				Signature: base64.StdEncoding.EncodeToString(sig),
 				Size:      fi.Size(),
 			}
-			fmt.Printf("[Manifest] Added windows-amd64: %s (SHA256: %s)\n", filepath.Base(winInstaller), hash)
+			fmt.Printf("[Manifest] Added windows-amd64: %s (SHA256: %s)\n", filepath.Base(winPortable), hash)
 		}
-	} else {
+	}
+
+	// 2. Process Windows NSIS Setup Installer (windows-setup)
+	setupCandidates := []string{
+		filepath.Join(*distDirFlag, "NordLauncher-Setup.exe"),
+		filepath.Join(*distDirFlag, "windows", "NordLauncher-Setup.exe"),
+		filepath.Join(*distDirFlag, "dist", "windows", "NordLauncher-Setup.exe"),
+	}
+
+	var winSetup string
+	for _, candidate := range setupCandidates {
+		if _, err := os.Stat(candidate); err == nil {
+			winSetup = candidate
+			break
+		}
+	}
+
+	if winSetup != "" {
+		if fi, err := os.Stat(winSetup); err == nil {
+			hash, err := calcSHA256(winSetup)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Failed to hash %s: %v\n", winSetup, err)
+				os.Exit(1)
+			}
+			sig := ed25519.Sign(privKey, []byte(hash))
+			manifest.Platforms["windows-setup"] = updater.PlatformAsset{
+				URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winSetup)),
+				SHA256:    hash,
+				Signature: base64.StdEncoding.EncodeToString(sig),
+				Size:      fi.Size(),
+			}
+			fmt.Printf("[Manifest] Added windows-setup: %s (SHA256: %s)\n", filepath.Base(winSetup), hash)
+		}
+	}
+
+	if _, ok := manifest.Platforms["windows-amd64"]; !ok {
+		if setupAsset, ok := manifest.Platforms["windows-setup"]; ok {
+			manifest.Platforms["windows-amd64"] = setupAsset
+		}
+	}
+
+	if winPortable == "" && winSetup == "" {
 		fmt.Printf("[Manifest] Warning: Windows artifact not found in %s\n", *distDirFlag)
 	}
 

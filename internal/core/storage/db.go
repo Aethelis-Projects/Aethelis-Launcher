@@ -33,7 +33,7 @@ func Open(dsn string) (*Database, error) {
 
 	for _, p := range pragmas {
 		if _, err := db.Exec(p); err != nil {
-			_ = db.Close()
+			_ = db.Close() // slop:ok close partially opened database on pragma failure
 			return nil, fmt.Errorf("exec pragma %q: %w", p, err)
 		}
 	}
@@ -41,12 +41,12 @@ func Open(dsn string) (*Database, error) {
 	// Run Goose migrations
 	goose.SetBaseFS(embedMigrations)
 	if err := goose.SetDialect("sqlite3"); err != nil {
-		_ = db.Close()
+		_ = db.Close() // slop:ok close database on goose dialect failure
 		return nil, fmt.Errorf("set goose dialect: %w", err)
 	}
 
 	if err := goose.Up(db, "migrations"); err != nil {
-		_ = db.Close()
+		_ = db.Close() // slop:ok close database on migration failure
 		return nil, fmt.Errorf("run goose up migrations: %w", err)
 	}
 

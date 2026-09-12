@@ -1,24 +1,30 @@
-[16:26:14.344] === NORD LAUNCHER END-TO-END VERIFICATION RUNNER (M3/M4 GATE) ===
-[16:26:14.359] Operating System: windows (amd64)
-[16:26:14.359] 
+[17:32:49.379] === NORD LAUNCHER END-TO-END VERIFICATION RUNNER (M3/M4 GATE) ===
+[17:32:49.394] Operating System: windows (amd64)
+[17:32:49.394] 
 --- STEP 1: Keyring Persistence E2E ---
-[16:26:14.388] PASS: Refresh-token successfully retrieved across keyring instances (Credential Manager persistence verified).
-[16:26:14.389] 
+[17:32:49.427] PASS: Refresh-token successfully retrieved across keyring instances (Credential Manager persistence verified).
+[17:32:49.428] 
 --- STEP 2: Auth Offline UUID v3 Mojang Parity E2E ---
-[16:26:14.389] PASS: Canonical Mojang UUID v3 parity confirmed for Steve (5627dd98-e6be-3c21-b8a8-e92344183641) and Alex (36532b5e-c442-3dbb-a24c-c7e55d0f979a).
-[16:26:14.389] 
+[17:32:49.428] PASS: Canonical Mojang UUID v3 parity confirmed for Steve (5627dd98-e6be-3c21-b8a8-e92344183641) and Alex (36532b5e-c442-3dbb-a24c-c7e55d0f979a).
+[17:32:49.428] 
 --- STEP 3: Java Provisioning Matrix & Hermetic Detection E2E ---
-[16:26:14.389] PASS: Java version matrix mappings verified for all Minecraft epochs.
-[16:26:14.401] PASS: Hermetic JDK 21 discovery and release file parsing verified.
-[16:26:14.401] 
+[17:32:49.428] PASS: Java version matrix mappings verified for all Minecraft epochs.
+[17:32:49.441] PASS: Hermetic JDK 21 discovery and release file parsing verified.
+[17:32:49.441] 
 --- STEP 4: Content Engine (.mrpack & Range Downloader) E2E ---
-[16:26:14.406] PASS: .mrpack index parsing and overrides extraction succeeded.
-[16:26:14.410] PASS: Range-based HTTP 206 download verified with dispatcher.
-[16:26:14.410] 
+[17:32:49.459] PASS: .mrpack index parsing and overrides extraction succeeded.
+[17:32:49.464] PASS: Range-based HTTP 206 download verified with dispatcher.
+[17:32:49.464] 
 --- STEP 5: Process Supervision & Crash Diagnostics E2E ---
-[16:26:14.449] PASS: Supervised process lifecycle (PID: 24792) executed and captured successfully.
-[16:26:14.449] PASS: LogSupervisor correctly classified OutOfMemoryError from simulated game crash log.
-[16:26:14.449] 
+[17:32:49.501] PASS: Supervised process lifecycle (PID: 11812) executed and captured successfully.
+[17:32:49.501] PASS: LogSupervisor correctly classified OutOfMemoryError from simulated game crash log.
+[17:32:49.501] 
+--- STEP 6: InstanceService.Launch Product Lifecycle E2E ---
+[17:32:49.513] Launched clean instance (PID: 23348), waiting for termination...
+[17:32:49.563] PASS: Clean exit (exit 0) transitioned instance state to Idle.
+[17:32:49.575] Launched crashing instance (PID: 22976), waiting for crash classification...
+[17:32:49.625] PASS: Crash exit (exit 1) transitioned instance to Crashed, and onCrash diagnosed out_of_memory (Игра завершилась из-за нехватки оперативной памяти (Out of Memory)).
+[17:32:49.625] 
 =================================================================
-[16:26:14.449]  ALL E2E STAGES PASSED (M3/M4 VERIFIED)
-[16:26:14.449] =================================================================
+[17:32:49.625]  ALL E2E STAGES PASSED (M3/M4 VERIFIED)
+[17:32:49.625] =================================================================

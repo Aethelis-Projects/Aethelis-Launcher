@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -14,27 +16,44 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/ports"
+	"github.com/nord-launcher/launcher/internal/core/updater"
 )
 
 // WailsAdapter connects Wails IPC layer to the Hexagonal Core.
 type WailsAdapter struct {
-	svc         *launch.InstanceService
-	authSvc     *auth.AuthService
-	accountRepo ports.AccountRepository
-	modrinth    *modrinth.Client
-	curseforge  *curseforge.Client
-	fileSys     ports.FileSystem
+	svc          *launch.InstanceService
+	authSvc      *auth.AuthService
+	accountRepo  ports.AccountRepository
+	modrinth     *modrinth.Client
+	curseforge   *curseforge.Client
+	fileSys      ports.FileSystem
 	instancesDir string
+	updater      *updater.AutoUpdater
+	javaDetector ports.JavaDetector
 
 	lastCrashes map[string]*CrashReportDTO
 	mu          sync.RWMutex
 }
 
 func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
-	return &WailsAdapter{
+	a := &WailsAdapter{
 		svc:         svc,
 		lastCrashes: make(map[string]*CrashReportDTO),
 	}
+	if svc != nil {
+		svc.SetOnCrash(func(instanceID string, report *launch.CrashReport) {
+			a.RecordCrash(instanceID, report)
+		})
+	}
+	return a
+}
+
+func (a *WailsAdapter) SetUpdater(u *updater.AutoUpdater) {
+	a.updater = u
+}
+
+func (a *WailsAdapter) SetJavaDetector(jd ports.JavaDetector) {
+	a.javaDetector = jd
 }
 
 func (a *WailsAdapter) SetAuth(authSvc *auth.AuthService, accountRepo ports.AccountRepository) {
@@ -145,6 +164,35 @@ func (a *WailsAdapter) LoginOffline(username string) (*AccountDTO, error) {
 		Type:     string(acc.Type),
 		IsActive: acc.IsActive,
 	}, nil
+}
+
+func (a *WailsAdapter) LoginMicrosoft() (*AccountDTO, error) {
+	if a.authSvc == nil {
+		return nil, fmt.Errorf("auth service not initialized")
+	}
+	acc, err := a.authSvc.StartInteractiveLogin(context.Background(), openBrowserCrossPlatform)
+	if err != nil {
+		return nil, err
+	}
+	return &AccountDTO{
+		UUID:     acc.UUID,
+		Username: acc.Username,
+		Type:     string(acc.Type),
+		IsActive: acc.IsActive,
+	}, nil
+}
+
+func openBrowserCrossPlatform(url string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	case "darwin":
+		cmd = exec.Command("open", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	return cmd.Start()
 }
 
 func (a *WailsAdapter) SearchMods(req SearchModsRequest) ([]ModItemDTO, error) {
@@ -285,4 +333,48 @@ func (a *WailsAdapter) getModsDir(instanceID string) string {
 		return filepath.Join(a.instancesDir, instanceID, "mods")
 	}
 	return filepath.Join("instances", instanceID, "mods")
+}
+
+func (a *WailsAdapter) CheckForUpdates() (*UpdateInfoDTO, error) {
+	if a.updater == nil {
+		return nil, fmt.Errorf("auto-updater not initialized")
+	}
+	info, err := a.updater.CheckForUpdates(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	return &UpdateInfoDTO{
+		HasUpdate:    info.Available,
+		Version:      info.Version,
+		ReleaseNotes: info.Changelog,
+		DownloadURL:  info.Asset.URL,
+		SHA256:       info.Asset.SHA256,
+		Size:         info.Asset.Size,
+	}, nil
+}
+
+func (a *WailsAdapter) ApplyUpdate() (*UpdateApplyResultDTO, error) {
+	if a.updater == nil {
+		return nil, fmt.Errorf("auto-updater not initialized")
+	}
+	info, err := a.updater.CheckForUpdates(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("check update before apply: %w", err)
+	}
+	if !info.Available {
+		return &UpdateApplyResultDTO{
+			Success: false,
+			Message: "No update available",
+		}, nil
+	}
+	if err := a.updater.ApplyUpdate(context.Background(), info); err != nil {
+		return &UpdateApplyResultDTO{
+			Success: false,
+			Message: err.Error(),
+		}, nil
+	}
+	return &UpdateApplyResultDTO{
+		Success: true,
+		Message: fmt.Sprintf("Successfully applied update %s", info.Version),
+	}, nil
 }

@@ -407,7 +407,7 @@ func (d *Dispatcher) downloadSingleURL(
 		bytesToCount = 0
 
 	case http.StatusRequestedRangeNotSatisfiable: // 416: Existing part is invalid
-		_ = os.Remove(partPath)
+		_ = os.Remove(partPath) // slop:ok purge corrupt or mismatched part file before fresh download
 		// Retry fresh request without range
 		file, err = os.OpenFile(partPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 		if err != nil {
@@ -462,7 +462,7 @@ func (d *Dispatcher) downloadSingleURL(
 
 	// Verify checksum of completed .part file
 	if err := d.verifyPartChecksum(partPath, task); err != nil {
-		_ = os.Remove(partPath) // Checksum failed; purge corrupt file
+		_ = os.Remove(partPath) // slop:ok Checksum failed; purge corrupt file
 		if bytesToCount > 0 {
 			totalBytesCounter.Add(-bytesToCount)
 		}
@@ -551,7 +551,7 @@ func (d *Dispatcher) verifyPartChecksum(path string, task *DownloadTask) error {
 func atomicReplace(src, dst string) error {
 	if err := os.Rename(src, dst); err != nil {
 		// On Windows, Rename fails if dst already exists.
-		_ = os.Remove(dst)
+		_ = os.Remove(dst) // slop:ok remove existing destination file on Windows before rename
 		return os.Rename(src, dst)
 	}
 	return nil

@@ -11,108 +11,17 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/domain"
 )
 
-// VersionJSON represents the Mojang/Fabric/Forge version descriptor.
-type VersionJSON struct {
-	ID        string `json:"id"`
-	MainClass string `json:"mainClass"`
-	Arguments *struct {
-		Game []any `json:"game"`
-		JVM  []any `json:"jvm"`
-	} `json:"arguments,omitempty"`
-	MinecraftArguments string    `json:"minecraftArguments,omitempty"`
-	Libraries          []Library `json:"libraries"`
-	AssetIndex         struct {
-		ID  string `json:"id"`
-		URL string `json:"url"`
-	} `json:"assetIndex"`
-	Type string `json:"type"`
-}
+type VersionJSON = domain.VersionJSON
+type Library = domain.Library
+type Rule = domain.Rule
+type LaunchConfig = domain.LaunchConfig
 
-type Library struct {
-	Name      string `json:"name"`
-	Rules     []Rule `json:"rules,omitempty"`
-	Downloads struct {
-		Artifact *struct {
-			Path string `json:"path"`
-			SHA1 string `json:"sha1"`
-			Size int64  `json:"size"`
-			URL  string `json:"url"`
-		} `json:"artifact,omitempty"`
-	} `json:"downloads,omitempty"`
-	Natives map[string]string `json:"natives,omitempty"`
-}
-
-type Rule struct {
-	Action string `json:"action"` // "allow" or "disallow"
-	OS     *struct {
-		Name    string `json:"name,omitempty"`
-		Version string `json:"version,omitempty"`
-		Arch    string `json:"arch,omitempty"`
-	} `json:"os,omitempty"`
-	Features map[string]bool `json:"features,omitempty"`
-}
-
-// LaunchConfig contains runtime parameters for constructing game command line.
-type LaunchConfig struct {
-	Instance       *domain.Instance
-	Account        *domain.Account
-	VersionMeta    *VersionJSON
-	GameDir        string
-	AssetsDir      string
-	LibrariesDir   string
-	NativesDir     string
-	ClientJarPath  string
-	LibraryJarList []string
-	ResolutionW    int
-	ResolutionH    int
-	IsDemo         bool
-}
 
 // EvaluateRules checks if a set of rules permits an argument or library for current OS and architecture.
 func EvaluateRules(rules []Rule, currentOS, currentArch string, features map[string]bool) bool {
-	if len(rules) == 0 {
-		return true // default allow
-	}
-
-	allowed := false
-	for _, r := range rules {
-		match := true
-
-		if r.OS != nil {
-			if r.OS.Name != "" {
-				expectedOS := r.OS.Name
-				if expectedOS == "osx" {
-					expectedOS = "darwin"
-				}
-				if expectedOS != currentOS {
-					match = false
-				}
-			}
-			if r.OS.Arch != "" && r.OS.Arch != currentArch {
-				match = false
-			}
-		}
-
-		if len(r.Features) > 0 {
-			for k, v := range r.Features {
-				if features == nil || features[k] != v {
-					match = false
-					break
-				}
-			}
-		}
-
-		if match {
-			if r.Action == "allow" {
-				allowed = true
-			} else if r.Action == "disallow" {
-				allowed = false
-			}
-		}
-	}
-
-	return allowed
+	return domain.EvaluateRules(rules, currentOS, currentArch, features)
 }
+
 
 // BuildLaunchArguments constructs the complete JVM and game arguments list.
 func BuildLaunchArguments(cfg LaunchConfig) ([]string, error) {
@@ -209,7 +118,7 @@ func BuildLaunchArguments(cfg LaunchConfig) ([]string, error) {
 				// Rule-conditional argument
 				var rules []Rule
 				if rBytes, err := json.Marshal(val["rules"]); err == nil {
-					_ = json.Unmarshal(rBytes, &rules)
+					_ = json.Unmarshal(rBytes, &rules) // slop:ok best-effort unmarshal of rule objects
 				}
 				if EvaluateRules(rules, currentOS, currentArch, features) {
 					switch value := val["value"].(type) {
@@ -254,7 +163,7 @@ func BuildLaunchArguments(cfg LaunchConfig) ([]string, error) {
 			case map[string]any:
 				var rules []Rule
 				if rBytes, err := json.Marshal(val["rules"]); err == nil {
-					_ = json.Unmarshal(rBytes, &rules)
+					_ = json.Unmarshal(rBytes, &rules) // slop:ok best-effort unmarshal of rule objects
 				}
 				if EvaluateRules(rules, currentOS, currentArch, features) {
 					switch value := val["value"].(type) {

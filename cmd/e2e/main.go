@@ -16,10 +16,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nord-launcher/launcher/internal/adapters/fs"
 	javaadapter "github.com/nord-launcher/launcher/internal/adapters/java"
 	"github.com/nord-launcher/launcher/internal/adapters/keyring"
 	"github.com/nord-launcher/launcher/internal/adapters/process"
+	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content"
+	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
@@ -31,7 +34,7 @@ func main() {
 
 	logf := func(format string, a ...interface{}) {
 		msg := fmt.Sprintf("[%s] ", time.Now().Format("15:04:05.000")) + fmt.Sprintf(format, a...) + "\n"
-		_, _ = mw.Write([]byte(msg))
+		_, _ = mw.Write([]byte(msg)) // slop:ok log trace write
 	}
 
 	logf("=== NORD LAUNCHER END-TO-END VERIFICATION RUNNER (M3/M4 GATE) ===")
@@ -68,7 +71,7 @@ func main() {
 		}
 		logf("PASS: Refresh-token successfully retrieved across keyring instances (Credential Manager persistence verified).")
 	}
-	_ = kr2.Delete(testSvc, testUser)
+	_ = kr2.Delete(testSvc, testUser) // slop:ok test credential cleanup
 
 	// =========================================================================
 	// 2. Auth E2E: Mojang Canonical Offline UUID v3 Parity (§5.4)
@@ -127,14 +130,14 @@ func main() {
 	defer os.RemoveAll(tempDir)
 
 	mockRelease := "IMPLEMENTOR=\"Eclipse Adoptium\"\nJAVA_VERSION=\"21.0.2\"\n"
-	_ = os.WriteFile(filepath.Join(tempDir, "release"), []byte(mockRelease), 0644)
+	_ = os.WriteFile(filepath.Join(tempDir, "release"), []byte(mockRelease), 0644) // slop:ok test release file write
 	binDir := filepath.Join(tempDir, "bin")
-	_ = os.MkdirAll(binDir, 0755)
+	_ = os.MkdirAll(binDir, 0755) // slop:ok test bin dir creation
 	javaExeName := "java"
 	if runtime.GOOS == "windows" {
 		javaExeName = "java.exe"
 	}
-	_ = os.WriteFile(filepath.Join(binDir, javaExeName), []byte("mock binary"), 0755)
+	_ = os.WriteFile(filepath.Join(binDir, javaExeName), []byte("mock binary"), 0755) // slop:ok test binary write
 
 	detector := javaadapter.NewJavaDetector(filepath.Dir(tempDir))
 	installations, err := detector.DetectInstallations(context.Background())
@@ -175,13 +178,13 @@ func main() {
 		"files": []
 	}`
 	fIndex, _ := zw.Create("modrinth.index.json")
-	_, _ = fIndex.Write([]byte(indexJSON))
+	_, _ = fIndex.Write([]byte(indexJSON)) // slop:ok write test index
 	fOverride, _ := zw.Create("overrides/config/nord-test.txt")
-	_, _ = fOverride.Write([]byte("custom config value"))
-	_ = zw.Close()
+	_, _ = fOverride.Write([]byte("custom config value")) // slop:ok write test override
+	_ = zw.Close() // slop:ok close zip writer
 
 	mrpackFile := filepath.Join(tempDir, "test.mrpack")
-	_ = os.WriteFile(mrpackFile, mrpackBuf.Bytes(), 0644)
+	_ = os.WriteFile(mrpackFile, mrpackBuf.Bytes(), 0644) // slop:ok write test mrpack
 
 	fMrPack, err := os.Open(mrpackFile)
 	if err != nil {
@@ -205,7 +208,7 @@ func main() {
 		logf("FAIL: Failed to extract .mrpack overrides: %v", err)
 		os.Exit(1)
 	}
-	_ = fMrPack.Close()
+	_ = fMrPack.Close() // slop:ok close test mrpack file
 
 	extractedContent, err := os.ReadFile(filepath.Join(extractTarget, "config", "nord-test.txt"))
 	if err != nil || string(extractedContent) != "custom config value" {
@@ -223,7 +226,7 @@ func main() {
 		} else {
 			w.WriteHeader(http.StatusOK)
 		}
-		_, _ = w.Write(payloadData)
+		_, _ = w.Write(payloadData) // slop:ok mock server payload write
 	}))
 	defer server.Close()
 
@@ -294,13 +297,121 @@ func main() {
 	}
 	logf("PASS: LogSupervisor correctly classified OutOfMemoryError from simulated game crash log.")
 
+	// =========================================================================
+	// 6. InstanceService.Launch Product Lifecycle E2E
+	// =========================================================================
+	logf("\n--- STEP 6: InstanceService.Launch Product Lifecycle E2E ---")
+	e2eClock := clock.NewRealClock()
+	e2eFS := fs.NewOSFileSystem()
+	e2ePM := process.NewProcessManager()
+	e2eKR := keyring.NewMemoryKeyring()
+
+	instSvc := launch.NewInstanceService(nil, e2eFS, e2ePM, e2eKR, e2eClock)
+
+	var lastReport *launch.CrashReport
+	instSvc.SetOnCrash(func(id string, rep *launch.CrashReport) {
+		lastReport = rep
+	})
+
+	e2eAcc := &domain.Account{
+		UUID:        "e2e-steve-uuid",
+		Username:    "Steve",
+		Type:        domain.AccountMicrosoft,
+		AccessToken: "e2e-token",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+	}
+	instSvc.SetActiveAccount(e2eAcc)
+
+	// Create instance for clean exit test
+	cleanInst, err := instSvc.CreateInstance("E2E-Clean-Instance", "1.21.1", domain.LoaderVanilla)
+	if err != nil {
+		logf("FAIL: Create clean instance failed: %v", err)
+		os.Exit(1)
+	}
+
+	var fakeJava string
+	if runtime.GOOS == "windows" {
+		fakeJava = "cmd.exe"
+		cleanInst.JVMArgs = []string{"/c", "exit 0"}
+	} else {
+		fakeJava = "sh"
+		cleanInst.JVMArgs = []string{"-c", "exit 0"}
+	}
+	cleanInst.JavaPath = fakeJava
+
+	cleanPID, err := instSvc.Launch(context.Background(), cleanInst.ID)
+	if err != nil {
+		logf("FAIL: Launch clean instance failed: %v", err)
+		os.Exit(1)
+	}
+	if cleanPID <= 0 {
+		logf("FAIL: Expected positive PID, got %d", cleanPID)
+		os.Exit(1)
+	}
+	logf("Launched clean instance (PID: %d), waiting for termination...", cleanPID)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		cur, _ := instSvc.GetInstance(cleanInst.ID)
+		if cur.State == domain.StateIdle {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	finalClean, _ := instSvc.GetInstance(cleanInst.ID)
+	if finalClean.State != domain.StateIdle {
+		logf("FAIL: Expected clean instance state Idle, got %s", finalClean.State)
+		os.Exit(1)
+	}
+	logf("PASS: Clean exit (exit 0) transitioned instance state to Idle.")
+
+	// Create instance for crash exit test
+	crashInst, err := instSvc.CreateInstance("E2E-Crash-Instance", "1.21.1", domain.LoaderVanilla)
+	if err != nil {
+		logf("FAIL: Create crash instance failed: %v", err)
+		os.Exit(1)
+	}
+	if runtime.GOOS == "windows" {
+		crashInst.JVMArgs = []string{"/c", "echo java.lang.OutOfMemoryError: Java heap space 1>&2 && exit 1"}
+	} else {
+		crashInst.JVMArgs = []string{"-c", "echo 'java.lang.OutOfMemoryError: Java heap space' >&2 && exit 1"}
+	}
+	crashInst.JavaPath = fakeJava
+
+	crashPID, err := instSvc.Launch(context.Background(), crashInst.ID)
+	if err != nil {
+		logf("FAIL: Launch crash instance failed: %v", err)
+		os.Exit(1)
+	}
+	logf("Launched crashing instance (PID: %d), waiting for crash classification...", crashPID)
+
+	deadline = time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		cur, _ := instSvc.GetInstance(crashInst.ID)
+		if cur.State == domain.StateCrashed {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	finalCrash, _ := instSvc.GetInstance(crashInst.ID)
+	if finalCrash.State != domain.StateCrashed {
+		logf("FAIL: Expected crashing instance state Crashed, got %s", finalCrash.State)
+		os.Exit(1)
+	}
+	if lastReport == nil || lastReport.Category != launch.CrashCategoryOOM {
+		logf("FAIL: Expected crash report Category OOM, got %+v", lastReport)
+		os.Exit(1)
+	}
+	logf("PASS: Crash exit (exit 1) transitioned instance to Crashed, and onCrash diagnosed %s (%s).",
+		lastReport.Category, lastReport.Summary)
+
 	logf("\n=================================================================")
 	logf(" ALL E2E STAGES PASSED (M3/M4 VERIFIED)")
 	logf("=================================================================")
 
 	// Save trace to docs/evidence/e2e_m3_m4_trace.txt
 	evidenceDir := filepath.Join(".", "docs", "evidence")
-	_ = os.MkdirAll(evidenceDir, 0755)
+	_ = os.MkdirAll(evidenceDir, 0755) // slop:ok create evidence directory
 	traceFile := filepath.Join(evidenceDir, "e2e_m3_m4_trace.txt")
 	if err := os.WriteFile(traceFile, traceBuf.Bytes(), 0644); err != nil {
 		logf("WARNING: Failed to save trace log: %v", err)

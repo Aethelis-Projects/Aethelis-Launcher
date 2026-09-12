@@ -74,7 +74,7 @@ func NewSystemKeyring() ports.Keyring {
 		return mem
 	}
 	// Clean up probe
-	_ = zkr.Delete(probeSvc, probeUser)
+	_ = zkr.Delete(probeSvc, probeUser) // slop:ok best-effort probe secret cleanup
 
 	return &SystemKeyring{
 		fallback:    mem,

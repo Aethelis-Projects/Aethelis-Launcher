@@ -10,6 +10,7 @@ dist/
 vendor/
 *.out
 coverage*
+*.log
 
 # Node / Frontend
 frontend/node_modules/

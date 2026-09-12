@@ -9,7 +9,25 @@ import type {
   SearchModsRequest,
   ToggleModRequest,
   DeleteModRequest,
+  UpdateInfoDTO,
+  UpdateApplyResultDTO,
 } from "../bindings/ipc_types";
+
+interface WailsAdapterBindings {
+  LoginMicrosoft?: () => Promise<AccountDTO>;
+  CheckForUpdates?: () => Promise<UpdateInfoDTO>;
+  ApplyUpdate?: () => Promise<UpdateApplyResultDTO>;
+}
+
+declare global {
+  interface Window {
+    go?: {
+      wails?: {
+        WailsAdapter?: WailsAdapterBindings;
+      };
+    };
+  }
+}
 
 // Mock store for dev & Vitest environments
 let mockInstances: InstanceDTO[] = [
@@ -173,6 +191,22 @@ export const launcherAPI = {
     return newAcc;
   },
 
+  async loginMicrosoft(): Promise<AccountDTO> {
+    const fn = window.go?.wails?.WailsAdapter?.LoginMicrosoft;
+    if (typeof fn === "function") {
+      return await fn();
+    }
+    const newAcc: AccountDTO = {
+      uuid: `ms-${Date.now()}`,
+      username: "MicrosoftPlayer",
+      type: "microsoft",
+      is_active: true,
+    };
+    mockAccounts = mockAccounts.map((a) => ({ ...a, is_active: false }));
+    mockAccounts.push(newAcc);
+    return newAcc;
+  },
+
   async searchMods(req: SearchModsRequest): Promise<ModItemDTO[]> {
     const q = req.query.toLowerCase().trim();
     return mockModCatalog.filter((m) => {
@@ -224,5 +258,31 @@ export const launcherAPI = {
 
   async getLastCrashReport(_instanceId: string): Promise<CrashReportDTO | null> {
     return null;
+  },
+
+  async checkForUpdates(): Promise<UpdateInfoDTO> {
+    const fn = window.go?.wails?.WailsAdapter?.CheckForUpdates;
+    if (typeof fn === "function") {
+      return await fn();
+    }
+    return {
+      has_update: false,
+      version: "0.1.1",
+      release_notes: "",
+      download_url: "",
+      sha256: "",
+      size: 0,
+    };
+  },
+
+  async applyUpdate(): Promise<UpdateApplyResultDTO> {
+    const fn = window.go?.wails?.WailsAdapter?.ApplyUpdate;
+    if (typeof fn === "function") {
+      return await fn();
+    }
+    return {
+      success: true,
+      message: "Update applied successfully",
+    };
   },
 };

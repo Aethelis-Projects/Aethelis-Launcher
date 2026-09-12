@@ -100,3 +100,17 @@ export interface LogLineEvent {
   message: string;
   timestamp: string;
 }
+
+export interface UpdateInfoDTO {
+  has_update: boolean;
+  version: string;
+  release_notes: string;
+  download_url: string;
+  sha256: string;
+  size: number;
+}
+
+export interface UpdateApplyResultDTO {
+  success: boolean;
+  message?: string;
+}

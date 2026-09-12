@@ -26,10 +26,10 @@ export const AccountManager: Component = () => {
   const handleMicrosoftLogin = async () => {
     setIsLoggingInMS(true);
     try {
-      // Simulate browser auth delay or trigger Wails IPC
-      await new Promise((r) => setTimeout(r, 1200));
-      await launcherAPI.loginOffline("Player_" + Math.floor(Math.random() * 1000));
+      await launcherAPI.loginMicrosoft();
       refetch();
+    } catch (err) {
+      console.error("Microsoft login failed:", err);
     } finally {
       setIsLoggingInMS(false);
     }

@@ -83,7 +83,7 @@ func (d *WindowsJavaDetector) DetectInstallations(ctx context.Context) ([]ports.
 			continue
 		}
 		subkeys, err := k.ReadSubKeyNames(-1)
-		_ = k.Close()
+		_ = k.Close() // slop:ok registry key handle cleanup
 		if err != nil {
 			continue
 		}
@@ -94,7 +94,7 @@ func (d *WindowsJavaDetector) DetectInstallations(ctx context.Context) ([]ports.
 				continue
 			}
 			home, _, err := subKey.GetStringValue("JavaHome")
-			_ = subKey.Close()
+			_ = subKey.Close() // slop:ok registry subkey handle cleanup
 			if err == nil && home != "" {
 				addIfValid(home)
 			}
