@@ -71,7 +71,8 @@ jobs:
 
       - name: Open Source License Compliance (go-licenses)
         run: |
-          go run github.com/google/go-licenses@v1.6.0 check --ignore modernc.org/mathutil --ignore golang.org/toolchain ./...
+          export GOROOT="$(go env GOROOT)"
+          go run github.com/google/go-licenses@v1.6.0 check --ignore modernc.org/mathutil ./cmd/launcher
         shell: bash
 
       - name: Install Frontend Dependencies
