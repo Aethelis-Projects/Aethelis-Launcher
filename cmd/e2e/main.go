@@ -329,15 +329,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	var fakeJava string
 	if runtime.GOOS == "windows" {
-		fakeJava = "cmd.exe"
 		cleanInst.JVMArgs = []string{"/c", "exit 0"}
+		cleanInst.JavaPath = "cmd.exe"
 	} else {
-		fakeJava = "sh"
-		cleanInst.JVMArgs = []string{"-c", "exit 0"}
+		cleanScript := filepath.Join(tempDir, "fake-clean.sh")
+		_ = os.WriteFile(cleanScript, []byte("#!/bin/sh\nexit 0\n"), 0755) // slop:ok write fake clean java runner
+		cleanInst.JavaPath = cleanScript
+		cleanInst.JVMArgs = nil
 	}
-	cleanInst.JavaPath = fakeJava
 
 	cleanPID, err := instSvc.Launch(context.Background(), cleanInst.ID)
 	if err != nil {
@@ -373,10 +373,13 @@ func main() {
 	}
 	if runtime.GOOS == "windows" {
 		crashInst.JVMArgs = []string{"/c", "echo java.lang.OutOfMemoryError: Java heap space 1>&2 && exit 1"}
+		crashInst.JavaPath = "cmd.exe"
 	} else {
-		crashInst.JVMArgs = []string{"-c", "echo 'java.lang.OutOfMemoryError: Java heap space' >&2 && exit 1"}
+		crashScript := filepath.Join(tempDir, "fake-crash.sh")
+		_ = os.WriteFile(crashScript, []byte("#!/bin/sh\necho 'java.lang.OutOfMemoryError: Java heap space' >&2\nexit 1\n"), 0755) // slop:ok write fake crash java runner
+		crashInst.JavaPath = crashScript
+		crashInst.JVMArgs = nil
 	}
-	crashInst.JavaPath = fakeJava
 
 	crashPID, err := instSvc.Launch(context.Background(), crashInst.ID)
 	if err != nil {
