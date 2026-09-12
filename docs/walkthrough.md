@@ -189,3 +189,20 @@
    - Бенчмарк IPC стандартизирован: замер $N = 100$ батчей по 50,000 вызовов, преодолевающий дискретность системного таймера Windows. Метрика строго зафиксирована как *"IPC dispatch latency — p95 средних по батчам 50k операций"*.
 5. **CI Защита Embed**:
    - В шаге `go vet` в `.github/workflows/ci.yml` добавлен поясняющий комментарий о создании стаб-директории `frontend/dist/.gitkeep` для удовлетворения директивы `//go:embed all:dist`.
+
+---
+
+## 8. Артефакты релиза v0.1.2
+
+Релиз v0.1.2 официально опубликован:
+- **Тег**: [v0.1.2](https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/tag/v0.1.2)
+- **Контрольные суммы SHA-256 и размеры (опубликованные бинарники)**:
+  - `NordLauncher.exe`: `bbf8e45ee5b8ccd0fac0ffa902051bb54c5805ada8bb696fe3d39d4203ea76af` (17,489,024 B, ~16.68 MB)
+  - `NordLauncher-Setup.exe`: `b3840520df912df85e671242cd6fd1d07f030e61ea095a9f71d6a1f1b1decb51` (7,071,456 B, ~6.74 MB)
+  - `nord-launcher-v0.1.2-linux-amd64.tar.gz`: `6de51bbe8d556f18ab09c2a68eb8090991d05a5a92d05ee000fc61f8f9f62d90` (6,962,187 B, ~6.64 MB)
+  - `manifest-stable.json`: `de7373132a47d1d7fd06ccf72ef9d35cef6d4c28dcb97ca272e7f52192eeed16` (1,270 B)
+- **CI Траектория & Верификация**:
+  - CI Quality Gate: Run #34702530953 (`master`, коммит `5c299db`) — ✅ PASS (2m59s).
+  - Release Pipeline: Run #34702705234 (`v0.1.2`) — ✅ PASS (3m44s). Все 3 джобы (`Linux`, `Windows`, `Publish`) завершены без ошибок.
+  - Тело релиза GitHub Release v0.1.2 сгенерировано строго идемпотентно и содержит ровно одну ссылку на сравнение версий (`v0.1.0...v0.1.2`) без дублирования секций.
+  - Манифест `manifest-stable.json` верифицирован: содержит 3 платформенных таргета (`windows-amd64`, `windows-setup`, `linux-amd64`), хэши SHA-256 строго идентичны файлам из `SHA256SUMS.txt`, подписи Ed25519 валидны.
