@@ -17,6 +17,7 @@ stages:
 variables:
   GOPATH: "$CI_PROJECT_DIR/.go"
   PNPM_HOME: "$CI_PROJECT_DIR/.pnpm-store"
+  DEBIAN_FRONTEND: "noninteractive"
 
 cache:
   key:
@@ -85,14 +86,14 @@ frontend-quality-gate:
 backend-quality-gate:
   stage: test
   image:
-    name: golang:bookworm
+    name: ubuntu:24.04
     entrypoint: [""]
   before_script:
-    - export PATH="$GOPATH/bin:$PATH"
-    - git config --global --add safe.directory "$CI_PROJECT_DIR"
     - apt-get update -y
-    - apt-get install -y git libgtk-4-dev libsoup-3.0-dev pkg-config nodejs
-    - apt-get install -y libwebkitgtk-6.0-dev || apt-get install -y libwebkit2gtk-4.1-dev || true
+    - apt-get install -y curl git gcc libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config nodejs ca-certificates
+    - curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz | tar -C /usr/local -xz
+    - export PATH="/usr/local/go/bin:$GOPATH/bin:$PATH"
+    - git config --global --add safe.directory "$CI_PROJECT_DIR"
     - mkdir -p frontend/dist && touch frontend/dist/.gitkeep
   script:
     # 1. Verify IPC codegen parity
@@ -117,16 +118,16 @@ backend-quality-gate:
 build-launcher:
   stage: build
   image:
-    name: golang:bookworm
+    name: ubuntu:24.04
     entrypoint: [""]
   needs:
     - frontend-quality-gate
     - backend-quality-gate
   before_script:
-    - export PATH="$GOPATH/bin:$PATH"
     - apt-get update -y
-    - apt-get install -y git libgtk-4-dev libsoup-3.0-dev pkg-config nodejs
-    - apt-get install -y libwebkitgtk-6.0-dev || apt-get install -y libwebkit2gtk-4.1-dev || true
+    - apt-get install -y curl git gcc libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config nodejs ca-certificates
+    - curl -fsSL https://go.dev/dl/go1.23.6.linux-amd64.tar.gz | tar -C /usr/local -xz
+    - export PATH="/usr/local/go/bin:$GOPATH/bin:$PATH"
   script:
     - mkdir -p build
     - go build -ldflags="-s -w" -o build/nord-launcher cmd/launcher/main.go
