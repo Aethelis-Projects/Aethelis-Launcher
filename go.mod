@@ -2,6 +2,8 @@ module github.com/nord-launcher/launcher
 
 go 1.26.0
 
+toolchain go1.26.8
+
 require (
 	github.com/google/go-licenses v1.6.0
 	github.com/pressly/goose/v3 v3.28.0
