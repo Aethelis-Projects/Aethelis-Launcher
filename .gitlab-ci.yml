@@ -30,7 +30,7 @@ cache:
 
 code-hygiene:
   stage: lint
-  image: node:22-alpine
+  image: node:22-bookworm
   script:
     - node scripts/code_hygiene_lint.js
 
@@ -38,8 +38,7 @@ frontend-quality-gate:
   stage: test
   image: node:22-bookworm
   before_script:
-    - corepack enable
-    - corepack prepare pnpm@latest --activate
+    - npm install -g pnpm
     - pnpm config set store-dir "$PNPM_HOME"
     - cd frontend
     - pnpm install
@@ -85,8 +84,9 @@ backend-quality-gate:
   image: golang:bookworm
   before_script:
     - git config --global --add safe.directory "$CI_PROJECT_DIR"
-    - apt-get update
-    - apt-get install -y git libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config nodejs
+    - apt-get update -y
+    - apt-get install -y git libgtk-4-dev libsoup-3.0-dev pkg-config nodejs
+    - apt-get install -y libwebkitgtk-6.0-dev || apt-get install -y libwebkit2gtk-4.1-dev || true
     - mkdir -p frontend/dist && touch frontend/dist/.gitkeep
   script:
     # 1. Verify IPC codegen parity
@@ -115,8 +115,9 @@ build-launcher:
     - frontend-quality-gate
     - backend-quality-gate
   before_script:
-    - apt-get update
-    - apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config nodejs
+    - apt-get update -y
+    - apt-get install -y git libgtk-4-dev libsoup-3.0-dev pkg-config nodejs
+    - apt-get install -y libwebkitgtk-6.0-dev || apt-get install -y libwebkit2gtk-4.1-dev || true
   script:
     - mkdir -p build
     - go build -ldflags="-s -w" -o build/nord-launcher cmd/launcher/main.go
