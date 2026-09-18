@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	version           = "0.1.5"
+	version           = "0.1.6"
 	CurseForgeKey     = ""
 	MicrosoftClientID = auth.DefaultClientID
 	UpdateChannel     = "stable"
@@ -129,6 +129,7 @@ func main() {
 	adapter.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
 	adapter.SetUpdater(autoUpdater)
 	adapter.SetJavaDetector(javaDetector)
+	adapter.SetVersion(version)
 
 	coreInitDuration := time.Since(startInit)
 

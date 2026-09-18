@@ -92,6 +92,14 @@ func NewAutoUpdater(currentVersion, manifestURL string, publicKey ed25519.Public
 	}
 }
 
+// CurrentVersion returns the currently configured version string.
+func (u *AutoUpdater) CurrentVersion() string {
+	if u == nil {
+		return ""
+	}
+	return u.currentVersion
+}
+
 // CurrentPlatformKey returns platform key e.g. "windows-amd64" or "linux-amd64".
 func CurrentPlatformKey() string {
 	return fmt.Sprintf("%s-%s", runtime.GOOS, runtime.GOARCH)

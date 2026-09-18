@@ -27,6 +27,7 @@ type WailsAdapter struct {
 	modrinth     *modrinth.Client
 	curseforge   *curseforge.Client
 	fileSys      ports.FileSystem
+	version      string
 	instancesDir string
 	updater      *updater.AutoUpdater
 	relauncher   updater.RelauncherFunc
@@ -48,6 +49,24 @@ func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 		})
 	}
 	return a
+}
+
+func (a *WailsAdapter) SetVersion(v string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.version = strings.TrimPrefix(v, "v")
+}
+
+func (a *WailsAdapter) GetCurrentVersion() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.version != "" {
+		return a.version
+	}
+	if a.updater != nil {
+		return a.updater.CurrentVersion()
+	}
+	return ""
 }
 
 func (a *WailsAdapter) SetUpdater(u *updater.AutoUpdater) {

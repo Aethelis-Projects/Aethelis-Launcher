@@ -1,4 +1,4 @@
-import { Component, createSignal, Show } from "solid-js";
+import { Component, createSignal, Show, onMount } from "solid-js";
 import { RefreshCw, Download, CheckCircle2, AlertCircle, ShieldCheck, Loader2, RotateCcw } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { UpdateInfoDTO, UpdateApplyResultDTO } from "../../bindings/ipc_types";
@@ -26,9 +26,27 @@ export const formatVersion = (v?: string): string => {
 export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
   const [status, setStatus] = createSignal<UpdateStatus>("idle");
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfoDTO | null>(null);
+  const [installedVersion, setInstalledVersion] = createSignal<string>("");
   const [applyResult, setApplyResult] = createSignal<UpdateApplyResultDTO | null>(null);
   const [errorMessage, setErrorMessage] = createSignal<string>("");
   const currentChannel = () => props.channel || "stable";
+
+  onMount(async () => {
+    try {
+      const ver = await launcherAPI.getCurrentVersion();
+      if (ver) {
+        setInstalledVersion(ver);
+      }
+    } catch (_err: unknown) {
+      // D1: on runtime failure/race, installedVersion remains empty string (clean display, no crash, no hardcoded fallback)
+      setInstalledVersion("");
+    }
+  });
+
+  const currentDisplayVersion = () => {
+    const raw = updateInfo()?.current_version || installedVersion();
+    return formatVersion(raw);
+  };
 
   const handleCheck = async () => {
     setStatus("checking");
@@ -121,7 +139,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
           <div class="flex flex-col gap-1">
             <span class="text-xs text-zinc-400 font-mono">Installed Version</span>
             <span class="text-lg font-bold font-mono text-white" data-testid="current-version-text">
-              {formatVersion(updateInfo()?.current_version || "0.1.4")}
+              {currentDisplayVersion()}
             </span>
           </div>
 
@@ -175,7 +193,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
           <div class="flex flex-col">
             <span class="font-semibold text-sm text-white">You are running the latest version</span>
             <span class="text-xs text-zinc-400 mt-0.5">
-              Nord Launcher {formatVersion(updateInfo()?.current_version || "0.1.4")} is up to date.
+              Nord Launcher {currentDisplayVersion()} is up to date.
             </span>
           </div>
         </section>

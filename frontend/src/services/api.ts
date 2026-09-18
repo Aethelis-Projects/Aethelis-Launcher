@@ -14,10 +14,22 @@ import type {
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
-  LoginMicrosoft?: () => Promise<AccountDTO>;
+  GetCurrentVersion?: () => Promise<string>;
   CheckForUpdates?: () => Promise<UpdateInfoDTO>;
   ApplyUpdate?: () => Promise<UpdateApplyResultDTO>;
   RestartApplication?: () => Promise<void>;
+  LoginMicrosoft?: () => Promise<AccountDTO>;
+  LoginOffline?: (username: string) => Promise<AccountDTO>;
+  ListInstances?: () => Promise<InstanceDTO[]>;
+  CreateInstance?: (req: CreateInstanceRequest) => Promise<InstanceDTO>;
+  LaunchInstance?: (id: string) => Promise<LaunchResponse>;
+  ListAccounts?: () => Promise<AccountDTO[]>;
+  SetActiveAccount?: (uuid: string) => Promise<void>;
+  SearchMods?: (req: SearchModsRequest) => Promise<ModItemDTO[]>;
+  ListInstalledMods?: (instanceId: string) => Promise<InstalledModDTO[]>;
+  ToggleMod?: (req: ToggleModRequest) => Promise<void>;
+  DeleteMod?: (req: DeleteModRequest) => Promise<void>;
+  GetLastCrashReport?: (instanceId: string) => Promise<CrashReportDTO | null>;
   [key: string]: unknown;
 }
 
@@ -224,10 +236,10 @@ const mockModCatalog: ModItemDTO[] = [
 
 let mockUpdateInfo: UpdateInfoDTO = {
   has_update: false,
-  version: "0.1.5",
-  current_version: "0.1.5",
+  version: "0.1.6",
+  current_version: "0.1.6",
   release_date: "2026-09-18T12:00:00Z",
-  release_notes: "Nord Launcher v0.1.5 (stable channel) release.",
+  release_notes: "Nord Launcher v0.1.6 (stable channel) release.",
   download_url: "",
   sha256: "",
   size: 0,
@@ -251,10 +263,10 @@ export const launcherAPI = {
   resetMockUpdater(): void {
     mockUpdateInfo = {
       has_update: false,
-      version: "0.1.5",
-      current_version: "0.1.5",
+      version: "0.1.6",
+      current_version: "0.1.6",
       release_date: "2026-09-18T12:00:00Z",
-      release_notes: "Nord Launcher v0.1.5 (stable channel) release.",
+      release_notes: "Nord Launcher v0.1.6 (stable channel) release.",
       download_url: "",
       sha256: "",
       size: 0,
@@ -266,53 +278,81 @@ export const launcherAPI = {
     };
   },
 
+  async getCurrentVersion(): Promise<string> {
+    return invokeWails("GetCurrentVersion", () => "0.1.6");
+  },
+
   async listInstances(): Promise<InstanceDTO[]> {
-    return [...mockInstances];
+    return invokeWails("ListInstances", () => [...mockInstances]);
   },
 
   async createInstance(req: CreateInstanceRequest): Promise<InstanceDTO> {
-    const newInst: InstanceDTO = {
-      id: `${req.name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`,
-      name: req.name,
-      game_version: req.game_version,
-      loader: req.loader,
-      state: "idle",
-      total_play_seconds: 0,
-    };
-    mockInstances.push(newInst);
-    return newInst;
+    return invokeWails(
+      "CreateInstance",
+      () => {
+        const newInst: InstanceDTO = {
+          id: `${req.name.toLowerCase().replace(/\s+/g, "-")}-${Date.now()}`,
+          name: req.name,
+          game_version: req.game_version,
+          loader: req.loader,
+          state: "idle",
+          total_play_seconds: 0,
+        };
+        mockInstances.push(newInst);
+        return newInst;
+      },
+      req
+    );
   },
 
   async launchInstance(id: string): Promise<LaunchResponse> {
-    const inst = mockInstances.find((i) => i.id === id);
-    if (!inst) {
-      return { success: false, error: "Instance not found" };
-    }
-    inst.state = "running";
-    return { success: true, pid: Math.floor(Math.random() * 8000) + 1000 };
+    return invokeWails(
+      "LaunchInstance",
+      () => {
+        const inst = mockInstances.find((i) => i.id === id);
+        if (!inst) {
+          return { success: false, error: "Instance not found" };
+        }
+        inst.state = "running";
+        return { success: true, pid: Math.floor(Math.random() * 8000) + 1000 };
+      },
+      id
+    );
   },
 
   async listAccounts(): Promise<AccountDTO[]> {
-    return [...mockAccounts];
+    return invokeWails("ListAccounts", () => [...mockAccounts]);
   },
 
   async setActiveAccount(uuid: string): Promise<void> {
-    mockAccounts = mockAccounts.map((a) => ({
-      ...a,
-      is_active: a.uuid === uuid,
-    }));
+    return invokeWails(
+      "SetActiveAccount",
+      () => {
+        mockAccounts = mockAccounts.map((a) => ({
+          ...a,
+          is_active: a.uuid === uuid,
+        }));
+      },
+      uuid
+    );
   },
 
   async loginOffline(username: string): Promise<AccountDTO> {
-    const newAcc: AccountDTO = {
-      uuid: `offline-${Date.now()}`,
-      username,
-      type: "offline",
-      is_active: true,
-    };
-    mockAccounts = mockAccounts.map((a) => ({ ...a, is_active: false }));
-    mockAccounts.push(newAcc);
-    return newAcc;
+    return invokeWails(
+      "LoginOffline",
+      () => {
+        const newAcc: AccountDTO = {
+          uuid: `offline-${Date.now()}`,
+          username,
+          type: "offline",
+          is_active: true,
+        };
+        mockAccounts = mockAccounts.map((a) => ({ ...a, is_active: false }));
+        mockAccounts.push(newAcc);
+        return newAcc;
+      },
+      username
+    );
   },
 
   async loginMicrosoft(): Promise<AccountDTO> {
@@ -330,42 +370,65 @@ export const launcherAPI = {
   },
 
   async searchMods(req: SearchModsRequest): Promise<ModItemDTO[]> {
-    const q = req.query.toLowerCase().trim();
-    return mockModCatalog.filter((m) => {
-      if (req.source && m.source !== req.source) return false;
-      if (!q) return true;
-      return (
-        m.name.toLowerCase().includes(q) ||
-        m.summary.toLowerCase().includes(q) ||
-        m.slug.toLowerCase().includes(q)
-      );
-    });
-  },
-
-  async listInstalledMods(instanceId: string): Promise<InstalledModDTO[]> {
-    return [...(mockInstalledMods[instanceId] || [])];
-  },
-
-  async toggleMod(req: ToggleModRequest): Promise<void> {
-    const list = mockInstalledMods[req.instance_id] || [];
-    const target = list.find((m) => m.file_name === req.file_name);
-    if (target) {
-      target.enabled = req.enable;
-      if (req.enable && target.file_name.endsWith(".disabled")) {
-        target.file_name = target.file_name.replace(/\.disabled$/, "");
-      } else if (!req.enable && !target.file_name.endsWith(".disabled")) {
-        target.file_name = `${target.file_name}.disabled`;
-      }
-    }
-  },
-
-  async deleteMod(req: DeleteModRequest): Promise<void> {
-    const list = mockInstalledMods[req.instance_id] || [];
-    mockInstalledMods[req.instance_id] = list.filter(
-      (m) => m.file_name !== req.file_name
+    return invokeWails(
+      "SearchMods",
+      () => {
+        const q = req.query.toLowerCase().trim();
+        return mockModCatalog.filter((m) => {
+          if (req.source && m.source !== req.source) return false;
+          if (!q) return true;
+          return (
+            m.name.toLowerCase().includes(q) ||
+            m.summary.toLowerCase().includes(q) ||
+            m.slug.toLowerCase().includes(q)
+          );
+        });
+      },
+      req
     );
   },
 
+  async listInstalledMods(instanceId: string): Promise<InstalledModDTO[]> {
+    return invokeWails(
+      "ListInstalledMods",
+      () => [...(mockInstalledMods[instanceId] || [])],
+      instanceId
+    );
+  },
+
+  async toggleMod(req: ToggleModRequest): Promise<void> {
+    return invokeWails(
+      "ToggleMod",
+      () => {
+        const list = mockInstalledMods[req.instance_id] || [];
+        const target = list.find((m) => m.file_name === req.file_name);
+        if (target) {
+          target.enabled = req.enable;
+          if (req.enable && target.file_name.endsWith(".disabled")) {
+            target.file_name = target.file_name.replace(/\.disabled$/, "");
+          } else if (!req.enable && !target.file_name.endsWith(".disabled")) {
+            target.file_name = `${target.file_name}.disabled`;
+          }
+        }
+      },
+      req
+    );
+  },
+
+  async deleteMod(req: DeleteModRequest): Promise<void> {
+    return invokeWails(
+      "DeleteMod",
+      () => {
+        const list = mockInstalledMods[req.instance_id] || [];
+        mockInstalledMods[req.instance_id] = list.filter(
+          (m) => m.file_name !== req.file_name
+        );
+      },
+      req
+    );
+  },
+
+  // Note (D2): installMod remains demo mock; backend implementation scheduled for v0.2.0.
   async installMod(instanceId: string, mod: ModItemDTO): Promise<void> {
     if (!mockInstalledMods[instanceId]) {
       mockInstalledMods[instanceId] = [];
@@ -380,8 +443,8 @@ export const launcherAPI = {
     });
   },
 
-  async getLastCrashReport(_instanceId: string): Promise<CrashReportDTO | null> {
-    return null;
+  async getLastCrashReport(instanceId: string): Promise<CrashReportDTO | null> {
+    return invokeWails("GetLastCrashReport", () => null, instanceId);
   },
 
   async checkForUpdates(): Promise<UpdateInfoDTO> {

@@ -356,6 +356,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"CheckForUpdates",
 		"ApplyUpdate",
 		"RestartApplication",
+		"GetCurrentVersion",
 		"LoginMicrosoft",
 		"LoginOffline",
 		"ListInstances",
@@ -427,6 +428,38 @@ func TestWailsAdapter_WailsV3BindingCall_CheckForUpdates(t *testing.T) {
 	}
 	if !dto.HasUpdate || dto.Version != "0.1.4" || dto.CurrentVersion != "0.1.3" {
 		t.Fatalf("unexpected DTO: %+v", dto)
+	}
+}
+
+func TestWailsAdapter_GetCurrentVersion(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetVersion("v0.1.6")
+
+	if ver := adapter.GetCurrentVersion(); ver != "0.1.6" {
+		t.Fatalf("expected version 0.1.6, got %q", ver)
+	}
+
+	bindings := application.NewBindings(nil, nil)
+	_ = bindings.Add(application.NewService(adapter))
+
+	method := bindings.Get(&application.CallOptions{
+		MethodName: "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter.GetCurrentVersion",
+	})
+	if method == nil {
+		t.Fatalf("method GetCurrentVersion not found in bindings")
+	}
+
+	result, err := method.Call(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+
+	verStr, ok := result.(string)
+	if !ok {
+		t.Fatalf("expected string, got %T", result)
+	}
+	if verStr != "0.1.6" {
+		t.Fatalf("expected 0.1.6, got %q", verStr)
 	}
 }
 
