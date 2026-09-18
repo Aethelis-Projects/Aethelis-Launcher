@@ -30,6 +30,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 type mockProcHandle struct{}
@@ -337,6 +338,95 @@ func TestWailsAdapter_Updater(t *testing.T) {
 	}
 	if resNoUpdate.Success || resNoUpdate.Message != "No update available" {
 		t.Errorf("expected success=false, message='No update available', got %+v", resNoUpdate)
+	}
+}
+
+func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
+	// Initialize global application if not already initialized
+	_ = application.New(application.Options{})
+
+	bindings := application.NewBindings(nil, nil)
+	adapter := wails.NewWailsAdapter(nil)
+	err := bindings.Add(application.NewService(adapter))
+	if err != nil {
+		t.Fatalf("bindings.Add failed: %v", err)
+	}
+
+	expectedMethods := []string{
+		"CheckForUpdates",
+		"ApplyUpdate",
+		"RestartApplication",
+		"LoginMicrosoft",
+		"LoginOffline",
+		"ListInstances",
+		"CreateInstance",
+		"LaunchInstance",
+		"ListAccounts",
+		"SetActiveAccount",
+		"SearchMods",
+		"ListInstalledMods",
+		"ToggleMod",
+		"DeleteMod",
+		"GetLastCrashReport",
+	}
+
+	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
+
+	for _, methodName := range expectedMethods {
+		fqn := prefix + methodName
+		method := bindings.Get(&application.CallOptions{
+			MethodName: fqn,
+		})
+		if method == nil {
+			t.Errorf("Method %s was not registered in Wails v3 bindings (expected FQN: %s)", methodName, fqn)
+		}
+	}
+}
+
+func TestWailsAdapter_WailsV3BindingCall_CheckForUpdates(t *testing.T) {
+	manifest := updater.UpdateManifest{
+		Version:     "0.1.4",
+		ReleaseDate: time.Now(),
+		Changelog:   "Test v0.1.4 changelog",
+		Platforms: map[string]updater.PlatformAsset{
+			updater.CurrentPlatformKey(): {
+				URL:       "http://example.com/asset.exe",
+				SHA256:    "abcd",
+				Signature: "sig",
+				Size:      12345,
+			},
+		},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(manifest)
+	}))
+	defer server.Close()
+
+	u := updater.NewAutoUpdater("0.1.3", server.URL, updater.GetDefaultPublicKey(), server.Client())
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetUpdater(u)
+
+	bindings := application.NewBindings(nil, nil)
+	_ = bindings.Add(application.NewService(adapter))
+
+	method := bindings.Get(&application.CallOptions{
+		MethodName: "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter.CheckForUpdates",
+	})
+	if method == nil {
+		t.Fatalf("method not found")
+	}
+
+	result, err := method.Call(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+
+	dto, ok := result.(*wails.UpdateInfoDTO)
+	if !ok {
+		t.Fatalf("expected *UpdateInfoDTO, got %T", result)
+	}
+	if !dto.HasUpdate || dto.Version != "0.1.4" || dto.CurrentVersion != "0.1.3" {
+		t.Fatalf("unexpected DTO: %+v", dto)
 	}
 }
 

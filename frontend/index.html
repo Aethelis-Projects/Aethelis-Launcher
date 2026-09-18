@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
@@ -7,6 +7,13 @@
   </head>
   <body class="bg-nord-dark text-zinc-100 antialiased overflow-hidden select-none">
     <div id="root"></div>
+    <script type="module">
+      try {
+        const dynamicImport = new Function("u", "return import(u)");
+        const wails = await dynamicImport("/wails/runtime.js");
+        window.wails = wails;
+      } catch (_) {}
+    </script>
     <script type="module" src="/src/index.tsx"></script>
   </body>
 </html>

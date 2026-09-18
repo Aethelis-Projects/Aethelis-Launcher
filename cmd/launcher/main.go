@@ -30,7 +30,7 @@ import (
 )
 
 var (
-	version           = "0.1.4"
+	version           = "0.1.5"
 	CurseForgeKey     = ""
 	MicrosoftClientID = auth.DefaultClientID
 	UpdateChannel     = "stable"

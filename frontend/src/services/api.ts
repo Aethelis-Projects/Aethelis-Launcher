@@ -18,6 +18,12 @@ interface WailsAdapterBindings {
   CheckForUpdates?: () => Promise<UpdateInfoDTO>;
   ApplyUpdate?: () => Promise<UpdateApplyResultDTO>;
   RestartApplication?: () => Promise<void>;
+  [key: string]: unknown;
+}
+
+interface WailsRuntimeCall {
+  ByName: (methodName: string, ...args: unknown[]) => Promise<unknown>;
+  ByID?: (methodID: number, ...args: unknown[]) => Promise<unknown>;
 }
 
 declare global {
@@ -27,7 +33,81 @@ declare global {
         WailsAdapter?: WailsAdapterBindings;
       };
     };
+    wails?: {
+      Call?: WailsRuntimeCall;
+      [key: string]: unknown;
+    };
   }
+}
+
+const WAILS_ADAPTER_PREFIX =
+  "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter";
+
+let wailsCallPromise: Promise<WailsRuntimeCall | null> | null = null;
+
+export async function getWailsCall(): Promise<WailsRuntimeCall | null> {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  if (window.wails?.Call?.ByName) {
+    return window.wails.Call;
+  }
+  if (!wailsCallPromise) {
+    wailsCallPromise = (async () => {
+      try {
+        const dynamicImport = new Function("u", "return import(u)");
+        const mod = await dynamicImport("/wails/runtime.js");
+        if (mod?.Call?.ByName) {
+          window.wails = { ...window.wails, ...mod };
+          return mod.Call;
+        }
+      } catch {
+        // Not running in Wails desktop webview (Vitest / pure browser / dev server)
+      }
+      return null;
+    })();
+  }
+  return await wailsCallPromise;
+}
+
+/**
+ * Detects whether the code is running in a development or unit-test environment.
+ * Per review requirement D2: uses strictly import.meta.env to prevent fragile runtime process dependencies.
+ */
+function isDevEnvironment(): boolean {
+  return Boolean(
+    typeof import.meta !== "undefined" &&
+      import.meta.env &&
+      (import.meta.env.DEV || import.meta.env.MODE === "test")
+  );
+}
+
+async function invokeWails<T>(
+  methodName: string,
+  fallback: () => Promise<T> | T,
+  ...args: unknown[]
+): Promise<T> {
+  if (typeof window !== "undefined") {
+    const fn = window.go?.wails?.WailsAdapter?.[methodName];
+    if (typeof fn === "function") {
+      return (await (fn as (...args: unknown[]) => Promise<T>)(...args));
+    }
+  }
+
+  const call = await getWailsCall();
+  if (call) {
+    return (await call.ByName(`${WAILS_ADAPTER_PREFIX}.${methodName}`, ...args)) as T;
+  }
+
+  // P1 Blocker: Silent mocks are strictly forbidden in production.
+  // Fallback to mock is permitted only in dev / test environments.
+  if (isDevEnvironment()) {
+    return await fallback();
+  }
+
+  throw new Error(
+    `Wails IPC bridge unavailable for ${methodName}. Application is not connected to desktop runtime.`
+  );
 }
 
 // Mock store for dev & Vitest environments
@@ -144,10 +224,10 @@ const mockModCatalog: ModItemDTO[] = [
 
 let mockUpdateInfo: UpdateInfoDTO = {
   has_update: false,
-  version: "0.1.4",
-  current_version: "0.1.4",
+  version: "0.1.5",
+  current_version: "0.1.5",
   release_date: "2026-09-18T12:00:00Z",
-  release_notes: "Nord Launcher v0.1.4 (stable channel) release.",
+  release_notes: "Nord Launcher v0.1.5 (stable channel) release.",
   download_url: "",
   sha256: "",
   size: 0,
@@ -171,10 +251,10 @@ export const launcherAPI = {
   resetMockUpdater(): void {
     mockUpdateInfo = {
       has_update: false,
-      version: "0.1.4",
-      current_version: "0.1.4",
+      version: "0.1.5",
+      current_version: "0.1.5",
       release_date: "2026-09-18T12:00:00Z",
-      release_notes: "Nord Launcher v0.1.4 (stable channel) release.",
+      release_notes: "Nord Launcher v0.1.5 (stable channel) release.",
       download_url: "",
       sha256: "",
       size: 0,
@@ -236,19 +316,17 @@ export const launcherAPI = {
   },
 
   async loginMicrosoft(): Promise<AccountDTO> {
-    const fn = window.go?.wails?.WailsAdapter?.LoginMicrosoft;
-    if (typeof fn === "function") {
-      return await fn();
-    }
-    const newAcc: AccountDTO = {
-      uuid: `ms-${Date.now()}`,
-      username: "MicrosoftPlayer",
-      type: "microsoft",
-      is_active: true,
-    };
-    mockAccounts = mockAccounts.map((a) => ({ ...a, is_active: false }));
-    mockAccounts.push(newAcc);
-    return newAcc;
+    return invokeWails("LoginMicrosoft", () => {
+      const newAcc: AccountDTO = {
+        uuid: `ms-${Date.now()}`,
+        username: "MicrosoftPlayer",
+        type: "microsoft",
+        is_active: true,
+      };
+      mockAccounts = mockAccounts.map((a) => ({ ...a, is_active: false }));
+      mockAccounts.push(newAcc);
+      return newAcc;
+    });
   },
 
   async searchMods(req: SearchModsRequest): Promise<ModItemDTO[]> {
@@ -283,7 +361,9 @@ export const launcherAPI = {
 
   async deleteMod(req: DeleteModRequest): Promise<void> {
     const list = mockInstalledMods[req.instance_id] || [];
-    mockInstalledMods[req.instance_id] = list.filter((m) => m.file_name !== req.file_name);
+    mockInstalledMods[req.instance_id] = list.filter(
+      (m) => m.file_name !== req.file_name
+    );
   },
 
   async installMod(instanceId: string, mod: ModItemDTO): Promise<void> {
@@ -305,25 +385,14 @@ export const launcherAPI = {
   },
 
   async checkForUpdates(): Promise<UpdateInfoDTO> {
-    const fn = window.go?.wails?.WailsAdapter?.CheckForUpdates;
-    if (typeof fn === "function") {
-      return await fn();
-    }
-    return { ...mockUpdateInfo };
+    return invokeWails("CheckForUpdates", () => ({ ...mockUpdateInfo }));
   },
 
   async applyUpdate(): Promise<UpdateApplyResultDTO> {
-    const fn = window.go?.wails?.WailsAdapter?.ApplyUpdate;
-    if (typeof fn === "function") {
-      return await fn();
-    }
-    return { ...mockApplyResult };
+    return invokeWails("ApplyUpdate", () => ({ ...mockApplyResult }));
   },
 
   async restartApplication(): Promise<void> {
-    const fn = window.go?.wails?.WailsAdapter?.RestartApplication;
-    if (typeof fn === "function") {
-      await fn();
-    }
+    return invokeWails("RestartApplication", () => {});
   },
 };
