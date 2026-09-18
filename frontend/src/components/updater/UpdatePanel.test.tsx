@@ -13,16 +13,16 @@ describe("UpdatePanel Component", () => {
     render(() => <UpdatePanel channel="stable" />);
     expect(screen.getByText("Software Updates")).toBeTruthy();
     expect(screen.getByText("Channel: stable")).toBeTruthy();
-    expect(screen.getByTestId("current-version-text").textContent).toContain("v0.1.3");
+    expect(screen.getByTestId("current-version-text").textContent).toContain("v0.1.4");
     expect(screen.getByTestId("check-updates-button").textContent).toContain("Check for updates");
   });
 
   it("shows up to date banner when no new version exists", async () => {
     launcherAPI.setMockUpdateInfo({
       has_update: false,
-      version: "0.1.3",
-      current_version: "0.1.3",
-      release_date: "2026-09-12T12:00:00Z",
+      version: "0.1.4",
+      current_version: "0.1.4",
+      release_date: "2026-09-18T12:00:00Z",
       release_notes: "Latest stable version",
       download_url: "",
       sha256: "",
@@ -41,7 +41,7 @@ describe("UpdatePanel Component", () => {
     launcherAPI.setMockUpdateInfo({
       has_update: true,
       version: "0.2.0",
-      current_version: "0.1.3",
+      current_version: "0.1.4",
       release_date: "2026-09-15T10:00:00Z",
       release_notes: "Nord Launcher v0.2.0: Fabric, Quilt, and NeoForge modloader support.",
       download_url: "https://example.com/download/NordLauncher.exe",
@@ -66,7 +66,7 @@ describe("UpdatePanel Component", () => {
     launcherAPI.setMockUpdateInfo({
       has_update: true,
       version: "0.2.0",
-      current_version: "0.1.3",
+      current_version: "0.1.4",
       release_date: "2026-09-15T10:00:00Z",
       release_notes: "Feature release",
       download_url: "https://example.com/download",

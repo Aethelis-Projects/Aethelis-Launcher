@@ -272,3 +272,44 @@ func TestRelaunch_Mock(t *testing.T) {
 		t.Errorf("expected DefaultRelauncher to be called")
 	}
 }
+
+func TestSignAndVerifyPayload_CanonicalDomain(t *testing.T) {
+	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate ed25519 keypair: %v", err)
+	}
+
+	otherPubKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate other keypair: %v", err)
+	}
+
+	payload := []byte("nord-launcher-v0.1.4-production-binary-payload-bytes")
+
+	// 1. Valid signature over raw payload bytes
+	sig := SignPayload(privKey, payload)
+	if !VerifyPayload(pubKey, payload, sig) {
+		t.Fatalf("expected valid signature over payload bytes to verify successfully")
+	}
+
+	// 2. Tampered payload
+	tamperedPayload := make([]byte, len(payload))
+	copy(tamperedPayload, payload)
+	tamperedPayload[0] ^= 0xFF
+	if VerifyPayload(pubKey, tamperedPayload, sig) {
+		t.Errorf("expected tampered payload to fail verification")
+	}
+
+	// 3. Tampered signature
+	tamperedSig := make([]byte, len(sig))
+	copy(tamperedSig, sig)
+	tamperedSig[0] ^= 0xFF
+	if VerifyPayload(pubKey, payload, tamperedSig) {
+		t.Errorf("expected tampered signature to fail verification")
+	}
+
+	// 4. Mismatched public key
+	if VerifyPayload(otherPubKey, payload, sig) {
+		t.Errorf("expected verification with mismatched public key to fail")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -29,11 +30,15 @@ import (
 )
 
 var (
-	version           = "0.1.3"
+	version           = "0.1.4"
 	CurseForgeKey     = ""
 	MicrosoftClientID = auth.DefaultClientID
 	UpdateChannel     = "stable"
 )
+
+func init() {
+	version = strings.TrimPrefix(version, "v")
+}
 
 func main() {
 	startInit := time.Now()

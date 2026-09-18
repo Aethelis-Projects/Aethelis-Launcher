@@ -18,6 +18,11 @@ export type UpdateStatus =
   | "restart_required"
   | "error";
 
+export const formatVersion = (v?: string): string => {
+  if (!v) return "";
+  return v.startsWith("v") ? v : `v${v}`;
+};
+
 export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
   const [status, setStatus] = createSignal<UpdateStatus>("idle");
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfoDTO | null>(null);
@@ -116,7 +121,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
           <div class="flex flex-col gap-1">
             <span class="text-xs text-zinc-400 font-mono">Installed Version</span>
             <span class="text-lg font-bold font-mono text-white" data-testid="current-version-text">
-              v{updateInfo()?.current_version || "0.1.3"}
+              {formatVersion(updateInfo()?.current_version || "0.1.4")}
             </span>
           </div>
 
@@ -170,7 +175,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
           <div class="flex flex-col">
             <span class="font-semibold text-sm text-white">You are running the latest version</span>
             <span class="text-xs text-zinc-400 mt-0.5">
-              Nord Launcher v{updateInfo()?.current_version || "0.1.3"} is up to date.
+              Nord Launcher {formatVersion(updateInfo()?.current_version || "0.1.4")} is up to date.
             </span>
           </div>
         </section>
@@ -190,7 +195,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
               <div>
                 <div class="flex items-center gap-2">
                   <span class="text-base font-bold text-white tracking-tight">
-                    Nord Launcher v{updateInfo()?.version}
+                    Nord Launcher {formatVersion(updateInfo()?.version)}
                   </span>
                   <span class="px-2 py-0.5 rounded text-[11px] font-mono font-semibold bg-nord-cyan text-nord-dark">
                     Available

@@ -11,11 +11,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -547,6 +549,168 @@ func main() {
 		_ = os.Remove(oldBackupPath) // errcheck:ok stale backup cleanup
 		logf("PASS: Stale executable backup (.old) verified and cleaned up.")
 	}
+
+	// =========================================================================
+	// 8. Manifest Generator Contract & Real Signing Lifecycle E2E
+	// =========================================================================
+	logf("\n--- STEP 8: Manifest Generator Contract & Real Signing Lifecycle E2E ---")
+
+	step8Tmp, err := os.MkdirTemp("", "nord-e2e-step8-*")
+	if err != nil {
+		logf("FAIL: MkdirTemp failed: %v", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(step8Tmp) // errcheck:ok cleanup test temporary files
+
+	// D3: Compile genmanifest tool deterministically
+	genmanifestBin := filepath.Join(step8Tmp, "genmanifest")
+	if runtime.GOOS == "windows" {
+		genmanifestBin += ".exe"
+	}
+
+	buildCmd := exec.Command("go", "build", "-o", genmanifestBin, "./scripts/generate_manifest.go")
+	if out, buildErr := buildCmd.CombinedOutput(); buildErr != nil {
+		logf("FAIL: Failed to compile generate_manifest.go: %v\nOutput: %s", buildErr, string(out))
+		os.Exit(1)
+	}
+
+	// D2: Ephemeral keypair for this test run (never production key)
+	pubKey8, privKey8, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		logf("FAIL: GenerateKey failed: %v", err)
+		os.Exit(1)
+	}
+	privSeedHex := hex.EncodeToString(privKey8.Seed())
+
+	// D3: Platform fixture matching CurrentPlatformKey
+	fixtureDist := filepath.Join(step8Tmp, "dist")
+	if err := os.MkdirAll(fixtureDist, 0755); err != nil {
+		logf("FAIL: MkdirAll fixture dist failed: %v", err)
+		os.Exit(1)
+	}
+
+	fixturePayload := []byte("nord-launcher-v0.9.9-step8-real-contract-binary-payload")
+	var fixtureFile string
+	if runtime.GOOS == "windows" {
+		fixtureFile = filepath.Join(fixtureDist, "NordLauncher.exe")
+	} else {
+		fixtureFile = filepath.Join(fixtureDist, "nord-launcher-0.9.9.tar.gz")
+	}
+
+	if err := os.WriteFile(fixtureFile, fixturePayload, 0755); err != nil {
+		logf("FAIL: WriteFile fixture binary failed: %v", err)
+		os.Exit(1)
+	}
+
+	manifestOut := filepath.Join(fixtureDist, "manifest-stable.json")
+
+	// Run compiled generator tool
+	genCmd := exec.Command(genmanifestBin,
+		"-version", "0.9.9",
+		"-channel", "stable",
+		"-dist", fixtureDist,
+		"-out", manifestOut,
+		"-privkey-hex", privSeedHex,
+	)
+	if out, genErr := genCmd.CombinedOutput(); genErr != nil {
+		logf("FAIL: genmanifest execution failed: %v\nOutput: %s", genErr, string(out))
+		os.Exit(1)
+	}
+
+	// Read generated manifest JSON
+	rawManifestBytes, err := os.ReadFile(manifestOut)
+	if err != nil {
+		logf("FAIL: Failed to read generated manifest: %v", err)
+		os.Exit(1)
+	}
+
+	var generatedManifest updater.UpdateManifest
+	if err := json.Unmarshal(rawManifestBytes, &generatedManifest); err != nil {
+		logf("FAIL: Failed to parse generated manifest JSON: %v", err)
+		os.Exit(1)
+	}
+
+	platKey8 := updater.CurrentPlatformKey()
+	_, exists := generatedManifest.Platforms[platKey8]
+	if !exists {
+		logf("FAIL: Generated manifest missing platform %s. Platforms: %+v", platKey8, generatedManifest.Platforms)
+		os.Exit(1)
+	}
+
+	// D1: URL patch in manifest to point to httptest server while keeping sig/sha256/size intact
+	var step8Server *httptest.Server
+	step8Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/manifest":
+			mCopy := generatedManifest
+			mCopy.Platforms = make(map[string]updater.PlatformAsset)
+			for k, v := range generatedManifest.Platforms {
+				if k == platKey8 {
+					v.URL = step8Server.URL + "/payload"
+				}
+				mCopy.Platforms[k] = v
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(mCopy) // errcheck:ok mock server response
+		case "/payload":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(fixturePayload) // errcheck:ok mock server response
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer step8Server.Close()
+
+	// Initialize AutoUpdater with matching ephemeral pubKey8
+	step8Updater := updater.NewAutoUpdater("0.1.3", step8Server.URL+"/manifest", pubKey8, step8Server.Client())
+
+	step8Info, err := step8Updater.CheckForUpdates(context.Background())
+	if err != nil {
+		logf("FAIL: STEP 8 CheckForUpdates failed: %v", err)
+		os.Exit(1)
+	}
+	if !step8Info.Available || step8Info.Version != "0.9.9" {
+		logf("FAIL: STEP 8 Expected update 0.9.9 available, got %+v", step8Info)
+		os.Exit(1)
+	}
+	logf("PASS: Generated manifest correctly checked (version: %s, channel: stable).", step8Info.Version)
+
+	dummyExe8 := filepath.Join(step8Tmp, "current_app.exe")
+	if err := os.WriteFile(dummyExe8, []byte("old-binary-v0.1.3"), 0755); err != nil {
+		logf("FAIL: Create dummyExe8 failed: %v", err)
+		os.Exit(1)
+	}
+
+	// Negative check: Tampered signature must be rejected with ErrSignatureInvalid
+	tamperedAsset8 := step8Info.Asset
+	rawSig8, decodeErr := base64.StdEncoding.DecodeString(tamperedAsset8.Signature)
+	if decodeErr != nil {
+		logf("FAIL: Decode valid signature failed: %v", decodeErr)
+		os.Exit(1)
+	}
+	rawSig8[0] ^= 0xFF
+	tamperedAsset8.Signature = base64.StdEncoding.EncodeToString(rawSig8)
+
+	err = step8Updater.DownloadAndApply(context.Background(), tamperedAsset8, dummyExe8)
+	if err == nil || !errors.Is(err, updater.ErrSignatureInvalid) {
+		logf("FAIL: Expected ErrSignatureInvalid on tampered manifest signature, got %v", err)
+		os.Exit(1)
+	}
+	logf("PASS: Tampered manifest signature rejected with ErrSignatureInvalid.")
+
+	// Positive check: Valid DownloadAndApply using manifest generated by real genmanifest tool
+	err = step8Updater.DownloadAndApply(context.Background(), step8Info.Asset, dummyExe8)
+	if err != nil {
+		logf("FAIL: STEP 8 DownloadAndApply failed on valid manifest: %v", err)
+		os.Exit(1)
+	}
+
+	appliedBytes8, err := os.ReadFile(dummyExe8)
+	if err != nil || !bytes.Equal(appliedBytes8, fixturePayload) {
+		logf("FAIL: Applied binary content mismatch in STEP 8")
+		os.Exit(1)
+	}
+	logf("PASS: Full contract verified: scripts/generate_manifest.go -> updater.DownloadAndApply.")
 
 	logf("\n=================================================================")
 	logf(" ALL E2E STAGES PASSED")

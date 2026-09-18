@@ -84,21 +84,21 @@ func main() {
 	}
 
 	if winPortable != "" {
-		if fi, err := os.Stat(winPortable); err == nil {
-			hash, err := calcSHA256(winPortable)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to hash %s: %v\n", winPortable, err)
-				os.Exit(1)
-			}
-			sig := ed25519.Sign(privKey, []byte(hash))
-			manifest.Platforms["windows-amd64"] = updater.PlatformAsset{
-				URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winPortable)),
-				SHA256:    hash,
-				Signature: base64.StdEncoding.EncodeToString(sig),
-				Size:      fi.Size(),
-			}
-			fmt.Printf("[Manifest] Added windows-amd64: %s (SHA256: %s)\n", filepath.Base(winPortable), hash)
+		payload, err := os.ReadFile(winPortable)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to read %s: %v\n", winPortable, err)
+			os.Exit(1)
 		}
+		hashBytes := sha256.Sum256(payload)
+		hash := hex.EncodeToString(hashBytes[:])
+		sig := updater.SignPayload(privKey, payload)
+		manifest.Platforms["windows-amd64"] = updater.PlatformAsset{
+			URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winPortable)),
+			SHA256:    hash,
+			Signature: base64.StdEncoding.EncodeToString(sig),
+			Size:      int64(len(payload)),
+		}
+		fmt.Printf("[Manifest] Added windows-amd64: %s (SHA256: %s, Size: %d)\n", filepath.Base(winPortable), hash, len(payload))
 	}
 
 	// 2. Process Windows NSIS Setup Installer (windows-setup)
@@ -117,21 +117,21 @@ func main() {
 	}
 
 	if winSetup != "" {
-		if fi, err := os.Stat(winSetup); err == nil {
-			hash, err := calcSHA256(winSetup)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to hash %s: %v\n", winSetup, err)
-				os.Exit(1)
-			}
-			sig := ed25519.Sign(privKey, []byte(hash))
-			manifest.Platforms["windows-setup"] = updater.PlatformAsset{
-				URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winSetup)),
-				SHA256:    hash,
-				Signature: base64.StdEncoding.EncodeToString(sig),
-				Size:      fi.Size(),
-			}
-			fmt.Printf("[Manifest] Added windows-setup: %s (SHA256: %s)\n", filepath.Base(winSetup), hash)
+		payload, err := os.ReadFile(winSetup)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to read %s: %v\n", winSetup, err)
+			os.Exit(1)
 		}
+		hashBytes := sha256.Sum256(payload)
+		hash := hex.EncodeToString(hashBytes[:])
+		sig := updater.SignPayload(privKey, payload)
+		manifest.Platforms["windows-setup"] = updater.PlatformAsset{
+			URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winSetup)),
+			SHA256:    hash,
+			Signature: base64.StdEncoding.EncodeToString(sig),
+			Size:      int64(len(payload)),
+		}
+		fmt.Printf("[Manifest] Added windows-setup: %s (SHA256: %s, Size: %d)\n", filepath.Base(winSetup), hash, len(payload))
 	}
 
 	if _, ok := manifest.Platforms["windows-amd64"]; !ok {
@@ -161,21 +161,21 @@ func main() {
 	}
 
 	if linuxTarball != "" {
-		if fi, err := os.Stat(linuxTarball); err == nil {
-			hash, err := calcSHA256(linuxTarball)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to hash %s: %v\n", linuxTarball, err)
-				os.Exit(1)
-			}
-			sig := ed25519.Sign(privKey, []byte(hash))
-			manifest.Platforms["linux-amd64"] = updater.PlatformAsset{
-				URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(linuxTarball)),
-				SHA256:    hash,
-				Signature: base64.StdEncoding.EncodeToString(sig),
-				Size:      fi.Size(),
-			}
-			fmt.Printf("[Manifest] Added linux-amd64: %s (SHA256: %s)\n", filepath.Base(linuxTarball), hash)
+		payload, err := os.ReadFile(linuxTarball)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to read %s: %v\n", linuxTarball, err)
+			os.Exit(1)
 		}
+		hashBytes := sha256.Sum256(payload)
+		hash := hex.EncodeToString(hashBytes[:])
+		sig := updater.SignPayload(privKey, payload)
+		manifest.Platforms["linux-amd64"] = updater.PlatformAsset{
+			URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(linuxTarball)),
+			SHA256:    hash,
+			Signature: base64.StdEncoding.EncodeToString(sig),
+			Size:      int64(len(payload)),
+		}
+		fmt.Printf("[Manifest] Added linux-amd64: %s (SHA256: %s, Size: %d)\n", filepath.Base(linuxTarball), hash, len(payload))
 	} else {
 		fmt.Printf("[Manifest] Warning: Linux artifact not found in %s\n", *distDirFlag)
 	}
@@ -198,13 +198,4 @@ func main() {
 	}
 
 	fmt.Printf("[Manifest] Generated signed update manifest: %s\n", outPath)
-}
-
-func calcSHA256(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	h := sha256.Sum256(data)
-	return hex.EncodeToString(h[:]), nil
 }

@@ -39,6 +39,17 @@ func GetDefaultPublicKey() ed25519.PublicKey {
 	return ed25519.PublicKey(b)
 }
 
+// SignPayload signs the raw binary payload using Ed25519.
+// The signature domain is strictly the exact binary bytes of the target artifact.
+func SignPayload(privKey ed25519.PrivateKey, payload []byte) []byte {
+	return ed25519.Sign(privKey, payload)
+}
+
+// VerifyPayload verifies the Ed25519 signature against raw binary payload bytes.
+func VerifyPayload(pubKey ed25519.PublicKey, payload []byte, sig []byte) bool {
+	return ed25519.Verify(pubKey, payload, sig)
+}
+
 type PlatformAsset struct {
 	URL       string `json:"url"`
 	SHA256    string `json:"sha256"`
@@ -194,7 +205,7 @@ func (u *AutoUpdater) DownloadAndApply(ctx context.Context, asset PlatformAsset,
 			return fmt.Errorf("decode signature: %w", err)
 		}
 
-		if !ed25519.Verify(u.publicKey, payloadBytes, sigBytes) {
+		if !VerifyPayload(u.publicKey, payloadBytes, sigBytes) {
 			_ = os.Remove(newExePath) // errcheck:ok cleanup failed download target
 			return ErrSignatureInvalid
 		}

@@ -7,7 +7,7 @@ import { ModCatalog } from "./components/mods/ModCatalog";
 import { InstalledModsManager } from "./components/mods/InstalledModsManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
-import { UpdatePanel } from "./components/updater/UpdatePanel";
+import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
@@ -251,7 +251,7 @@ export const App: Component = () => {
                 data-testid="header-update-badge"
               >
                 <span class="w-1.5 h-1.5 rounded-full bg-nord-cyan animate-pulse" />
-                <span>Update v{availableUpdate()?.version} available</span>
+                <span>Update {formatVersion(availableUpdate()?.version)} available</span>
               </button>
             </Show>
           </div>

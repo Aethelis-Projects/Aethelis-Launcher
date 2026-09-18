@@ -144,10 +144,10 @@ const mockModCatalog: ModItemDTO[] = [
 
 let mockUpdateInfo: UpdateInfoDTO = {
   has_update: false,
-  version: "0.1.2",
-  current_version: "0.1.2",
-  release_date: "2026-09-12T12:00:00Z",
-  release_notes: "Nord Launcher v0.1.2 (stable channel) release.",
+  version: "0.1.4",
+  current_version: "0.1.4",
+  release_date: "2026-09-18T12:00:00Z",
+  release_notes: "Nord Launcher v0.1.4 (stable channel) release.",
   download_url: "",
   sha256: "",
   size: 0,
@@ -171,10 +171,10 @@ export const launcherAPI = {
   resetMockUpdater(): void {
     mockUpdateInfo = {
       has_update: false,
-      version: "0.1.2",
-      current_version: "0.1.2",
-      release_date: "2026-09-12T12:00:00Z",
-      release_notes: "Nord Launcher v0.1.2 (stable channel) release.",
+      version: "0.1.4",
+      current_version: "0.1.4",
+      release_date: "2026-09-18T12:00:00Z",
+      release_notes: "Nord Launcher v0.1.4 (stable channel) release.",
       download_url: "",
       sha256: "",
       size: 0,
