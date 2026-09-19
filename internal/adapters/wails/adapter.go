@@ -752,7 +752,7 @@ func (a *WailsAdapter) SetSetting(req SetSettingRequest) error {
 		if resolvedKey == "" {
 			resolvedKey = os.Getenv("CURSEFORGE_API_KEY")
 			if resolvedKey == "" {
-				resolvedKey = curseforge.BuiltinAPIKey
+				resolvedKey = curseforge.GetBuiltinAPIKey()
 			}
 		}
 		cf.SetAPIKey(resolvedKey)
@@ -762,5 +762,5 @@ func (a *WailsAdapter) SetSetting(req SetSettingRequest) error {
 }
 
 func (a *WailsAdapter) HasBuiltinCurseForgeKey() (bool, error) {
-	return curseforge.BuiltinAPIKey != "" || os.Getenv("CURSEFORGE_API_KEY") != "", nil
+	return curseforge.HasBuiltinKey() || os.Getenv("CURSEFORGE_API_KEY") != "", nil
 }

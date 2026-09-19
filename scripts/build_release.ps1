@@ -26,16 +26,33 @@ try {
     Pop-Location
 }
 
+if ($CurseForgeKey) {
+    Set-Content -Path (Join-Path $DistWin "cf.key") -Value $CurseForgeKey -NoNewline
+    Write-Host "Wrote sidecar key to: $(Join-Path $DistWin 'cf.key')" -ForegroundColor Cyan
+}
+
 Write-Host "==> [3/5] Compiling Launcher Executable with Go..." -ForegroundColor Cyan
 $BinaryPath = Join-Path $DistWin "NordLauncher.exe"
-go build "-ldflags=-s -w -H=windowsgui -X main.version=$Version -X main.CurseForgeKey=$CurseForgeKey" -o $BinaryPath ./cmd/launcher/main.go
+go build "-ldflags=-s -w -H=windowsgui -X main.version=$Version" -o $BinaryPath ./cmd/launcher/main.go
+
+# Verify binary does NOT leak key in buildinfo or strings
+$buildInfo = go version -m $BinaryPath | Out-String
+if ($buildInfo -match "CurseForgeKey" -or ($CurseForgeKey -and $buildInfo.Contains($CurseForgeKey))) {
+    Write-Error "CRITICAL SECURITY ERROR: CurseForgeKey leaked in Windows buildinfo!"
+}
 
 if ($CurseForgeKey) {
     $found = Select-String -Path $BinaryPath -Pattern $CurseForgeKey -SimpleMatch -Quiet
-    if (-not $found) {
-        Write-Error "ERROR: Built-in CurseForge API key was not baked into executable!"
+    if ($found) {
+        Write-Error "CRITICAL SECURITY ERROR: Secret key found in Windows binary strings!"
     } else {
-        Write-Host "PASS: Built-in CurseForge API key verified in Windows executable." -ForegroundColor Green
+        Write-Host "PASS: Windows binary verified clean of secrets." -ForegroundColor Green
+    }
+
+    if (-not (Test-Path (Join-Path $DistWin "cf.key"))) {
+        Write-Error "ERROR: cf.key was not generated in $DistWin!"
+    } else {
+        Write-Host "PASS: Verified cf.key present for installer packaging." -ForegroundColor Green
     }
 }
 

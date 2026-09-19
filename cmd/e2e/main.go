@@ -29,6 +29,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/adapters/process"
 	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content"
+	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/java"
@@ -712,8 +713,78 @@ func main() {
 	}
 	logf("PASS: Full contract verified: scripts/generate_manifest.go -> updater.DownloadAndApply.")
 
+	// =========================================================================
+	// 9. CurseForge Sidecar Key Delivery & Request Header Contract E2E
+	// =========================================================================
+	logf("\n--- STEP 9: CurseForge Sidecar Key Delivery & Header Contract E2E ---")
+
+	testSidecarSecret := "$2a$10$e2e-sidecar-verification-token-987654321"
+	var receivedAPIKeyHeader string
+
+	cfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedAPIKeyHeader = r.Header.Get("x-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{ // errcheck:ok mock http response encode
+			"data": []interface{}{
+				map[string]interface{}{
+					"id":   12345,
+					"name": "Sidecar Test Mod",
+					"slug": "sidecar-test-mod",
+				},
+			},
+			"pagination": map[string]interface{}{
+				"totalCount": 1,
+			},
+		})
+	}))
+	defer cfServer.Close()
+
+	// 1. Write temporary sidecar file
+	tempE2EDir, err := os.MkdirTemp("", "e2e_cf_sidecar_*")
+	if err != nil {
+		logf("FAIL: MkdirTemp for STEP 9 failed: %v", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(tempE2EDir)
+
+	sidecarPath := filepath.Join(tempE2EDir, "cf.key")
+	if err := os.WriteFile(sidecarPath, []byte(testSidecarSecret), 0644); err != nil {
+		logf("FAIL: Write sidecar key failed: %v", err)
+		os.Exit(1)
+	}
+
+	// Read sidecar content
+	sidecarBytes, err := os.ReadFile(sidecarPath)
+	if err != nil {
+		logf("FAIL: Read sidecar key failed: %v", err)
+		os.Exit(1)
+	}
+	sidecarKey := strings.TrimSpace(string(sidecarBytes))
+
+	// Configure curseforge client
+	curseforge.SetBuiltinAPIKey(sidecarKey)
+	step9Client := curseforge.NewClient(cfServer.URL, "", nil)
+
+	// Issue search request
+	results, _, err := step9Client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		logf("FAIL: STEP 9 SearchMods failed: %v", err)
+		os.Exit(1)
+	}
+
+	if len(results) == 0 || results[0].Name != "Sidecar Test Mod" {
+		logf("FAIL: STEP 9 unexpected mod search results")
+		os.Exit(1)
+	}
+
+	if receivedAPIKeyHeader != testSidecarSecret {
+		logf("FAIL: Expected x-api-key header %q, got %q", testSidecarSecret, receivedAPIKeyHeader)
+		os.Exit(1)
+	}
+	logf("PASS: Sidecar key resolved from file and verified in x-api-key HTTP header.")
+
 	logf("\n=================================================================")
-	logf(" ALL E2E STAGES PASSED")
+	logf(" ALL 9 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt

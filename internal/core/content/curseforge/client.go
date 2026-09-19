@@ -25,8 +25,32 @@ const (
 // ErrCurseForgeRateLimited indicates CurseForge returned HTTP 401 or 403 (quota or auth issue).
 var ErrCurseForgeRateLimited = errors.New("curseforge rate limit or authentication error")
 
-// BuiltinAPIKey holds an optional CurseForge API key. In official releases, CurseForge uses BYOK via CURSEFORGE_API_KEY (or -X main.CurseForgeKey in custom builds).
-var BuiltinAPIKey = ""
+// BuiltinAPIKey holds an optional CurseForge API key (resolved from sidecar cf.key or env).
+var (
+	builtinMu     sync.RWMutex
+	BuiltinAPIKey = ""
+)
+
+// SetBuiltinAPIKey sets the package-level built-in API key.
+func SetBuiltinAPIKey(key string) {
+	builtinMu.Lock()
+	defer builtinMu.Unlock()
+	BuiltinAPIKey = key
+}
+
+// GetBuiltinAPIKey returns the current package-level built-in API key.
+func GetBuiltinAPIKey() string {
+	builtinMu.RLock()
+	defer builtinMu.RUnlock()
+	return BuiltinAPIKey
+}
+
+// HasBuiltinKey reports whether a non-empty built-in API key is configured.
+func HasBuiltinKey() bool {
+	builtinMu.RLock()
+	defer builtinMu.RUnlock()
+	return BuiltinAPIKey != ""
+}
 
 type searchCacheEntry struct {
 	rawJSON    []byte
@@ -49,7 +73,7 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
 		baseURL = DefaultBaseURL
 	}
 	if apiKey == "" {
-		apiKey = BuiltinAPIKey
+		apiKey = GetBuiltinAPIKey()
 	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}

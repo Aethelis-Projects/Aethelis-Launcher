@@ -27,3 +27,7 @@ Thumbs.db
 
 # Build artifacts & E2E traces
 build/e2e/
+
+# Sidecar secrets
+cf.key
+**/cf.key

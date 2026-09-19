@@ -39,29 +39,56 @@ jobs:
           pnpm install
           pnpm build
 
-      - name: Compile Windows Executable
+      - name: Write CurseForge Sidecar Key
         env:
           CURSEFORGE_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist/windows
-          go build "-ldflags=-s -w -H=windowsgui -X main.version=$($env:GITHUB_REF_NAME) -X main.CurseForgeKey=$($env:CURSEFORGE_KEY)" -o dist/windows/NordLauncher.exe cmd/launcher/main.go
+          if ($env:CURSEFORGE_KEY) {
+            Set-Content -Path "dist/windows/cf.key" -Value $env:CURSEFORGE_KEY -NoNewline
+            Write-Host "Created dist/windows/cf.key ($($env:CURSEFORGE_KEY.Length) chars)"
+          }
 
-      - name: Verify Baked CurseForge Key (D2)
+      - name: Compile Windows Executable
+        shell: pwsh
+        run: |
+          go build "-ldflags=-s -w -H=windowsgui -X main.version=$($env:GITHUB_REF_NAME)" -o dist/windows/NordLauncher.exe cmd/launcher/main.go
+
+      - name: Verify Secret Not In Shipped Binary (S2 Asserts 1 & 2)
         env:
           CF_SECRET: ${{ secrets.CURSEFORGE_API_KEY }}
         shell: pwsh
         run: |
-          if (-not $env:CF_SECRET) {
-            Write-Host "NOTE: CURSEFORGE_API_KEY secret is not set, skipping baked verification."
-            exit 0
-          }
-          $matches = Select-String -Path "dist/windows/NordLauncher.exe" -Pattern $env:CF_SECRET -SimpleMatch -Quiet
-          if (-not $matches) {
-            Write-Error "ERROR: Built-in CurseForge API key was not baked into executable!"
+          $buildInfo = go version -m dist/windows/NordLauncher.exe | Out-String
+          if ($buildInfo -match "CurseForgeKey" -or ($env:CF_SECRET -and $buildInfo.Contains($env:CF_SECRET))) {
+            Write-Error "CRITICAL SECURITY ERROR: Secret leaked in go version -m buildinfo!"
             exit 1
           }
-          Write-Host "PASS: Built-in CurseForge API key verified in Windows executable binary."
+          Write-Host "PASS: go version -m is clean of secrets."
+
+          if ($env:CF_SECRET) {
+            $hasSecret = Select-String -Path "dist/windows/NordLauncher.exe" -Pattern $env:CF_SECRET -SimpleMatch -Quiet
+            if ($hasSecret) {
+              Write-Error "CRITICAL SECURITY ERROR: Secret found in executable strings table!"
+              exit 1
+            }
+            Write-Host "PASS: Executable binary is clean of secret."
+          }
+
+      - name: Verify Sidecar Key Present for Installer (S2 Assert 3)
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/windows/cf.key")) {
+            Write-Error "ERROR: dist/windows/cf.key was not created!"
+            exit 1
+          }
+          $keyLen = (Get-Item "dist/windows/cf.key").Length
+          if ($keyLen -lt 16) {
+            Write-Error "ERROR: dist/windows/cf.key length ($keyLen bytes) is below minimum (16)!"
+            exit 1
+          }
+          Write-Host "PASS: dist/windows/cf.key verified ($keyLen bytes)."
 
       - name: Check Binary Size Budget (<= 40 MB)
         run: |
@@ -156,6 +183,33 @@ jobs:
           ./scripts/build_release.sh "${{ github.ref_name }}" "$CURSEFORGE_KEY"
         shell: bash
 
+      - name: Verify Secret Not In Shipped Linux Binary & Tarball (S2 Linux Asserts 1, 2, 3)
+        env:
+          CF_SECRET: ${{ secrets.CURSEFORGE_API_KEY }}
+        run: |
+          BUILD_INFO=$(go version -m dist/linux/nord-launcher)
+          if echo "$BUILD_INFO" | grep -Eq "CurseForgeKey"; then
+            echo "CRITICAL SECURITY ERROR: Secret leaked in Linux buildinfo!"
+            exit 1
+          fi
+          if [ -n "$CF_SECRET" ]; then
+            if echo "$BUILD_INFO" | grep -Fq "$CF_SECRET"; then
+              echo "CRITICAL SECURITY ERROR: Secret string found in Linux buildinfo!"
+              exit 1
+            fi
+            if grep -Fq "$CF_SECRET" dist/linux/nord-launcher; then
+              echo "CRITICAL SECURITY ERROR: Secret string found in Linux binary!"
+              exit 1
+            fi
+          fi
+          TARBALL=$(ls dist/linux/nord-launcher-v*-linux-amd64.tar.gz)
+          if ! tar -ztvf "$TARBALL" | grep -q "cf.key"; then
+            echo "ERROR: cf.key not packaged into release tarball!"
+            exit 1
+          fi
+          echo "PASS: Linux binary and tarball verified (clean binary + sidecar present in tarball)."
+        shell: bash
+
       - name: Upload Linux Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -188,6 +242,19 @@ jobs:
         with:
           name: nord-launcher-linux
           path: release-assets/
+
+      - name: Verify No Secret Files In Release Assets (N2 Blocker Guard)
+        run: |
+          if [ -f "release-assets/cf.key" ]; then
+            echo "CRITICAL SECURITY ERROR: cf.key was accidentally included in release-assets!"
+            exit 1
+          fi
+          if ls release-assets/ | grep -qi "^cf\.key$"; then
+            echo "CRITICAL SECURITY ERROR: cf.key matching file found in release-assets!"
+            exit 1
+          fi
+          echo "PASS: release-assets/ verified free of secret key files."
+        shell: bash
 
       - name: Determine Channel & Prerelease Status
         id: meta
@@ -236,3 +303,16 @@ jobs:
             Nord Launcher ${{ github.ref_name }} (${{ steps.meta.outputs.channel }} channel release).
 
             **Full Changelog**: https://github.com/Aethelis-Projects/Aethelis-Launcher/compare/v0.1.0...${{ github.ref_name }}
+
+      - name: Verify Published Release Assets (N2 Assert 4)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ASSETS=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets.[].name')
+          echo "Published assets: $ASSETS"
+          if echo "$ASSETS" | grep -qi "^cf\.key$"; then
+            echo "CRITICAL SECURITY ERROR: cf.key published as public release asset!"
+            exit 1
+          fi
+          echo "PASS: Public release assets verified clean of sidecar key."
+        shell: bash
