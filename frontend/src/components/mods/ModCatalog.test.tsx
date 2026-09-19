@@ -199,4 +199,41 @@ describe("ModCatalog Component", () => {
     expect(errorBanner.textContent).toContain("Лимит запросов CurseForge исчерпан");
     expect(errorBanner.textContent).toContain("Укажите свой персональный API-ключ в Настройках");
   });
+
+  it("displays missing sidecar message on 401/403 when no builtin key exists (A-остатки)", async () => {
+    vi.spyOn(launcherAPI, "hasBuiltinCurseForgeKey").mockResolvedValue(false);
+    vi.spyOn(launcherAPI, "searchMods").mockRejectedValue(
+      new Error("curseforge: request returned status 403 Forbidden")
+    );
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    const errorBanner = await screen.findByTestId("mods-search-error-banner");
+    expect(errorBanner.textContent).toContain("сайдкар-файл cf.key не обнаружен");
+    expect(errorBanner.textContent).toContain("Укажите ключ в настройках");
+  });
+
+  it("displays invalid/exhausted message on 401/403 when builtin key exists (A-остатки)", async () => {
+    vi.spyOn(launcherAPI, "hasBuiltinCurseForgeKey").mockResolvedValue(true);
+    vi.spyOn(launcherAPI, "searchMods").mockRejectedValue(
+      new Error("curseforge: request returned status 401 Unauthorized")
+    );
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    const errorBanner = await screen.findByTestId("mods-search-error-banner");
+    expect(errorBanner.textContent).toContain("Лимит запросов к CurseForge исчерпан или ключ недействителен");
+  });
 });

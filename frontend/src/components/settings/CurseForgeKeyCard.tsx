@@ -105,7 +105,7 @@ export const CurseForgeKeyCard: Component = () => {
                 type={showKey() ? "text" : "password"}
                 value={key()}
                 onInput={(e) => setKey(e.currentTarget.value)}
-                placeholder="32-значный hex-ключ CurseForge (например, a1b2c3d4...)"
+                placeholder="ключ вида $2a$10… с console.curseforge.com (или оставьте пустым для встроенного)"
                 data-testid="cf-key-input"
                 class="w-full px-3 py-2 pr-10 bg-nord-dark/80 border border-white/10 rounded-lg text-xs text-zinc-100 font-mono placeholder:text-zinc-600 focus:outline-none focus:border-nord-cyan transition-colors"
               />
@@ -119,6 +119,9 @@ export const CurseForgeKeyCard: Component = () => {
                 {showKey() ? <EyeOff class="w-4 h-4" /> : <Eye class="w-4 h-4" />}
               </button>
             </div>
+            <p class="text-[11px] text-zinc-500" data-testid="cf-key-helper-text">
+              Сохранение пустого поля возвращает использование встроенного/сайдкар-ключа.
+            </p>
           </div>
 
           <div class="flex items-center justify-between pt-1">

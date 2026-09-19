@@ -1,4 +1,4 @@
-import { Component, createSignal, createResource, For, Show } from "solid-js";
+import { Component, createSignal, createResource, For, Show, onMount } from "solid-js";
 import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { ModItemDTO, ModSource } from "../../bindings/ipc_types";
@@ -17,6 +17,16 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const [installedIds, setInstalledIds] = createSignal<Set<string>>(new Set());
   const [searchError, setSearchError] = createSignal<string>("");
   const [installError, setInstallError] = createSignal<string>("");
+  const [hasBuiltinKey, setHasBuiltinKey] = createSignal(false);
+
+  onMount(async () => {
+    try {
+      const builtin = await launcherAPI.hasBuiltinCurseForgeKey();
+      setHasBuiltinKey(builtin);
+    } catch (_err: unknown) {
+      // Safe fallback
+    }
+  });
 
   const [mods] = createResource(
     () => ({ q: query(), s: source(), gv: props.gameVersion, l: props.loader }),
@@ -150,7 +160,15 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
             <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
             <Show
               when={searchError().includes("CF_RATE_LIMITED:")}
-              fallback={<span>Ошибка поиска модов: {searchError()}</span>}
+              fallback={
+                <span>
+                  {searchError().includes("401") || searchError().includes("403")
+                    ? hasBuiltinKey()
+                      ? "Лимит запросов к CurseForge исчерпан или ключ недействителен. Вы можете указать собственный ключ в Настройках."
+                      : "Для поиска модов CurseForge требуется API-ключ (сайдкар-файл cf.key не обнаружен). Укажите ключ в настройках."
+                    : `Ошибка поиска модов: ${searchError()}`}
+                </span>
+              }
             >
               <span>Лимит запросов CurseForge исчерпан. Укажите свой персональный API-ключ в Настройках для снятия ограничений.</span>
             </Show>

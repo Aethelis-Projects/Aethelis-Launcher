@@ -20,7 +20,9 @@ describe("CurseForgeKeyCard Component (B5, N6, R2)", () => {
       expect(input.value).toBe("$2a$10$existingkey");
     });
     expect(input.type).toBe("password");
-    expect(input.placeholder).toBe("32-значный hex-ключ CurseForge (например, a1b2c3d4...)");
+    expect(input.placeholder).toBe("ключ вида $2a$10… с console.curseforge.com (или оставьте пустым для встроенного)");
+    const helper = screen.getByTestId("cf-key-helper-text");
+    expect(helper.textContent).toContain("Сохранение пустого поля возвращает использование встроенного/сайдкар-ключа.");
   });
 
   it("toggles password visibility mask", async () => {
@@ -83,7 +85,7 @@ describe("CurseForgeKeyCard Component (B5, N6, R2)", () => {
 
     const input = (await screen.findByTestId("cf-key-input")) as HTMLInputElement;
     expect(input).toBeTruthy();
-    expect(input.placeholder).toBe("32-значный hex-ключ CurseForge (например, a1b2c3d4...)");
+    expect(input.placeholder).toBe("ключ вида $2a$10… с console.curseforge.com (или оставьте пустым для встроенного)");
   });
 
   it("opens spoiler automatically when builtin key is active but custom key is configured (R2)", async () => {
