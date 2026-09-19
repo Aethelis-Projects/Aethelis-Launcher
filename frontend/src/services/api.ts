@@ -437,22 +437,38 @@ export const launcherAPI = {
     );
   },
 
-  // Note (C3/N4): In production, installMod fails closed with a clear demo message; full backend implementation ships in v0.2.0.
-  async installMod(instanceId: string, mod: ModItemDTO): Promise<void> {
-    if (!isDevEnvironment()) {
-      throw new Error("Demo mode: mod installation backend ships in v0.2.0");
+  async installMod(instanceId: string, mod: ModItemDTO): Promise<InstallModResponse> {
+    const res = await invokeWails<InstallModResponse>(
+      "InstallMod",
+      () => {
+        if (!mockInstalledMods[instanceId]) {
+          mockInstalledMods[instanceId] = [];
+        }
+        const fileName = `${mod.slug}-1.0.0.jar`;
+        mockInstalledMods[instanceId].push({
+          file_name: fileName,
+          mod_id: mod.slug,
+          name: mod.name,
+          version: "1.0.0",
+          enabled: true,
+          size_bytes: 1572864,
+        });
+        return {
+          success: true,
+          file_name: fileName,
+          message: `Mod ${fileName} installed successfully`,
+        };
+      },
+      {
+        instance_id: instanceId,
+        mod_id: mod.id,
+        source: mod.source,
+      } as InstallModRequest
+    );
+    if (!res.success) {
+      throw new Error(res.message || "Failed to install mod");
     }
-    if (!mockInstalledMods[instanceId]) {
-      mockInstalledMods[instanceId] = [];
-    }
-    mockInstalledMods[instanceId].push({
-      file_name: `${mod.slug}-1.0.0.jar`,
-      mod_id: mod.slug,
-      name: mod.name,
-      version: "1.0.0",
-      enabled: true,
-      size_bytes: 1572864,
-    });
+    return res;
   },
 
   async getLastCrashReport(instanceId: string): Promise<CrashReportDTO | null> {

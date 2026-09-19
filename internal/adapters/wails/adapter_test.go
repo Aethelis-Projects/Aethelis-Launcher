@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha1"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +28,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/auth"
 	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
+	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/ports"
@@ -566,5 +569,312 @@ func TestWailsAdapter_Settings_CurseForgeKey(t *testing.T) {
 
 	if cf.APIKey() != "" {
 		t.Fatalf("expected empty cf key after clear, got %q", cf.APIKey())
+	}
+}
+
+func TestWailsAdapter_InstallMod_Modrinth_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	modData := []byte("PK\x03\x04test-modrinth-mod-bytes")
+	hSha1 := sha1.Sum(modData)
+	sha1Hex := hex.EncodeToString(hSha1[:])
+
+	var downloadRequested bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/test-mod/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-1",
+					"project_id":     "test-mod",
+					"version_number": "1.0.0",
+					"name":           "Test Mod 1.0.0",
+					"game_versions":  []string{"1.21"},
+					"loaders":        []string{"fabric"},
+					"files": []map[string]interface{}{
+						{
+							"hashes": map[string]string{
+								"sha1": sha1Hex,
+							},
+							"url":      fmt.Sprintf("http://%s/download/test-mod-1.0.0.jar", r.Host),
+							"filename": "test-mod-1.0.0.jar",
+							"primary":  true,
+							"size":     len(modData),
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/test-mod-1.0.0.jar" {
+			downloadRequested = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(modData)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+	adapter.SetHTTPClient(ts.Client())
+
+	res, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-test",
+		ModID:      "test-mod",
+		Source:     "modrinth",
+	})
+	if err != nil {
+		t.Fatalf("InstallMod returned error: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected success, got: %+v", res)
+	}
+	if res.FileName != "test-mod-1.0.0.jar" {
+		t.Fatalf("expected filename 'test-mod-1.0.0.jar', got %q", res.FileName)
+	}
+	if !downloadRequested {
+		t.Fatalf("expected download request to be served")
+	}
+
+	installedPath := filepath.Join(tempDir, "inst-test", "mods", "test-mod-1.0.0.jar")
+	content, err := os.ReadFile(installedPath)
+	if err != nil {
+		t.Fatalf("failed to read installed mod file: %v", err)
+	}
+	if string(content) != string(modData) {
+		t.Fatalf("file content mismatch: expected %s, got %s", string(modData), string(content))
+	}
+}
+
+func TestWailsAdapter_InstallMod_CurseForge_Success(t *testing.T) {
+	tempDir := t.TempDir()
+	modData := []byte("PK\x03\x04test-curseforge-mod-bytes")
+	hSha1 := sha1.Sum(modData)
+	sha1Hex := hex.EncodeToString(hSha1[:])
+
+	var downloadRequested bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v1/mods/99999/files") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"data": []map[string]interface{}{
+					{
+						"id":          55555,
+						"modId":       99999,
+						"displayName": "CF Mod 1.0.0",
+						"fileName":    "cf-mod-1.0.0.jar",
+						"fileLength":  len(modData),
+						"downloadUrl": fmt.Sprintf("http://%s/download/cf-mod-1.0.0.jar", r.Host),
+						"hashes": []map[string]interface{}{
+							{
+								"value": sha1Hex,
+								"algo":  1,
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/cf-mod-1.0.0.jar" {
+			downloadRequested = true
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(modData)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	cf := curseforge.NewClient(ts.URL, "dummy-cf-key", ts.Client())
+	adapter.SetContent(nil, cf)
+	adapter.SetHTTPClient(ts.Client())
+
+	res, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-test",
+		ModID:      "99999",
+		Source:     "curseforge",
+	})
+	if err != nil {
+		t.Fatalf("InstallMod returned error: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected success, got: %+v", res)
+	}
+	if res.FileName != "cf-mod-1.0.0.jar" {
+		t.Fatalf("expected filename 'cf-mod-1.0.0.jar', got %q", res.FileName)
+	}
+	if !downloadRequested {
+		t.Fatalf("expected download request to be served")
+	}
+
+	installedPath := filepath.Join(tempDir, "inst-test", "mods", "cf-mod-1.0.0.jar")
+	content, err := os.ReadFile(installedPath)
+	if err != nil {
+		t.Fatalf("failed to read installed mod file: %v", err)
+	}
+	if string(content) != string(modData) {
+		t.Fatalf("file content mismatch: expected %s, got %s", string(modData), string(content))
+	}
+}
+
+func TestWailsAdapter_InstallMod_ChecksumMismatch_Cleanup(t *testing.T) {
+	tempDir := t.TempDir()
+	modData := []byte("PK\x03\x04test-tampered-data")
+	wrongSha1 := "0000000000000000000000000000000000000000"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/tampered/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-1",
+					"project_id":     "tampered",
+					"version_number": "1.0.0",
+					"name":           "Tampered 1.0.0",
+					"files": []map[string]interface{}{
+						{
+							"hashes": map[string]string{
+								"sha1": wrongSha1,
+							},
+							"url":      fmt.Sprintf("http://%s/download/tampered.jar", r.Host),
+							"filename": "tampered.jar",
+							"primary":  true,
+							"size":     len(modData),
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/tampered.jar" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(modData)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+	adapter.SetHTTPClient(ts.Client())
+
+	res, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-test",
+		ModID:      "tampered",
+		Source:     "modrinth",
+	})
+	if err == nil {
+		t.Fatalf("expected checksum error, got success: %+v", res)
+	}
+	if !strings.Contains(err.Error(), "sha1 mismatch") {
+		t.Fatalf("expected 'sha1 mismatch' in error, got: %v", err)
+	}
+
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	entries, _ := os.ReadDir(modsDir)
+	if len(entries) != 0 {
+		t.Fatalf("expected mods directory to be empty after failed checksum, found: %d entries", len(entries))
+	}
+}
+
+func TestWailsAdapter_InstallMod_Idempotent(t *testing.T) {
+	tempDir := t.TempDir()
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	_ = os.MkdirAll(modsDir, 0755)
+	existingPath := filepath.Join(modsDir, "existing-mod.jar")
+	_ = os.WriteFile(existingPath, []byte("existing"), 0644)
+
+	var downloadCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/existing-mod/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-1",
+					"project_id":     "existing-mod",
+					"version_number": "1.0.0",
+					"files": []map[string]interface{}{
+						{
+							"url":      fmt.Sprintf("http://%s/download/existing-mod.jar", r.Host),
+							"filename": "existing-mod.jar",
+							"primary":  true,
+							"size":     8,
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/existing-mod.jar" {
+			downloadCount++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("existing"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+	adapter.SetHTTPClient(ts.Client())
+
+	res, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-test",
+		ModID:      "existing-mod",
+		Source:     "modrinth",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Success || res.Message != "Mod already installed" {
+		t.Fatalf("expected idempotent success with 'Mod already installed', got: %+v", res)
+	}
+	if downloadCount != 0 {
+		t.Fatalf("expected 0 download requests for existing mod, got: %d", downloadCount)
+	}
+}
+
+func TestWailsAdapter_InstallMod_Validation(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+
+	_, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "",
+		ModID:      "test-mod",
+	})
+	if err == nil || !strings.Contains(err.Error(), "instance_id is required") {
+		t.Fatalf("expected instance_id is required, got: %v", err)
+	}
+
+	_, err = adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-1",
+		ModID:      "",
+	})
+	if err == nil || !strings.Contains(err.Error(), "mod_id is required") {
+		t.Fatalf("expected mod_id is required, got: %v", err)
+	}
+
+	_, err = adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-1",
+		ModID:      "test",
+		Source:     "unsupported_source",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported mod source") {
+		t.Fatalf("expected unsupported mod source, got: %v", err)
 	}
 }

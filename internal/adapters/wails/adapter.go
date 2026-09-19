@@ -2,15 +2,24 @@ package wails
 
 import (
 	"context"
+	"crypto/sha1"
+	"crypto/sha512"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/auth"
+	"github.com/nord-launcher/launcher/internal/core/content"
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/domain"
@@ -34,6 +43,7 @@ type WailsAdapter struct {
 	relauncher   updater.RelauncherFunc
 	javaDetector ports.JavaDetector
 	settingsRepo *storage.SettingsRepository
+	httpClient   *http.Client
 
 	lastCrashes map[string]*CrashReportDTO
 	mu          sync.RWMutex
@@ -427,11 +437,214 @@ func (a *WailsAdapter) RestartApplication() error {
 	return updater.Relaunch()
 }
 
+func (a *WailsAdapter) SetHTTPClient(client *http.Client) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.httpClient = client
+}
+
+func (a *WailsAdapter) getHTTPClient() *http.Client {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.httpClient != nil {
+		return a.httpClient
+	}
+	return &http.Client{Timeout: 60 * time.Second}
+}
+
 func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, error) {
+	if strings.TrimSpace(req.InstanceID) == "" {
+		return nil, errors.New("instance_id is required")
+	}
+	if strings.TrimSpace(req.ModID) == "" {
+		return nil, errors.New("mod_id is required")
+	}
+
+	source := strings.ToLower(strings.TrimSpace(req.Source))
+	if source == "" {
+		source = "modrinth"
+	}
+
+	var gameVersion, loader string
+	if a.svc != nil {
+		if inst, err := a.svc.GetInstance(req.InstanceID); err == nil && inst != nil {
+			gameVersion = inst.GameVersion
+			loader = string(inst.Loader)
+		}
+	}
+
+	var fileToDownload *content.ModFile
+
+	switch source {
+	case "modrinth":
+		a.mu.RLock()
+		mr := a.modrinth
+		a.mu.RUnlock()
+		if mr == nil {
+			return nil, errors.New("modrinth client not initialized")
+		}
+
+		ctx := context.Background()
+		versions, err := mr.GetProjectVersions(ctx, req.ModID, gameVersion, loader)
+		if (err != nil || len(versions) == 0) && (gameVersion != "" || loader != "") {
+			if vFallback, err2 := mr.GetProjectVersions(ctx, req.ModID, "", ""); err2 == nil && len(vFallback) > 0 {
+				versions = vFallback
+				err = nil
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("fetch modrinth versions: %w", err)
+		}
+		if len(versions) == 0 {
+			return nil, errors.New("no compatible versions found for mod")
+		}
+
+		for _, v := range versions {
+			if len(v.Files) == 0 {
+				continue
+			}
+			for i := range v.Files {
+				if v.Files[i].Primary {
+					fileToDownload = &v.Files[i]
+					break
+				}
+			}
+			if fileToDownload == nil {
+				fileToDownload = &v.Files[0]
+			}
+			break
+		}
+		if fileToDownload == nil {
+			return nil, errors.New("no downloadable files found for mod")
+		}
+
+	case "curseforge":
+		a.mu.RLock()
+		cf := a.curseforge
+		a.mu.RUnlock()
+		if cf == nil {
+			return nil, errors.New("curseforge client not initialized")
+		}
+
+		cfModID, err := strconv.ParseInt(req.ModID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid curseforge mod id: %w", err)
+		}
+
+		ctx := context.Background()
+		files, err := cf.GetModFiles(ctx, cfModID, gameVersion, loader)
+		if (err != nil || len(files) == 0) && (gameVersion != "" || loader != "") {
+			if fFallback, err2 := cf.GetModFiles(ctx, cfModID, "", ""); err2 == nil && len(fFallback) > 0 {
+				files = fFallback
+				err = nil
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("fetch curseforge files: %w", err)
+		}
+		if len(files) == 0 {
+			return nil, errors.New("no compatible files found for mod")
+		}
+
+		fileToDownload = &files[0]
+
+	default:
+		return nil, fmt.Errorf("unsupported mod source: %s", req.Source)
+	}
+
+	if fileToDownload == nil || fileToDownload.URL == "" {
+		return nil, errors.New("mod file download URL is missing")
+	}
+
+	modsDir := a.getModsDir(req.InstanceID)
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		return nil, fmt.Errorf("create mods directory: %w", err)
+	}
+
+	fileName := filepath.Base(fileToDownload.FileName)
+	if fileName == "" || fileName == "." || fileName == "/" {
+		fileName = filepath.Base(fileToDownload.URL)
+	}
+	if fileName == "" || fileName == "." || fileName == "/" {
+		fileName = fmt.Sprintf("%s.jar", req.ModID)
+	}
+	if !strings.HasSuffix(fileName, ".jar") {
+		fileName = fileName + ".jar"
+	}
+
+	destPath := filepath.Join(modsDir, fileName)
+
+	// Idempotency: if mod file already exists, return success
+	if _, err := os.Stat(destPath); err == nil {
+		return &InstallModResponse{
+			Success:  true,
+			FileName: fileName,
+			Message:  "Mod already installed",
+		}, nil
+	}
+
+	tempFile, err := os.CreateTemp(modsDir, ".tmp-*.jar")
+	if err != nil {
+		return nil, fmt.Errorf("create temporary download file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close() // errcheck:ok best effort close if still open
+		if _, statErr := os.Stat(tempPath); statErr == nil {
+			_ = os.Remove(tempPath) // errcheck:ok best effort cleanup of temporary file
+		}
+	}()
+
+	client := a.getHTTPClient()
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fileToDownload.URL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create download request: %w", err)
+	}
+
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("download mod file: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+	}
+
+	hSha1 := sha1.New()
+	hSha512 := sha512.New()
+	mw := io.MultiWriter(tempFile, hSha1, hSha512)
+
+	if _, err := io.Copy(mw, resp.Body); err != nil {
+		return nil, fmt.Errorf("write mod file: %w", err)
+	}
+
+	if err := tempFile.Close(); err != nil {
+		return nil, fmt.Errorf("close temp file: %w", err)
+	}
+
+	// Verify checksums
+	if fileToDownload.SHA512 != "" {
+		actualSha512 := hex.EncodeToString(hSha512.Sum(nil))
+		if !strings.EqualFold(actualSha512, fileToDownload.SHA512) {
+			return nil, fmt.Errorf("sha512 mismatch: expected %s, got %s", fileToDownload.SHA512, actualSha512)
+		}
+	} else if fileToDownload.SHA1 != "" {
+		actualSha1 := hex.EncodeToString(hSha1.Sum(nil))
+		if !strings.EqualFold(actualSha1, fileToDownload.SHA1) {
+			return nil, fmt.Errorf("sha1 mismatch: expected %s, got %s", fileToDownload.SHA1, actualSha1)
+		}
+	}
+
+	// Atomic rename
+	if err := os.Rename(tempPath, destPath); err != nil {
+		return nil, fmt.Errorf("finalize mod install: %w", err)
+	}
+
 	return &InstallModResponse{
-		Success:  false,
-		FileName: "",
-		Message:  "InstallMod backend implementation pending",
+		Success:  true,
+		FileName: fileName,
+		Message:  fmt.Sprintf("Mod %s installed successfully", fileName),
 	}, nil
 }
 

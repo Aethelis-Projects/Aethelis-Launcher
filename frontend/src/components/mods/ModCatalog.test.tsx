@@ -142,4 +142,43 @@ describe("ModCatalog Component", () => {
     // Ensure button did not transition to fake "Установлен"
     expect(screen.queryByText("Установлен")).toBeNull();
   });
+
+  it("installs mod successfully and triggers onModInstalled callback", async () => {
+    const mockMod: ModItemDTO = {
+      id: "mod-test-success",
+      slug: "success-mod",
+      source: "modrinth",
+      name: "Success Mod",
+      author: "tester",
+      summary: "Success test mod summary",
+      downloads: 200,
+      categories: ["optimization"],
+    };
+
+    const installSpy = vi.spyOn(launcherAPI, "installMod").mockResolvedValue({
+      success: true,
+      file_name: "success-mod-1.0.0.jar",
+      message: "Mod success-mod-1.0.0.jar installed successfully",
+    });
+    const onModInstalled = vi.fn();
+
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue([mockMod]);
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+        onModInstalled={onModInstalled}
+      />
+    ));
+
+    const installBtn = await screen.findByText("Установить");
+    fireEvent.click(installBtn);
+
+    await screen.findByText("Установлен");
+    expect(installSpy).toHaveBeenCalledWith("test-inst", mockMod);
+    expect(onModInstalled).toHaveBeenCalledWith(mockMod);
+    expect(screen.queryByTestId("mods-install-error-banner")).toBeNull();
+  });
 });
