@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -555,8 +556,11 @@ func TestWailsAdapter_Settings_CurseForgeKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get settings error: %v", err)
 	}
-	if gotSettings.Settings["curseforge_api_key"] != "cf-test-key-12345" {
-		t.Fatalf("expected saved key 'cf-test-key-12345', got %q", gotSettings.Settings["curseforge_api_key"])
+	if gotSettings.Settings["curseforge_api_key"] != "" {
+		t.Fatalf("expected masked empty curseforge_api_key, got %q", gotSettings.Settings["curseforge_api_key"])
+	}
+	if gotSettings.Settings["has_curseforge_api_key"] != "true" {
+		t.Fatalf("expected has_curseforge_api_key == 'true', got %q", gotSettings.Settings["has_curseforge_api_key"])
 	}
 
 	// 3. Clear key restores empty / fast-path
@@ -619,6 +623,8 @@ func TestWailsAdapter_InstallMod_Modrinth_Success(t *testing.T) {
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
 	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
 	adapter.SetContent(mr, nil)
 	adapter.SetHTTPClient(ts.Client())
@@ -694,6 +700,8 @@ func TestWailsAdapter_InstallMod_CurseForge_Success(t *testing.T) {
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
 	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
 	cf := curseforge.NewClient(ts.URL, "dummy-cf-key", ts.Client())
 	adapter.SetContent(nil, cf)
 	adapter.SetHTTPClient(ts.Client())
@@ -767,6 +775,8 @@ func TestWailsAdapter_InstallMod_ChecksumMismatch_Cleanup(t *testing.T) {
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
 	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
 	adapter.SetContent(mr, nil)
 	adapter.SetHTTPClient(ts.Client())
@@ -831,6 +841,8 @@ func TestWailsAdapter_InstallMod_Idempotent(t *testing.T) {
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
 	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
 	adapter.SetContent(mr, nil)
 	adapter.SetHTTPClient(ts.Client())
@@ -908,5 +920,108 @@ func TestWailsAdapter_HasBuiltinCurseForgeKey(t *testing.T) {
 	}
 	if !hasKey {
 		t.Errorf("expected hasKey=true when builtin is set")
+	}
+}
+
+func TestWailsAdapter_InstallMod_NonAllowlistedHost(t *testing.T) {
+	tempDir := t.TempDir()
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+			{
+				"id":             "ver-evil",
+				"project_id":     "evil-mod",
+				"version_number": "1.0.0",
+				"name":           "Evil Mod 1.0.0",
+				"files": []map[string]interface{}{
+					{
+						"url":      "http://evil.com/download/evil-mod.jar",
+						"filename": "evil-mod.jar",
+						"primary":  true,
+					},
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+
+	_, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-test",
+		ModID:      "evil-mod",
+		Source:     "modrinth",
+	})
+	if err == nil {
+		t.Fatalf("expected error for non-allowlisted download host, got nil")
+	}
+	if !strings.Contains(err.Error(), "download host not allowed: evil.com") {
+		t.Fatalf("expected 'download host not allowed: evil.com', got: %v", err)
+	}
+}
+
+func TestWailsAdapter_InstallMod_RedirectToUnauthorizedHost(t *testing.T) {
+	tempDir := t.TempDir()
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/redirect-mod/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-redirect",
+					"project_id":     "redirect-mod",
+					"version_number": "1.0.0",
+					"name":           "Redirect Mod 1.0.0",
+					"files": []map[string]interface{}{
+						{
+							"url":      fmt.Sprintf("http://%s/download/redirect-mod.jar", r.Host),
+							"filename": "redirect-mod.jar",
+							"primary":  true,
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/redirect-mod.jar" {
+			// Redirect to non-allowlisted host
+			http.Redirect(w, r, "http://unauthorized-evil.com/stolen.jar", http.StatusFound)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
+	adapter.SetHTTPClient(ts.Client())
+
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+
+	_, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID: "inst-test",
+		ModID:      "redirect-mod",
+		Source:     "modrinth",
+	})
+	if err == nil {
+		t.Fatalf("expected error for redirect to unauthorized host, got nil")
+	}
+	if !strings.Contains(err.Error(), "redirect to non-allowlisted host rejected") {
+		t.Fatalf("expected 'redirect to non-allowlisted host rejected', got: %v", err)
+	}
+
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	entries, _ := os.ReadDir(modsDir)
+	if len(entries) != 0 {
+		t.Fatalf("expected mods directory to be clean after redirect rejection, found %d entries", len(entries))
 	}
 }

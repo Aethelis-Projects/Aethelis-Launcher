@@ -8,7 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -44,6 +46,7 @@ type WailsAdapter struct {
 	javaDetector ports.JavaDetector
 	settingsRepo *storage.SettingsRepository
 	httpClient   *http.Client
+	allowedHosts []string
 
 	lastCrashes map[string]*CrashReportDTO
 	mu          sync.RWMutex
@@ -452,6 +455,41 @@ func (a *WailsAdapter) getHTTPClient() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
 
+func (a *WailsAdapter) SetAllowedHosts(hosts []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.allowedHosts = hosts
+}
+
+func (a *WailsAdapter) isAllowedDownloadHost(rawHost string) bool {
+	h := rawHost
+	if strings.Contains(h, ":") {
+		if hostOnly, _, err := net.SplitHostPort(rawHost); err == nil {
+			h = hostOnly
+		}
+	}
+	h = strings.ToLower(strings.TrimSpace(h))
+	if h == "" {
+		return false
+	}
+
+	if h == "cdn.modrinth.com" || h == "edge.forgecdn.net" {
+		return true
+	}
+	if strings.HasSuffix(h, ".forgecdn.net") {
+		return true
+	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, allowed := range a.allowedHosts {
+		if strings.EqualFold(h, allowed) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, error) {
 	if strings.TrimSpace(req.InstanceID) == "" {
 		return nil, errors.New("instance_id is required")
@@ -556,6 +594,14 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		return nil, errors.New("mod file download URL is missing")
 	}
 
+	parsedURL, err := url.Parse(fileToDownload.URL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid download URL: %w", err)
+	}
+	if !a.isAllowedDownloadHost(parsedURL.Host) {
+		return nil, fmt.Errorf("download host not allowed: %s", parsedURL.Host)
+	}
+
 	modsDir := a.getModsDir(req.InstanceID)
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
 		return nil, fmt.Errorf("create mods directory: %w", err)
@@ -595,13 +641,31 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		}
 	}()
 
-	client := a.getHTTPClient()
+	baseClient := a.getHTTPClient()
+	timeout := 60 * time.Second
+	if baseClient.Timeout > 0 {
+		timeout = baseClient.Timeout
+	}
+	downloadClient := &http.Client{
+		Timeout:   timeout,
+		Transport: baseClient.Transport,
+		CheckRedirect: func(redirectReq *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if !a.isAllowedDownloadHost(redirectReq.URL.Host) {
+				return fmt.Errorf("redirect to non-allowlisted host rejected: %s", redirectReq.URL.Host)
+			}
+			return nil
+		},
+	}
+
 	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fileToDownload.URL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create download request: %w", err)
 	}
 
-	resp, err := client.Do(httpReq)
+	resp, err := downloadClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("download mod file: %w", err)
 	}
@@ -660,6 +724,13 @@ func (a *WailsAdapter) GetSettings() (*GetSettingsResponse, error) {
 	all, err := repo.GetAll(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("get settings: %w", err)
+	}
+	if all == nil {
+		all = make(map[string]string)
+	}
+	if val, ok := all["curseforge_api_key"]; ok && val != "" {
+		all["has_curseforge_api_key"] = "true"
+		all["curseforge_api_key"] = ""
 	}
 	return &GetSettingsResponse{Settings: all}, nil
 }

@@ -82,7 +82,7 @@ export const App: Component = () => {
       } catch (err: unknown) {
         console.error("Polling error:", err);
       }
-    }, typeof process !== "undefined" && process.env?.NODE_ENV === "test" ? 50 : 1000);
+    }, import.meta.env.MODE === "test" ? 50 : 1000);
   };
 
   onMount(() => {
