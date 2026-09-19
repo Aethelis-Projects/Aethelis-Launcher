@@ -236,10 +236,10 @@ const mockModCatalog: ModItemDTO[] = [
 
 let mockUpdateInfo: UpdateInfoDTO = {
   has_update: false,
-  version: "0.1.6",
-  current_version: "0.1.6",
+  version: "0.1.7",
+  current_version: "0.1.7",
   release_date: "2026-09-18T12:00:00Z",
-  release_notes: "Nord Launcher v0.1.6 (stable channel) release.",
+  release_notes: "Nord Launcher v0.1.7 (stable channel) release.",
   download_url: "",
   sha256: "",
   size: 0,
@@ -263,10 +263,10 @@ export const launcherAPI = {
   resetMockUpdater(): void {
     mockUpdateInfo = {
       has_update: false,
-      version: "0.1.6",
-      current_version: "0.1.6",
+      version: "0.1.7",
+      current_version: "0.1.7",
       release_date: "2026-09-18T12:00:00Z",
-      release_notes: "Nord Launcher v0.1.6 (stable channel) release.",
+      release_notes: "Nord Launcher v0.1.7 (stable channel) release.",
       download_url: "",
       sha256: "",
       size: 0,
@@ -279,7 +279,7 @@ export const launcherAPI = {
   },
 
   async getCurrentVersion(): Promise<string> {
-    return invokeWails("GetCurrentVersion", () => "0.1.6");
+    return invokeWails("GetCurrentVersion", () => "0.1.7");
   },
 
   async listInstances(): Promise<InstanceDTO[]> {
@@ -428,8 +428,11 @@ export const launcherAPI = {
     );
   },
 
-  // Note (D2): installMod remains demo mock; backend implementation scheduled for v0.2.0.
+  // Note (C3/N4): In production, installMod fails closed with a clear demo message; full backend implementation ships in v0.2.0.
   async installMod(instanceId: string, mod: ModItemDTO): Promise<void> {
+    if (!isDevEnvironment()) {
+      throw new Error("Demo mode: mod installation backend ships in v0.2.0");
+    }
     if (!mockInstalledMods[instanceId]) {
       mockInstalledMods[instanceId] = [];
     }

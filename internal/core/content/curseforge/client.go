@@ -3,6 +3,7 @@ package curseforge
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,7 +19,7 @@ const (
 	MinecraftGameID = 432
 )
 
-// Injected via -ldflags in official CI builds; empty in open source dev builds unless BYOK is configured.
+// BuiltinAPIKey holds an optional CurseForge API key. In official releases, CurseForge uses BYOK via CURSEFORGE_API_KEY (or -X main.CurseForgeKey in custom builds).
 var BuiltinAPIKey = ""
 
 type Client struct {
@@ -94,6 +95,10 @@ func (c *Client) SearchMods(
 	loader string,
 	pageSize, index int,
 ) ([]content.ModItem, int64, error) {
+	if c.apiKey == "" {
+		return nil, 0, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
+	}
+
 	u, err := url.Parse(c.baseURL + "/v1/mods/search")
 	if err != nil {
 		return nil, 0, err
@@ -209,6 +214,10 @@ func (c *Client) GetModFiles(
 	gameVersion string,
 	loader string,
 ) ([]content.ModFile, error) {
+	if c.apiKey == "" {
+		return nil, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
+	}
+
 	u, err := url.Parse(fmt.Sprintf("%s/v1/mods/%d/files", c.baseURL, modID))
 	if err != nil {
 		return nil, err

@@ -1,5 +1,5 @@
 import { Component, createSignal, createResource, For, Show } from "solid-js";
-import { Download, Search, Check, Loader2, Layers, Globe } from "lucide-solid";
+import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { ModItemDTO, ModSource } from "../../bindings/ipc_types";
 
@@ -15,29 +15,42 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const [source, setSource] = createSignal<ModSource>("modrinth");
   const [installingId, setInstallingId] = createSignal<string | null>(null);
   const [installedIds, setInstalledIds] = createSignal<Set<string>>(new Set());
+  const [searchError, setSearchError] = createSignal<string>("");
+  const [installError, setInstallError] = createSignal<string>("");
 
   const [mods] = createResource(
     () => ({ q: query(), s: source(), gv: props.gameVersion, l: props.loader }),
     async ({ q, s, gv, l }) => {
-      return launcherAPI.searchMods({
-        query: q,
-        source: s,
-        game_version: gv,
-        loader: l,
-        limit: 20,
-        offset: 0,
-      });
+      setSearchError("");
+      try {
+        return await launcherAPI.searchMods({
+          query: q,
+          source: s,
+          game_version: gv,
+          loader: l,
+          limit: 20,
+          offset: 0,
+        });
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setSearchError(msg || "Failed to search mods");
+        return [];
+      }
     }
   );
 
   const handleInstall = async (mod: ModItemDTO) => {
     setInstallingId(mod.id);
+    setInstallError("");
     try {
       await launcherAPI.installMod(props.activeInstanceId, mod);
       setInstalledIds((prev) => new Set([...prev, mod.id]));
       if (props.onModInstalled) {
         props.onModInstalled(mod);
       }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setInstallError(msg || "Failed to install mod");
     } finally {
       setInstallingId(null);
     }
@@ -98,17 +111,52 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
         />
       </div>
 
+      <Show when={installError()}>
+        <div
+          class="p-3 rounded bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-center justify-between gap-2 font-mono"
+          data-testid="mods-install-error-banner"
+        >
+          <div class="flex items-center gap-2">
+            <AlertCircle class="w-4 h-4 text-amber-400 shrink-0" />
+            <span>{installError()}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setInstallError("")}
+            class="text-[10px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+          >
+            Закрыть
+          </button>
+        </div>
+      </Show>
+
       {/* Mod Cards List */}
       <div class="space-y-2">
         <Show when={mods.loading}>
-          <div class="flex items-center justify-center py-12 text-zinc-400 gap-2 text-xs font-mono">
+          <div
+            class="flex items-center justify-center py-12 text-zinc-400 gap-2 text-xs font-mono"
+            data-testid="mods-loading-indicator"
+          >
             <Loader2 class="w-4 h-4 animate-spin text-[#00D4B2]" />
             Поиск модификаций...
           </div>
         </Show>
 
-        <Show when={!mods.loading && (!mods() || mods()!.length === 0)}>
-          <div class="text-center py-12 border border-dashed border-zinc-800 rounded text-xs text-zinc-500">
+        <Show when={!mods.loading && searchError()}>
+          <div
+            class="p-4 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-400 flex items-center gap-2 font-mono"
+            data-testid="mods-search-error-banner"
+          >
+            <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
+            <span>Ошибка поиска модов: {searchError()}</span>
+          </div>
+        </Show>
+
+        <Show when={!mods.loading && !searchError() && (!mods() || mods()!.length === 0)}>
+          <div
+            class="text-center py-12 border border-dashed border-zinc-800 rounded text-xs text-zinc-500"
+            data-testid="mods-empty-state"
+          >
             Модификации по запросу не найдены.
           </div>
         </Show>

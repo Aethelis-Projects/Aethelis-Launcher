@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,5 +140,38 @@ func TestCurseForge_ClientDefaults(t *testing.T) {
 	c := curseforge.NewClient("", "", nil)
 	if c == nil {
 		t.Fatal("expected non-nil client")
+	}
+}
+
+func TestCurseForgeClient_NoAPIKey_FastPath(t *testing.T) {
+	reached := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = true
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := curseforge.NewClient(server.URL, "", server.Client())
+
+	_, _, err := client.SearchMods(context.Background(), "jei", "1.21.1", "fabric", 20, 0)
+	if err == nil {
+		t.Fatalf("expected error without API key, got nil")
+	}
+	if !strings.Contains(err.Error(), "API key is not configured") {
+		t.Fatalf("expected 'API key is not configured' error, got %v", err)
+	}
+	if reached {
+		t.Fatalf("expected fast-path to return before issuing HTTP request")
+	}
+
+	_, err = client.GetModFiles(context.Background(), 238222, "1.21.1", "fabric")
+	if err == nil {
+		t.Fatalf("expected error without API key for GetModFiles, got nil")
+	}
+	if !strings.Contains(err.Error(), "API key is not configured") {
+		t.Fatalf("expected 'API key is not configured' error, got %v", err)
+	}
+	if reached {
+		t.Fatalf("expected fast-path to return before issuing HTTP request")
 	}
 }
