@@ -369,6 +369,9 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"ToggleMod",
 		"DeleteMod",
 		"GetLastCrashReport",
+		"InstallMod",
+		"GetSettings",
+		"SetSetting",
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."

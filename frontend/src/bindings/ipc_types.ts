@@ -117,3 +117,28 @@ export interface UpdateApplyResultDTO {
   message?: string;
   restart_required?: boolean;
 }
+
+export interface InstallModRequest {
+  instance_id: string;
+  mod_id: string;
+  mod_slug: string;
+  mod_name: string;
+  source: ModSource;
+  game_version: string;
+  loader: string;
+}
+
+export interface InstallModResponse {
+  success: boolean;
+  file_name: string;
+  message: string;
+}
+
+export interface SetSettingRequest {
+  key: string;
+  value: string;
+}
+
+export interface GetSettingsResponse {
+  settings: Record<string, string>;
+}

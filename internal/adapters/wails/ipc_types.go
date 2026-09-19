@@ -115,3 +115,28 @@ type UpdateApplyResultDTO struct {
 	Message         string `json:"message,omitempty"`
 	RestartRequired bool   `json:"restart_required,omitempty"`
 }
+
+type InstallModRequest struct {
+	InstanceID  string `json:"instance_id"`
+	ModID       string `json:"mod_id"`
+	ModSlug     string `json:"mod_slug"`
+	ModName     string `json:"mod_name"`
+	Source      string `json:"source"`
+	GameVersion string `json:"game_version"`
+	Loader      string `json:"loader"`
+}
+
+type InstallModResponse struct {
+	Success  bool   `json:"success"`
+	FileName string `json:"file_name"`
+	Message  string `json:"message"`
+}
+
+type SetSettingRequest struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+type GetSettingsResponse struct {
+	Settings map[string]string `json:"settings"`
+}

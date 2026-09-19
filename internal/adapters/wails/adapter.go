@@ -418,3 +418,21 @@ func (a *WailsAdapter) RestartApplication() error {
 	}
 	return updater.Relaunch()
 }
+
+func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, error) {
+	return &InstallModResponse{
+		Success:  false,
+		FileName: "",
+		Message:  "InstallMod backend implementation pending",
+	}, nil
+}
+
+func (a *WailsAdapter) GetSettings() (*GetSettingsResponse, error) {
+	return &GetSettingsResponse{
+		Settings: map[string]string{},
+	}, nil
+}
+
+func (a *WailsAdapter) SetSetting(req SetSettingRequest) error {
+	return nil
+}
