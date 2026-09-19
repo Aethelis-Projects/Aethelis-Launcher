@@ -3,8 +3,11 @@ package launch_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -668,8 +671,17 @@ func TestInstanceService_UpdateInstance_FullUpsertPreservesFields(t *testing.T) 
 	nowLater := now.Add(1 * time.Hour)
 	clk.CurrentTime = nowLater
 
-	// Update instance with custom JavaPath and new name
-	updated, err := svc.UpdateInstance(context.Background(), created.ID, "Renamed-Pack", "C:\\Java21\\bin\\java.exe")
+	// Update instance with custom JavaPath, RAM, JVM args, and SkipJavaCheck
+	skipVal := true
+	updated, err := svc.UpdateInstance(context.Background(), launch.UpdateInstanceParams{
+		ID:            created.ID,
+		Name:          "Renamed-Pack",
+		JavaPath:      "C:\\Java21\\bin\\java.exe",
+		MinRAMMB:      1024,
+		MaxRAMMB:      6144,
+		JVMArgs:       []string{"-XX:+UseG1GC", "-Duser.language=ru"},
+		SkipJavaCheck: &skipVal,
+	})
 	if err != nil {
 		t.Fatalf("update instance failed: %v", err)
 	}
@@ -679,6 +691,15 @@ func TestInstanceService_UpdateInstance_FullUpsertPreservesFields(t *testing.T) 
 	}
 	if updated.JavaPath != "C:\\Java21\\bin\\java.exe" {
 		t.Errorf("expected updated JavaPath, got %q", updated.JavaPath)
+	}
+	if updated.MinRAMMB != 1024 || updated.MaxRAMMB != 6144 {
+		t.Errorf("expected updated RAM min=1024 max=6144, got min=%d max=%d", updated.MinRAMMB, updated.MaxRAMMB)
+	}
+	if len(updated.JVMArgs) != 2 || updated.JVMArgs[0] != "-XX:+UseG1GC" {
+		t.Errorf("expected updated JVMArgs, got %+v", updated.JVMArgs)
+	}
+	if !updated.SkipJavaCheck {
+		t.Errorf("expected updated SkipJavaCheck=true, got false")
 	}
 	if !updated.UpdatedAt.Equal(nowLater) {
 		t.Errorf("expected UpdatedAt %v, got %v", nowLater, updated.UpdatedAt)
@@ -696,8 +717,111 @@ func TestInstanceService_UpdateInstance_FullUpsertPreservesFields(t *testing.T) 
 	if persisted.GameVersion != "1.20.1" || persisted.Loader != domain.LoaderFabric {
 		t.Errorf("original fields corrupted: version=%q loader=%q", persisted.GameVersion, persisted.Loader)
 	}
-	if persisted.MinRAMMB != 2048 || persisted.MaxRAMMB != 4096 {
-		t.Errorf("RAM settings corrupted: min=%d max=%d", persisted.MinRAMMB, persisted.MaxRAMMB)
+	if persisted.MinRAMMB != 1024 || persisted.MaxRAMMB != 6144 {
+		t.Errorf("persisted RAM settings corrupted: min=%d max=%d", persisted.MinRAMMB, persisted.MaxRAMMB)
+	}
+	if len(persisted.JVMArgs) != 2 || persisted.JVMArgs[1] != "-Duser.language=ru" {
+		t.Errorf("persisted JVMArgs corrupted: %+v", persisted.JVMArgs)
+	}
+	if !persisted.SkipJavaCheck {
+		t.Errorf("persisted SkipJavaCheck corrupted: got false")
+	}
+}
+
+func createFakeJava(t *testing.T, major int) string {
+	tmpDir := t.TempDir()
+	var fakeJavaPath string
+	if runtime.GOOS == "windows" {
+		fakeJavaPath = filepath.Join(tmpDir, "java.cmd")
+		content := fmt.Sprintf("@echo openjdk version \"%d.0.2\" 2022-01-18>&2\r\n", major)
+		if err := os.WriteFile(fakeJavaPath, []byte(content), 0755); err != nil {
+			t.Fatalf("failed to write fake java: %v", err)
+		}
+	} else {
+		fakeJavaPath = filepath.Join(tmpDir, "java")
+		content := fmt.Sprintf("#!/bin/sh\necho 'openjdk version \"%d.0.2\" 2022-01-18' >&2\n", major)
+		if err := os.WriteFile(fakeJavaPath, []byte(content), 0755); err != nil {
+			t.Fatalf("failed to write fake java: %v", err)
+		}
+	}
+	return fakeJavaPath
+}
+
+func TestInstanceService_Launch_SkipJavaCheck(t *testing.T) {
+	now := time.Now()
+	clk := clock.NewMockClock(now)
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 7777, exitCode: 0}}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
+	svc.SetActiveAccount(&domain.Account{
+		UUID:        "uuid-steve",
+		Username:    "Steve",
+		Type:        domain.AccountOffline,
+		AccessToken: "mock-offline",
+	})
+
+	// 1.21.1 requires Java 21; we configure fake Java 17
+	fakeJava17 := createFakeJava(t, 17)
+	inst, err := svc.CreateInstance("Fabric-1.21", "1.21.1", domain.LoaderFabric)
+	if err != nil {
+		t.Fatalf("CreateInstance failed: %v", err)
+	}
+
+	// 1. With SkipJavaCheck = false (default), Launch fails closed referencing Java Manager
+	_, err = svc.UpdateInstance(context.Background(), launch.UpdateInstanceParams{
+		ID:       inst.ID,
+		JavaPath: fakeJava17,
+	})
+	if err != nil {
+		t.Fatalf("UpdateInstance failed: %v", err)
+	}
+
+	_, err = svc.Launch(context.Background(), inst.ID)
+	if err == nil {
+		t.Fatal("expected fail-closed error for Java 17 on Minecraft 1.21.1, got nil")
+	}
+	if !strings.Contains(err.Error(), "Java 21 required for Minecraft 1.21.1 (found Java 17 at ") {
+		t.Errorf("error did not contain expected version mismatch prefix: %v", err)
+	}
+	if !strings.Contains(err.Error(), "install Temurin 21 via Java Manager") {
+		t.Errorf("error did not contain reference to Java Manager: %v", err)
+	}
+
+	// 2. With SkipJavaCheck = true, Launch bypasses major mismatch
+	skipCheck := true
+	_, err = svc.UpdateInstance(context.Background(), launch.UpdateInstanceParams{
+		ID:            inst.ID,
+		SkipJavaCheck: &skipCheck,
+	})
+	if err != nil {
+		t.Fatalf("UpdateInstance with SkipJavaCheck failed: %v", err)
+	}
+
+	pid, err := svc.Launch(context.Background(), inst.ID)
+	if err != nil {
+		t.Fatalf("expected Launch to succeed with SkipJavaCheck=true, got error: %v", err)
+	}
+	if pid != 7777 {
+		t.Errorf("expected PID 7777, got %d", pid)
+	}
+
+	// 3. Even with SkipJavaCheck = true, a non-existent or unexecutable JavaPath fails closed
+	_, err = svc.UpdateInstance(context.Background(), launch.UpdateInstanceParams{
+		ID:       inst.ID,
+		JavaPath: filepath.Join(t.TempDir(), "nonexistent_java.exe"),
+	})
+	if err != nil {
+		t.Fatalf("UpdateInstance with bad path failed: %v", err)
+	}
+
+	_, err = svc.Launch(context.Background(), inst.ID)
+	if err == nil {
+		t.Fatal("expected error executing non-existent Java executable, got nil")
+	}
+	if !strings.Contains(err.Error(), "failed to execute configured Java") {
+		t.Errorf("expected 'failed to execute configured Java', got: %v", err)
 	}
 }
 

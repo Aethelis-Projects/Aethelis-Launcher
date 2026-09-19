@@ -13,7 +13,12 @@ export interface InstanceDTO {
   loader_version?: string;
   icon_path?: string;
   java_path?: string;
+  min_ram_mb: number;
+  max_ram_mb: number;
+  jvm_args: string[];
+  skip_java_check: boolean;
   state: InstanceState;
+  last_played_at?: string;
   total_play_seconds: number;
 }
 
@@ -28,6 +33,11 @@ export interface UpdateInstanceRequest {
   id: string;
   name?: string;
   java_path?: string;
+  clear_java_path?: boolean;
+  min_ram_mb?: number;
+  max_ram_mb?: number;
+  jvm_args?: string[];
+  skip_java_check?: boolean;
 }
 
 export interface LaunchResponse {

@@ -120,6 +120,10 @@ func (a *WailsAdapter) SetSettings(repo *storage.SettingsRepository) {
 }
 
 func toInstanceDTO(inst *domain.Instance) InstanceDTO {
+	jvmArgs := inst.JVMArgs
+	if jvmArgs == nil {
+		jvmArgs = []string{}
+	}
 	return InstanceDTO{
 		ID:               inst.ID,
 		Name:             inst.Name,
@@ -128,7 +132,12 @@ func toInstanceDTO(inst *domain.Instance) InstanceDTO {
 		LoaderVersion:    inst.LoaderVer,
 		IconPath:         inst.IconPath,
 		JavaPath:         inst.JavaPath,
+		MinRAMMB:         inst.MinRAMMB,
+		MaxRAMMB:         inst.MaxRAMMB,
+		JVMArgs:          jvmArgs,
+		SkipJavaCheck:    inst.SkipJavaCheck,
 		State:            string(inst.State),
+		LastPlayedAt:     inst.LastPlayedAt,
 		TotalPlaySeconds: inst.TotalPlaySec,
 	}
 }
@@ -148,7 +157,10 @@ func (a *WailsAdapter) CreateInstance(req CreateInstanceRequest) (*InstanceDTO, 
 		return nil, fmt.Errorf("create instance: %w", err)
 	}
 	if req.JavaPath != "" {
-		if updated, err := a.svc.UpdateInstance(context.Background(), inst.ID, "", req.JavaPath); err == nil {
+		if updated, err := a.svc.UpdateInstance(context.Background(), launch.UpdateInstanceParams{
+			ID:       inst.ID,
+			JavaPath: req.JavaPath,
+		}); err == nil {
 			inst = updated
 		}
 	}
@@ -161,7 +173,16 @@ func (a *WailsAdapter) UpdateInstance(req UpdateInstanceRequest) (*InstanceDTO, 
 	if req.ID == "" {
 		return nil, fmt.Errorf("instance ID cannot be empty")
 	}
-	inst, err := a.svc.UpdateInstance(context.Background(), req.ID, req.Name, req.JavaPath)
+	inst, err := a.svc.UpdateInstance(context.Background(), launch.UpdateInstanceParams{
+		ID:            req.ID,
+		Name:          req.Name,
+		JavaPath:      req.JavaPath,
+		ClearJavaPath: req.ClearJavaPath,
+		MinRAMMB:      req.MinRAMMB,
+		MaxRAMMB:      req.MaxRAMMB,
+		JVMArgs:       req.JVMArgs,
+		SkipJavaCheck: req.SkipJavaCheck,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("update instance: %w", err)
 	}

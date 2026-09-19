@@ -12,15 +12,20 @@ package wails
 import "time"
 
 type InstanceDTO struct {
-	ID               string ` + "`" + `json:"id"` + "`" + `
-	Name             string ` + "`" + `json:"name"` + "`" + `
-	GameVersion      string ` + "`" + `json:"game_version"` + "`" + `
-	Loader           string ` + "`" + `json:"loader"` + "`" + `
-	LoaderVersion    string ` + "`" + `json:"loader_version,omitempty"` + "`" + `
-	IconPath         string ` + "`" + `json:"icon_path,omitempty"` + "`" + `
-	JavaPath         string ` + "`" + `json:"java_path,omitempty"` + "`" + `
-	State            string ` + "`" + `json:"state"` + "`" + `
-	TotalPlaySeconds int64  ` + "`" + `json:"total_play_seconds"` + "`" + `
+	ID               string     ` + "`" + `json:"id"` + "`" + `
+	Name             string     ` + "`" + `json:"name"` + "`" + `
+	GameVersion      string     ` + "`" + `json:"game_version"` + "`" + `
+	Loader           string     ` + "`" + `json:"loader"` + "`" + `
+	LoaderVersion    string     ` + "`" + `json:"loader_version,omitempty"` + "`" + `
+	IconPath         string     ` + "`" + `json:"icon_path,omitempty"` + "`" + `
+	JavaPath         string     ` + "`" + `json:"java_path,omitempty"` + "`" + `
+	MinRAMMB         int        ` + "`" + `json:"min_ram_mb"` + "`" + `
+	MaxRAMMB         int        ` + "`" + `json:"max_ram_mb"` + "`" + `
+	JVMArgs          []string   ` + "`" + `json:"jvm_args"` + "`" + `
+	SkipJavaCheck    bool       ` + "`" + `json:"skip_java_check"` + "`" + `
+	State            string     ` + "`" + `json:"state"` + "`" + `
+	LastPlayedAt     *time.Time ` + "`" + `json:"last_played_at,omitempty"` + "`" + `
+	TotalPlaySeconds int64      ` + "`" + `json:"total_play_seconds"` + "`" + `
 }
 
 type CreateInstanceRequest struct {
@@ -31,9 +36,14 @@ type CreateInstanceRequest struct {
 }
 
 type UpdateInstanceRequest struct {
-	ID       string ` + "`" + `json:"id"` + "`" + `
-	Name     string ` + "`" + `json:"name,omitempty"` + "`" + `
-	JavaPath string ` + "`" + `json:"java_path,omitempty"` + "`" + `
+	ID            string   ` + "`" + `json:"id"` + "`" + `
+	Name          string   ` + "`" + `json:"name,omitempty"` + "`" + `
+	JavaPath      string   ` + "`" + `json:"java_path,omitempty"` + "`" + `
+	ClearJavaPath bool     ` + "`" + `json:"clear_java_path,omitempty"` + "`" + `
+	MinRAMMB      int      ` + "`" + `json:"min_ram_mb,omitempty"` + "`" + `
+	MaxRAMMB      int      ` + "`" + `json:"max_ram_mb,omitempty"` + "`" + `
+	JVMArgs       []string ` + "`" + `json:"jvm_args,omitempty"` + "`" + `
+	SkipJavaCheck *bool    ` + "`" + `json:"skip_java_check,omitempty"` + "`" + `
 }
 
 type LaunchResponse struct {
@@ -173,7 +183,12 @@ export interface InstanceDTO {
   loader_version?: string;
   icon_path?: string;
   java_path?: string;
+  min_ram_mb: number;
+  max_ram_mb: number;
+  jvm_args: string[];
+  skip_java_check: boolean;
   state: InstanceState;
+  last_played_at?: string;
   total_play_seconds: number;
 }
 
@@ -188,6 +203,11 @@ export interface UpdateInstanceRequest {
   id: string;
   name?: string;
   java_path?: string;
+  clear_java_path?: boolean;
+  min_ram_mb?: number;
+  max_ram_mb?: number;
+  jvm_args?: string[];
+  skip_java_check?: boolean;
 }
 
 export interface LaunchResponse {

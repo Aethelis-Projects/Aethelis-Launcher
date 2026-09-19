@@ -2,6 +2,7 @@ package storage_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -252,5 +253,79 @@ func TestInstanceRepository_EnsureDefaultInstance(t *testing.T) {
 	listAfter, err := instRepo.ListAll(ctx)
 	if err != nil || len(listAfter) != 1 {
 		t.Fatalf("expected still exactly 1 instance, got %d", len(listAfter))
+	}
+}
+
+func TestInstanceRepository_Migration00004_Upgrade(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "upgrade_test.db")
+
+	// 1. Create a legacy v0.2.2 database schema without skip_java_check
+	rawDB, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw sqlite: %v", err)
+	}
+
+	legacySchema := `
+	CREATE TABLE instances (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		game_version TEXT NOT NULL,
+		loader TEXT NOT NULL,
+		loader_version TEXT NOT NULL DEFAULT '',
+		icon_path TEXT NOT NULL DEFAULT '',
+		java_path TEXT NOT NULL DEFAULT '',
+		min_ram_mb INTEGER NOT NULL DEFAULT 2048,
+		max_ram_mb INTEGER NOT NULL DEFAULT 4096,
+		jvm_args TEXT NOT NULL DEFAULT '[]',
+		state TEXT NOT NULL DEFAULT 'idle',
+		last_played_at DATETIME,
+		total_play_seconds INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	INSERT INTO instances (id, name, game_version, loader, min_ram_mb, max_ram_mb, jvm_args, state, created_at, updated_at)
+	VALUES ('legacy-pack', 'Legacy Pack', '1.20.1', 'fabric', 2048, 4096, '["-XX:+UseG1GC"]', 'idle', '2026-09-01T00:00:00Z', '2026-09-01T00:00:00Z');
+	`
+	if _, err := rawDB.Exec(legacySchema); err != nil {
+		t.Fatalf("setup legacy schema: %v", err)
+	}
+	_ = rawDB.Close()
+
+	// 2. Open via storage.Open (which applies Goose migrations including 00004)
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("storage.Open failed during migration: %v", err)
+	}
+	defer db.Close()
+
+	instRepo := storage.NewInstanceRepository(db)
+
+	// 3. Verify existing instance loads cleanly with default SkipJavaCheck == false
+	inst, err := instRepo.GetByID(ctx, "legacy-pack")
+	if err != nil {
+		t.Fatalf("GetByID legacy-pack failed: %v", err)
+	}
+	if inst.SkipJavaCheck {
+		t.Errorf("expected SkipJavaCheck to be false by default, got true")
+	}
+	if inst.Name != "Legacy Pack" || inst.GameVersion != "1.20.1" {
+		t.Errorf("expected preserved legacy fields, got %+v", inst)
+	}
+
+	// 4. Update SkipJavaCheck to true and persist
+	inst.SkipJavaCheck = true
+	if err := instRepo.Save(ctx, inst); err != nil {
+		t.Fatalf("Save instance with SkipJavaCheck=true failed: %v", err)
+	}
+
+	// 5. Reload and assert SkipJavaCheck is true
+	updated, err := instRepo.GetByID(ctx, "legacy-pack")
+	if err != nil {
+		t.Fatalf("re-fetch legacy-pack failed: %v", err)
+	}
+	if !updated.SkipJavaCheck {
+		t.Errorf("expected SkipJavaCheck to be true after update, got false")
 	}
 }

@@ -25,12 +25,17 @@ func (r *InstanceRepository) Save(ctx context.Context, inst *domain.Instance) er
 		return fmt.Errorf("marshal jvm args: %w", err)
 	}
 
+	skipCheckInt := 0
+	if inst.SkipJavaCheck {
+		skipCheckInt = 1
+	}
+
 	query := `
 	INSERT INTO instances (
 		id, name, game_version, loader, loader_version, icon_path, java_path,
-		min_ram_mb, max_ram_mb, jvm_args, state, last_played_at, total_play_seconds,
+		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, state, last_played_at, total_play_seconds,
 		created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		game_version = excluded.game_version,
@@ -41,6 +46,7 @@ func (r *InstanceRepository) Save(ctx context.Context, inst *domain.Instance) er
 		min_ram_mb = excluded.min_ram_mb,
 		max_ram_mb = excluded.max_ram_mb,
 		jvm_args = excluded.jvm_args,
+		skip_java_check = excluded.skip_java_check,
 		state = excluded.state,
 		last_played_at = excluded.last_played_at,
 		total_play_seconds = excluded.total_play_seconds,
@@ -64,6 +70,7 @@ func (r *InstanceRepository) Save(ctx context.Context, inst *domain.Instance) er
 		inst.MinRAMMB,
 		inst.MaxRAMMB,
 		string(jvmArgsJSON),
+		skipCheckInt,
 		string(inst.State),
 		lastPlayed,
 		inst.TotalPlaySec,
@@ -80,7 +87,7 @@ func (r *InstanceRepository) GetByID(ctx context.Context, id string) (*domain.In
 	query := `
 	SELECT
 		id, name, game_version, loader, loader_version, icon_path, java_path,
-		min_ram_mb, max_ram_mb, jvm_args, state, last_played_at, total_play_seconds,
+		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, state, last_played_at, total_play_seconds,
 		created_at, updated_at
 	FROM instances WHERE id = ?;
 	`
@@ -93,7 +100,7 @@ func (r *InstanceRepository) ListAll(ctx context.Context) ([]*domain.Instance, e
 	query := `
 	SELECT
 		id, name, game_version, loader, loader_version, icon_path, java_path,
-		min_ram_mb, max_ram_mb, jvm_args, state, last_played_at, total_play_seconds,
+		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, state, last_played_at, total_play_seconds,
 		created_at, updated_at
 	FROM instances ORDER BY created_at DESC;
 	`
@@ -176,7 +183,7 @@ type rowScanner interface {
 func (r *InstanceRepository) scanInstance(s rowScanner) (*domain.Instance, error) {
 	var (
 		id, name, gameVersion, loader, loaderVer, iconPath, javaPath, jvmArgsStr, stateStr string
-		minRAM, maxRAM                                                                      int
+		minRAM, maxRAM, skipCheckInt                                                        int
 		totalPlaySec                                                                        int64
 		lastPlayedStr                                                                       sql.NullString
 		createdAtStr, updatedAtStr                                                          string
@@ -184,7 +191,7 @@ func (r *InstanceRepository) scanInstance(s rowScanner) (*domain.Instance, error
 
 	err := s.Scan(
 		&id, &name, &gameVersion, &loader, &loaderVer, &iconPath, &javaPath,
-		&minRAM, &maxRAM, &jvmArgsStr, &stateStr, &lastPlayedStr, &totalPlaySec,
+		&minRAM, &maxRAM, &jvmArgsStr, &skipCheckInt, &stateStr, &lastPlayedStr, &totalPlaySec,
 		&createdAtStr, &updatedAtStr,
 	)
 	if err != nil {
@@ -211,20 +218,21 @@ func (r *InstanceRepository) scanInstance(s rowScanner) (*domain.Instance, error
 	}
 
 	return &domain.Instance{
-		ID:           id,
-		Name:         name,
-		GameVersion:  gameVersion,
-		Loader:       domain.LoaderType(loader),
-		LoaderVer:    loaderVer,
-		IconPath:     iconPath,
-		JavaPath:     javaPath,
-		MinRAMMB:     minRAM,
-		MaxRAMMB:     maxRAM,
-		JVMArgs:      jvmArgs,
-		State:        domain.InstanceState(stateStr),
-		LastPlayedAt: lastPlayed,
-		TotalPlaySec: totalPlaySec,
-		CreatedAt:    createdAt,
-		UpdatedAt:    updatedAt,
+		ID:            id,
+		Name:          name,
+		GameVersion:   gameVersion,
+		Loader:        domain.LoaderType(loader),
+		LoaderVer:     loaderVer,
+		IconPath:      iconPath,
+		JavaPath:      javaPath,
+		MinRAMMB:      minRAM,
+		MaxRAMMB:      maxRAM,
+		JVMArgs:       jvmArgs,
+		SkipJavaCheck: skipCheckInt != 0,
+		State:         domain.InstanceState(stateStr),
+		LastPlayedAt:  lastPlayed,
+		TotalPlaySec:  totalPlaySec,
+		CreatedAt:     createdAt,
+		UpdatedAt:     updatedAt,
 	}, nil
 }

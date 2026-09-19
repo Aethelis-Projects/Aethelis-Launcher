@@ -47,6 +47,7 @@ type Instance struct {
 	MinRAMMB     int           `json:"min_ram_mb"`
 	MaxRAMMB     int           `json:"max_ram_mb"`
 	JVMArgs      []string      `json:"jvm_args"`
+	SkipJavaCheck bool         `json:"skip_java_check"`
 	State        InstanceState `json:"state"`
 	LastPlayedAt *time.Time    `json:"last_played_at,omitempty"`
 	TotalPlaySec int64         `json:"total_play_seconds"`

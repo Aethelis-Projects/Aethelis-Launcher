@@ -163,10 +163,21 @@ func (s *InstanceService) GetInstance(id string) (*domain.Instance, error) {
 	return &copyInst, nil
 }
 
-// UpdateInstance updates mutable properties (Name, JavaPath) of an existing instance.
+type UpdateInstanceParams struct {
+	ID            string
+	Name          string
+	JavaPath      string
+	ClearJavaPath bool
+	MinRAMMB      int
+	MaxRAMMB      int
+	JVMArgs       []string
+	SkipJavaCheck *bool
+}
+
+// UpdateInstance updates mutable properties (Name, JavaPath, RAM, JVMArgs, SkipJavaCheck) of an existing instance.
 // It loads the instance first to preserve all other fields, then persists the updated instance.
-func (s *InstanceService) UpdateInstance(ctx context.Context, id, name, javaPath string) (*domain.Instance, error) {
-	if id == "" {
+func (s *InstanceService) UpdateInstance(ctx context.Context, p UpdateInstanceParams) (*domain.Instance, error) {
+	if p.ID == "" {
 		return nil, fmt.Errorf("%w: instance ID cannot be empty", domain.ErrInvalidConfig)
 	}
 
@@ -176,25 +187,41 @@ func (s *InstanceService) UpdateInstance(ctx context.Context, id, name, javaPath
 	var inst *domain.Instance
 	if s.repo != nil {
 		var err error
-		inst, err = s.repo.GetByID(ctx, id)
+		inst, err = s.repo.GetByID(ctx, p.ID)
 		if err != nil || inst == nil {
 			return nil, domain.ErrInstanceNotFound
 		}
 	} else {
-		existing, ok := s.instances[id]
+		existing, ok := s.instances[p.ID]
 		if !ok {
 			return nil, domain.ErrInstanceNotFound
 		}
 		inst = existing
 	}
 
-	if name != "" {
-		inst.Name = name
+	if p.Name != "" {
+		inst.Name = p.Name
 	}
-	inst.JavaPath = javaPath
+	if p.ClearJavaPath {
+		inst.JavaPath = ""
+	} else if p.JavaPath != "" {
+		inst.JavaPath = p.JavaPath
+	}
+	if p.MinRAMMB > 0 {
+		inst.MinRAMMB = p.MinRAMMB
+	}
+	if p.MaxRAMMB > 0 {
+		inst.MaxRAMMB = p.MaxRAMMB
+	}
+	if p.JVMArgs != nil {
+		inst.JVMArgs = p.JVMArgs
+	}
+	if p.SkipJavaCheck != nil {
+		inst.SkipJavaCheck = *p.SkipJavaCheck
+	}
 	inst.UpdatedAt = s.clock.Now()
 
-	s.instances[id] = inst
+	s.instances[p.ID] = inst
 
 	if s.repo != nil {
 		if err := s.repo.Save(ctx, inst); err != nil {
@@ -265,8 +292,8 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 			}
 			return 0, fmt.Errorf("could not determine Java version for %s: %w", javaExec, parseErr)
 		}
-		if reqMajor > 0 && major != reqMajor {
-			return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d or set Java path in instance settings", reqMajor, inst.GameVersion, major, javaExec, reqMajor)
+		if !inst.SkipJavaCheck && reqMajor > 0 && major != reqMajor {
+			return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d via Java Manager or set Java path in instance settings", reqMajor, inst.GameVersion, major, javaExec, reqMajor)
 		}
 	} else if s.java != nil {
 		reqMajor, _ := java.ResolveJavaMajor(inst.GameVersion)
@@ -282,9 +309,9 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 		}
 		if javaExec == "" {
 			if len(installs) > 0 {
-				return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d or set Java path in instance settings", reqMajor, inst.GameVersion, installs[0].MajorVersion, installs[0].Path, reqMajor)
+				return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d via Java Manager or set Java path in instance settings", reqMajor, inst.GameVersion, installs[0].MajorVersion, installs[0].Path, reqMajor)
 			}
-			return 0, fmt.Errorf("no compatible Java %d installation found for Minecraft %s; install Temurin %d or configure custom Java path in instance settings", reqMajor, inst.GameVersion, reqMajor)
+			return 0, fmt.Errorf("no compatible Java %d installation found for Minecraft %s; install Temurin %d via Java Manager or configure custom Java path in instance settings", reqMajor, inst.GameVersion, reqMajor)
 		}
 	} else {
 		// Headless / mock test environment fallback

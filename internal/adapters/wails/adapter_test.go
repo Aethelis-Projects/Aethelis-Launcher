@@ -1051,11 +1051,16 @@ func TestWailsAdapter_UpdateInstance(t *testing.T) {
 		t.Errorf("expected JavaPath %q, got %q", "/initial/java/bin/java", dto.JavaPath)
 	}
 
-	// 2. Update Name and JavaPath
+	// 2. Update Name, JavaPath, RAM, JVMArgs, and SkipJavaCheck
+	skipTrue := true
 	updateReq := wails.UpdateInstanceRequest{
-		ID:       dto.ID,
-		Name:     "Vanilla-1.21-CustomJava",
-		JavaPath: "/opt/temurin-21/bin/java",
+		ID:            dto.ID,
+		Name:          "Vanilla-1.21-CustomJava",
+		JavaPath:      "/opt/temurin-21/bin/java",
+		MinRAMMB:      1024,
+		MaxRAMMB:      6144,
+		JVMArgs:       []string{"-XX:+UseG1GC", "-Duser.language=ru"},
+		SkipJavaCheck: &skipTrue,
 	}
 	updatedDTO, err := adapter.UpdateInstance(updateReq)
 	if err != nil {
@@ -1067,6 +1072,15 @@ func TestWailsAdapter_UpdateInstance(t *testing.T) {
 	if updatedDTO.JavaPath != "/opt/temurin-21/bin/java" {
 		t.Errorf("expected updated JavaPath, got %q", updatedDTO.JavaPath)
 	}
+	if updatedDTO.MinRAMMB != 1024 || updatedDTO.MaxRAMMB != 6144 {
+		t.Errorf("expected RAM 1024/6144, got %d/%d", updatedDTO.MinRAMMB, updatedDTO.MaxRAMMB)
+	}
+	if len(updatedDTO.JVMArgs) != 2 || updatedDTO.JVMArgs[0] != "-XX:+UseG1GC" {
+		t.Errorf("expected JVMArgs updated, got %+v", updatedDTO.JVMArgs)
+	}
+	if !updatedDTO.SkipJavaCheck {
+		t.Errorf("expected SkipJavaCheck=true, got false")
+	}
 	if updatedDTO.GameVersion != "1.21.1" || updatedDTO.Loader != "vanilla" {
 		t.Errorf("preserved fields altered: version=%q loader=%q", updatedDTO.GameVersion, updatedDTO.Loader)
 	}
@@ -1076,11 +1090,49 @@ func TestWailsAdapter_UpdateInstance(t *testing.T) {
 	if len(list) != 1 {
 		t.Fatalf("expected 1 instance, got %d", len(list))
 	}
-	if list[0].JavaPath != "/opt/temurin-21/bin/java" {
-		t.Errorf("ListInstances JavaPath mismatch: %q", list[0].JavaPath)
+	if list[0].JavaPath != "/opt/temurin-21/bin/java" || list[0].MinRAMMB != 1024 || list[0].MaxRAMMB != 6144 {
+		t.Errorf("ListInstances mismatch: %+v", list[0])
 	}
 
-	// 4. Update with empty ID returns error
+	// 4. Verify BuildLaunchArguments receives updated RAM and JVMArgs
+	instDomain, err := svc.GetInstance(dto.ID)
+	if err != nil {
+		t.Fatalf("GetInstance failed: %v", err)
+	}
+	launchArgs, err := launch.BuildLaunchArguments(launch.LaunchConfig{
+		Instance:    instDomain,
+		Account:     &domain.Account{UUID: "uuid-1", Username: "Player"},
+		VersionMeta: &launch.VersionJSON{ID: "1.21.1", MainClass: "net.minecraft.client.main.Main"},
+		GameDir:     "/game",
+		AssetsDir:   "/assets",
+		NativesDir:  "/natives",
+		ResolutionW: 854,
+		ResolutionH: 480,
+	})
+	if err != nil {
+		t.Fatalf("BuildLaunchArguments failed: %v", err)
+	}
+	joinedArgs := strings.Join(launchArgs, " ")
+	if !strings.Contains(joinedArgs, "-Xms1024M") || !strings.Contains(joinedArgs, "-Xmx6144M") {
+		t.Errorf("expected -Xms1024M -Xmx6144M in args, got: %s", joinedArgs)
+	}
+	if !strings.Contains(joinedArgs, "-XX:+UseG1GC") || !strings.Contains(joinedArgs, "-Duser.language=ru") {
+		t.Errorf("expected custom JVM args in args, got: %s", joinedArgs)
+	}
+
+	// 5. Test ClearJavaPath
+	clearedDTO, err := adapter.UpdateInstance(wails.UpdateInstanceRequest{
+		ID:            dto.ID,
+		ClearJavaPath: true,
+	})
+	if err != nil {
+		t.Fatalf("UpdateInstance with ClearJavaPath failed: %v", err)
+	}
+	if clearedDTO.JavaPath != "" {
+		t.Errorf("expected cleared JavaPath, got %q", clearedDTO.JavaPath)
+	}
+
+	// 6. Update with empty ID returns error
 	_, err = adapter.UpdateInstance(wails.UpdateInstanceRequest{ID: ""})
 	if err == nil {
 		t.Error("expected error for empty ID, got nil")
