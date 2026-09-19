@@ -25,6 +25,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/adapters/wails"
 	"github.com/nord-launcher/launcher/internal/core/auth"
 	"github.com/nord-launcher/launcher/internal/core/clock"
+	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/ports"
@@ -508,4 +509,62 @@ func BenchmarkWailsAdapter_IPCDispatch(b *testing.B) {
 		p95 := samples[int(float64(sampleCount)*0.95)]
 		fmt.Printf("# p95: %d ns\n", p95)
 	})
+}
+
+func TestWailsAdapter_Settings_CurseForgeKey(t *testing.T) {
+	db, err := storage.Open("file:settings_test?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatalf("open in-memory db: %v", err)
+	}
+	defer db.Close()
+
+	settingsRepo := storage.NewSettingsRepository(db)
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetSettings(settingsRepo)
+
+	cf := curseforge.NewClient("http://127.0.0.1:0", "", nil)
+	adapter.SetContent(nil, cf)
+
+	// 1. Initial settings empty
+	initSettings, err := adapter.GetSettings()
+	if err != nil {
+		t.Fatalf("get settings error: %v", err)
+	}
+	if len(initSettings.Settings) != 0 {
+		t.Fatalf("expected empty settings initially, got %+v", initSettings.Settings)
+	}
+
+	// 2. Set CurseForge key
+	err = adapter.SetSetting(wails.SetSettingRequest{
+		Key:   "curseforge_api_key",
+		Value: "cf-test-key-12345",
+	})
+	if err != nil {
+		t.Fatalf("set setting error: %v", err)
+	}
+
+	if cf.APIKey() != "cf-test-key-12345" {
+		t.Fatalf("expected cf client key 'cf-test-key-12345', got %q", cf.APIKey())
+	}
+
+	gotSettings, err := adapter.GetSettings()
+	if err != nil {
+		t.Fatalf("get settings error: %v", err)
+	}
+	if gotSettings.Settings["curseforge_api_key"] != "cf-test-key-12345" {
+		t.Fatalf("expected saved key 'cf-test-key-12345', got %q", gotSettings.Settings["curseforge_api_key"])
+	}
+
+	// 3. Clear key restores empty / fast-path
+	err = adapter.SetSetting(wails.SetSettingRequest{
+		Key:   "curseforge_api_key",
+		Value: "",
+	})
+	if err != nil {
+		t.Fatalf("clear setting error: %v", err)
+	}
+
+	if cf.APIKey() != "" {
+		t.Fatalf("expected empty cf key after clear, got %q", cf.APIKey())
+	}
 }

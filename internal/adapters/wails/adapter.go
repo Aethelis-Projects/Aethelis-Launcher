@@ -16,6 +16,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/ports"
+	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
 )
 
@@ -32,6 +33,7 @@ type WailsAdapter struct {
 	updater      *updater.AutoUpdater
 	relauncher   updater.RelauncherFunc
 	javaDetector ports.JavaDetector
+	settingsRepo *storage.SettingsRepository
 
 	lastCrashes map[string]*CrashReportDTO
 	mu          sync.RWMutex
@@ -96,6 +98,12 @@ func (a *WailsAdapter) SetContent(mr *modrinth.Client, cf *curseforge.Client) {
 func (a *WailsAdapter) SetFileSystem(fs ports.FileSystem, instancesDir string) {
 	a.fileSys = fs
 	a.instancesDir = instancesDir
+}
+
+func (a *WailsAdapter) SetSettings(repo *storage.SettingsRepository) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.settingsRepo = repo
 }
 
 func (a *WailsAdapter) ListInstances() []InstanceDTO {
@@ -428,11 +436,43 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 }
 
 func (a *WailsAdapter) GetSettings() (*GetSettingsResponse, error) {
-	return &GetSettingsResponse{
-		Settings: map[string]string{},
-	}, nil
+	a.mu.RLock()
+	repo := a.settingsRepo
+	a.mu.RUnlock()
+
+	if repo == nil {
+		return &GetSettingsResponse{Settings: map[string]string{}}, nil
+	}
+
+	all, err := repo.GetAll(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("get settings: %w", err)
+	}
+	return &GetSettingsResponse{Settings: all}, nil
 }
 
 func (a *WailsAdapter) SetSetting(req SetSettingRequest) error {
+	a.mu.RLock()
+	repo := a.settingsRepo
+	cf := a.curseforge
+	a.mu.RUnlock()
+
+	if repo != nil {
+		if err := repo.Set(context.Background(), req.Key, req.Value); err != nil {
+			return fmt.Errorf("save setting: %w", err)
+		}
+	}
+
+	if req.Key == "curseforge_api_key" && cf != nil {
+		resolvedKey := req.Value
+		if resolvedKey == "" {
+			resolvedKey = os.Getenv("CURSEFORGE_API_KEY")
+			if resolvedKey == "" {
+				resolvedKey = curseforge.BuiltinAPIKey
+			}
+		}
+		cf.SetAPIKey(resolvedKey)
+	}
+
 	return nil
 }

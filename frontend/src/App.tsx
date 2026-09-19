@@ -8,6 +8,7 @@ import { InstalledModsManager } from "./components/mods/InstalledModsManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
+import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
@@ -390,7 +391,8 @@ export const App: Component = () => {
 
           {/* VIEW 5: Settings & Updates */}
           <Show when={currentNav() === "settings"}>
-            <div class="max-w-3xl mx-auto">
+            <div class="max-w-3xl mx-auto space-y-6">
+              <CurseForgeKeyCard />
               <UpdatePanel
                 channel="stable"
                 onUpdateAvailable={(info) => setAvailableUpdate(info)}

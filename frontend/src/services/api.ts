@@ -11,6 +11,10 @@ import type {
   DeleteModRequest,
   UpdateInfoDTO,
   UpdateApplyResultDTO,
+  GetSettingsResponse,
+  SetSettingRequest,
+  InstallModRequest,
+  InstallModResponse,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -30,6 +34,9 @@ interface WailsAdapterBindings {
   ToggleMod?: (req: ToggleModRequest) => Promise<void>;
   DeleteMod?: (req: DeleteModRequest) => Promise<void>;
   GetLastCrashReport?: (instanceId: string) => Promise<CrashReportDTO | null>;
+  GetSettings?: () => Promise<GetSettingsResponse>;
+  SetSetting?: (req: SetSettingRequest) => Promise<void>;
+  InstallMod?: (req: InstallModRequest) => Promise<InstallModResponse>;
   [key: string]: unknown;
 }
 
@@ -251,6 +258,8 @@ let mockApplyResult: UpdateApplyResultDTO = {
   restart_required: true,
 };
 
+let mockSettings: Record<string, string> = {};
+
 export const launcherAPI = {
   setMockUpdateInfo(info: UpdateInfoDTO): void {
     mockUpdateInfo = { ...info };
@@ -460,5 +469,23 @@ export const launcherAPI = {
 
   async restartApplication(): Promise<void> {
     return invokeWails("RestartApplication", () => {});
+  },
+
+  setMockSettings(settings: Record<string, string>): void {
+    mockSettings = { ...settings };
+  },
+
+  async getSettings(): Promise<GetSettingsResponse> {
+    return invokeWails("GetSettings", () => ({ settings: { ...mockSettings } }));
+  },
+
+  async setSetting(key: string, value: string): Promise<void> {
+    return invokeWails(
+      "SetSetting",
+      () => {
+        mockSettings[key] = value;
+      },
+      { key, value }
+    );
   },
 };

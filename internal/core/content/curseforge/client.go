@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/content"
@@ -26,6 +27,7 @@ type Client struct {
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
+	mu         sync.RWMutex
 }
 
 func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
@@ -43,6 +45,18 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
 		apiKey:     apiKey,
 		httpClient: httpClient,
 	}
+}
+
+func (c *Client) SetAPIKey(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.apiKey = key
+}
+
+func (c *Client) APIKey() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.apiKey
 }
 
 // LoaderToTypeMap maps string loader names to CurseForge numeric enum.
@@ -95,7 +109,8 @@ func (c *Client) SearchMods(
 	loader string,
 	pageSize, index int,
 ) ([]content.ModItem, int64, error) {
-	if c.apiKey == "" {
+	apiKey := c.APIKey()
+	if apiKey == "" {
 		return nil, 0, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
 	}
 
@@ -128,8 +143,8 @@ func (c *Client) SearchMods(
 	if err != nil {
 		return nil, 0, err
 	}
-	if c.apiKey != "" {
-		req.Header.Set("x-api-key", c.apiKey)
+	if apiKey != "" {
+		req.Header.Set("x-api-key", apiKey)
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -214,7 +229,8 @@ func (c *Client) GetModFiles(
 	gameVersion string,
 	loader string,
 ) ([]content.ModFile, error) {
-	if c.apiKey == "" {
+	apiKey := c.APIKey()
+	if apiKey == "" {
 		return nil, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
 	}
 
@@ -236,8 +252,8 @@ func (c *Client) GetModFiles(
 	if err != nil {
 		return nil, err
 	}
-	if c.apiKey != "" {
-		req.Header.Set("x-api-key", c.apiKey)
+	if apiKey != "" {
+		req.Header.Set("x-api-key", apiKey)
 	}
 
 	resp, err := c.httpClient.Do(req)

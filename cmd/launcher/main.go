@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	iofs "io/fs"
 	"net/http"
@@ -85,15 +86,25 @@ func main() {
 
 	var instRepo *storage.InstanceRepository
 	var accRepo *storage.AccountRepository
+	var settingsRepo *storage.SettingsRepository
 	if db != nil {
 		instRepo = storage.NewInstanceRepository(db)
 		accRepo = storage.NewAccountRepository(db)
+		settingsRepo = storage.NewSettingsRepository(db)
 	}
 
 	// 4. Initialize Core Domain Services with Injected Configuration
-	cfKey := CurseForgeKey
+	cfKey := ""
+	if settingsRepo != nil {
+		if val, err := settingsRepo.Get(context.Background(), "curseforge_api_key"); err == nil {
+			cfKey = val
+		}
+	}
 	if cfKey == "" {
 		cfKey = os.Getenv("CURSEFORGE_API_KEY")
+	}
+	if cfKey == "" {
+		cfKey = CurseForgeKey
 	}
 
 	msClientID := MicrosoftClientID
@@ -129,6 +140,7 @@ func main() {
 	adapter.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
 	adapter.SetUpdater(autoUpdater)
 	adapter.SetJavaDetector(javaDetector)
+	adapter.SetSettings(settingsRepo)
 	adapter.SetVersion(version)
 
 	coreInitDuration := time.Since(startInit)

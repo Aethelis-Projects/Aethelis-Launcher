@@ -3,9 +3,11 @@ package curseforge_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -174,4 +176,22 @@ func TestCurseForgeClient_NoAPIKey_FastPath(t *testing.T) {
 	if reached {
 		t.Fatalf("expected fast-path to return before issuing HTTP request")
 	}
+}
+
+func TestCurseForgeClient_SetAPIKey_ThreadSafe(t *testing.T) {
+	client := curseforge.NewClient("http://127.0.0.1:0", "", nil)
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(2)
+		go func(idx int) {
+			defer wg.Done()
+			client.SetAPIKey(fmt.Sprintf("key-%d", idx))
+		}(i)
+		go func() {
+			defer wg.Done()
+			_ = client.APIKey()
+		}()
+	}
+	wg.Wait()
 }
