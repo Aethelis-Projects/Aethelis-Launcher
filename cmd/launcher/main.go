@@ -23,6 +23,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/auth"
 	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
+	"github.com/nord-launcher/launcher/internal/core/content/loaders"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/launch"
@@ -125,9 +126,18 @@ func main() {
 	instanceSvc.SetSessionRefresher(authSvc)
 
 	// Game provisioner
+	fabricClient := loaders.NewFabricClient(loaders.DefaultFabricMetaURL, sharedHTTPClient)
 	httpAdapter := httpadapter.NewHTTPClient(30 * time.Second)
 	gameProvisioner := game.NewGameService(httpAdapter, fileSys, dbDir)
+	gameProvisioner.SetFabricClient(fabricClient)
 	instanceSvc.SetProvisioner(gameProvisioner)
+
+	// Seed default instance if database has zero instances (N8)
+	if instRepo != nil {
+		if _, err := instRepo.EnsureDefaultInstance(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "[WARN] Failed to seed default instance: %v\n", err)
+		}
+	}
 
 	// Auto-updater wired with configured channel and embedded Ed25519 public key
 	manifestURL := fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/latest/download/manifest-%s.json", UpdateChannel)

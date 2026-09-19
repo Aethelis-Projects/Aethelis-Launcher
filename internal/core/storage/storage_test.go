@@ -212,3 +212,45 @@ func TestOpenDatabase_And_Migrate(t *testing.T) {
 		t.Fatalf("Migrate failed: %v", err)
 	}
 }
+
+func TestInstanceRepository_EnsureDefaultInstance(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "seed_test.db")
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	instRepo := storage.NewInstanceRepository(db)
+
+	// 1. Initial run on empty DB seeds Nordic Fabric 1.21 (N8)
+	seeded, err := instRepo.EnsureDefaultInstance(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefaultInstance failed: %v", err)
+	}
+	if seeded == nil || seeded.Name != "Nordic Fabric 1.21" || seeded.Loader != domain.LoaderFabric {
+		t.Fatalf("unexpected seeded instance: %+v", seeded)
+	}
+
+	list, err := instRepo.ListAll(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatalf("expected 1 instance, got %d (err: %v)", len(list), err)
+	}
+
+	// 2. Subsequent run on non-empty DB is a no-op (strictly when COUNT == 0)
+	secondCall, err := instRepo.EnsureDefaultInstance(ctx)
+	if err != nil {
+		t.Fatalf("EnsureDefaultInstance second call failed: %v", err)
+	}
+	if secondCall != nil {
+		t.Fatalf("expected nil when instances already exist, got: %+v", secondCall)
+	}
+
+	listAfter, err := instRepo.ListAll(ctx)
+	if err != nil || len(listAfter) != 1 {
+		t.Fatalf("expected still exactly 1 instance, got %d", len(listAfter))
+	}
+}

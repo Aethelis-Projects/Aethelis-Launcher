@@ -138,3 +138,50 @@ func TestLoaders_DefaultClients(t *testing.T) {
 		t.Fatal("expected non-nil quilt client")
 	}
 }
+
+func TestFabricLoader_GetProfile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/versions/loader/1.21.1/0.16.5/profile/json" {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":                "fabric-loader-0.16.5-1.21.1",
+			"inheritsFrom":      "1.21.1",
+			"mainClass":         "net.fabricmc.loader.impl.launch.knot.KnotClient",
+			"launcherMainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+			"libraries": []map[string]any{
+				{
+					"name": "net.fabricmc:fabric-loader:0.16.5",
+					"url":  "https://maven.fabricmc.net/",
+				},
+				{
+					"name": "net.fabricmc:intermediary:1.21.1",
+					"url":  "https://maven.fabricmc.net/",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := loaders.NewFabricClient(server.URL, server.Client())
+	profile, err := client.GetProfile(context.Background(), "1.21.1", "0.16.5")
+	if err != nil {
+		t.Fatalf("GetProfile failed: %v", err)
+	}
+
+	if profile.ID != "fabric-loader-0.16.5-1.21.1" {
+		t.Fatalf("expected ID 'fabric-loader-0.16.5-1.21.1', got %q", profile.ID)
+	}
+	if profile.LauncherMainClass != "net.fabricmc.loader.impl.launch.knot.KnotClient" {
+		t.Fatalf("expected launcherMainClass KnotClient, got %q", profile.LauncherMainClass)
+	}
+	if len(profile.Libraries) != 2 {
+		t.Fatalf("expected 2 libraries, got %d", len(profile.Libraries))
+	}
+	if profile.Libraries[0].Name != "net.fabricmc:fabric-loader:0.16.5" {
+		t.Fatalf("unexpected first lib: %+v", profile.Libraries[0])
+	}
+}

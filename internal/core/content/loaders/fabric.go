@@ -72,3 +72,42 @@ func (c *FabricClient) GetLoadersForGameVersion(ctx context.Context, gameVersion
 
 	return res, nil
 }
+
+type FabricProfileLibrary struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
+}
+
+type FabricProfile struct {
+	ID                string                 `json:"id"`
+	InheritsFrom      string                 `json:"inheritsFrom"`
+	MainClass         string                 `json:"mainClass"`
+	LauncherMainClass string                 `json:"launcherMainClass"`
+	Libraries         []FabricProfileLibrary `json:"libraries"`
+}
+
+// GetProfile retrieves the version profile JSON for a specific game version and Fabric loader version.
+func (c *FabricClient) GetProfile(ctx context.Context, gameVersion, loaderVersion string) (*FabricProfile, error) {
+	url := fmt.Sprintf("%s/v2/versions/loader/%s/%s/profile/json", c.baseURL, gameVersion, loaderVersion)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch fabric profile: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fabric meta profile returned HTTP %d", resp.StatusCode)
+	}
+
+	var profile FabricProfile
+	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
+		return nil, fmt.Errorf("decode fabric profile: %w", err)
+	}
+
+	return &profile, nil
+}

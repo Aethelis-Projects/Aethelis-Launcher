@@ -135,6 +135,40 @@ func (r *InstanceRepository) UpdateState(ctx context.Context, id string, state d
 	return nil
 }
 
+// EnsureDefaultInstance seeds the default "Nordic Fabric 1.21" instance strictly when COUNT(instances) == 0 (N8).
+func (r *InstanceRepository) EnsureDefaultInstance(ctx context.Context) (*domain.Instance, error) {
+	var count int
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM instances;").Scan(&count); err != nil {
+		return nil, fmt.Errorf("count instances: %w", err)
+	}
+
+	if count > 0 {
+		return nil, nil
+	}
+
+	now := time.Now()
+	defaultInst := &domain.Instance{
+		ID:           "default-fabric-1-21",
+		Name:         "Nordic Fabric 1.21",
+		GameVersion:  "1.21.1",
+		Loader:       domain.LoaderFabric,
+		LoaderVer:    "0.16.5",
+		MinRAMMB:     2048,
+		MaxRAMMB:     4096,
+		JVMArgs:      []string{},
+		State:        domain.StateIdle,
+		TotalPlaySec: 0,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	if err := r.Save(ctx, defaultInst); err != nil {
+		return nil, fmt.Errorf("save default instance: %w", err)
+	}
+
+	return defaultInst, nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }

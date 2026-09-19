@@ -19,6 +19,7 @@ import (
 
 	"github.com/nord-launcher/launcher/internal/adapters/fs"
 	httpadapter "github.com/nord-launcher/launcher/internal/adapters/http"
+	"github.com/nord-launcher/launcher/internal/core/content/loaders"
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/game"
 )
@@ -453,5 +454,113 @@ func TestMavenCoordinatesToPath(t *testing.T) {
 		if actual != tc.expected {
 			t.Errorf("coords %q: expected %q, got %q", tc.coords, tc.expected, actual)
 		}
+	}
+}
+
+func TestGameService_Provision_VanillaAndFabric_ColdCache(t *testing.T) {
+	tempDir := t.TempDir()
+	fsys := fs.NewOSFileSystem()
+	httpClient := httpadapter.NewHTTPClient(10 * time.Second)
+
+	fabricLibData := []byte("MOCK-FABRIC-LOADER-JAR-DATA")
+
+	ts, _ := setupMockServer(t, nil)
+	defer ts.Close()
+
+	var fabricServer *httptest.Server
+	fabricServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/v2/versions/loader/1.21.1/0.16.5/profile/json":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":                "fabric-loader-0.16.5-1.21.1",
+				"inheritsFrom":      "1.21.1",
+				"mainClass":         "net.fabricmc.loader.impl.launch.knot.KnotClient",
+				"launcherMainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient",
+				"libraries": []map[string]any{
+					{
+						"name": "net.fabricmc:fabric-loader:0.16.5",
+						"url":  fabricServer.URL + "/maven/",
+					},
+				},
+			})
+		case strings.HasPrefix(r.URL.Path, "/v2/versions/loader/1.21.1"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{
+					"loader": map[string]any{
+						"version": "0.16.5",
+						"stable":  true,
+					},
+				},
+			})
+		case strings.HasPrefix(r.URL.Path, "/maven/"):
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(fabricLibData)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer fabricServer.Close()
+
+	fabricClient := loaders.NewFabricClient(fabricServer.URL, fabricServer.Client())
+
+	svc := game.NewGameService(
+		httpClient,
+		fsys,
+		tempDir,
+		game.WithManifestURL(ts.URL+"/manifest.json"),
+		game.WithLibrariesBaseURL(ts.URL+"/libraries"),
+		game.WithResourcesBaseURL(ts.URL+"/resources"),
+		game.WithPlatform("windows", "x86_64"),
+		game.WithFabricClient(fabricClient),
+	)
+
+	acc := &domain.Account{
+		UUID:        "test-uuid",
+		Username:    "Steve",
+		Type:        domain.AccountMicrosoft,
+		AccessToken: "test-token",
+		ExpiresAt:   time.Now().Add(1 * time.Hour),
+		IsActive:    true,
+	}
+
+	// 1. Provision Vanilla instance (cold cache)
+	vanillaInst := &domain.Instance{
+		ID:          "inst-vanilla",
+		Name:        "Nordic Vanilla",
+		GameVersion: "1.21.1",
+		Loader:      domain.LoaderVanilla,
+	}
+
+	cfgVanilla, err := svc.Provision(context.Background(), vanillaInst, acc)
+	if err != nil {
+		t.Fatalf("vanilla provision failed: %v", err)
+	}
+	if cfgVanilla.VersionMeta.MainClass != "net.minecraft.client.main.Main" {
+		t.Fatalf("expected vanilla mainClass 'net.minecraft.client.main.Main', got %q", cfgVanilla.VersionMeta.MainClass)
+	}
+	if len(cfgVanilla.LibraryJarList) == 0 {
+		t.Fatalf("expected non-empty vanilla libraries list")
+	}
+
+	// 2. Provision Fabric instance (cold cache)
+	fabricInst := &domain.Instance{
+		ID:          "inst-fabric",
+		Name:        "Nordic Fabric",
+		GameVersion: "1.21.1",
+		Loader:      domain.LoaderFabric,
+		LoaderVer:   "0.16.5",
+	}
+
+	cfgFabric, err := svc.Provision(context.Background(), fabricInst, acc)
+	if err != nil {
+		t.Fatalf("fabric provision failed: %v", err)
+	}
+	if cfgFabric.VersionMeta.MainClass != "net.fabricmc.loader.impl.launch.knot.KnotClient" {
+		t.Fatalf("expected fabric mainClass 'net.fabricmc.loader.impl.launch.knot.KnotClient', got %q", cfgFabric.VersionMeta.MainClass)
+	}
+	if len(cfgFabric.LibraryJarList) <= len(cfgVanilla.LibraryJarList) {
+		t.Fatalf("expected fabric library count (%d) to exceed vanilla (%d)", len(cfgFabric.LibraryJarList), len(cfgVanilla.LibraryJarList))
 	}
 }

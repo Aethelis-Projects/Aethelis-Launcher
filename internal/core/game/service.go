@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/nord-launcher/launcher/internal/core/content/loaders"
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 )
@@ -48,6 +49,13 @@ func WithPlatform(osName, archName string) ServiceOption {
 	}
 }
 
+// WithFabricClient sets a custom Fabric metadata client.
+func WithFabricClient(c *loaders.FabricClient) ServiceOption {
+	return func(s *GameService) {
+		s.fabricClient = c
+	}
+}
+
 // GameService implements ports.GameProvisioner for resolving and downloading game assets.
 type GameService struct {
 	http             ports.HTTPClient
@@ -58,6 +66,11 @@ type GameService struct {
 	resourcesBaseURL string
 	currentOS        string
 	currentArch      string
+	fabricClient     *loaders.FabricClient
+}
+
+func (s *GameService) SetFabricClient(c *loaders.FabricClient) {
+	s.fabricClient = c
 }
 
 // NewGameService creates a new GameService instance.
@@ -255,6 +268,56 @@ func (s *GameService) Provision(
 					}
 					_ = s.extractNatives(nativePath, nativesDir) // errcheck:ok best-effort unpack of platform native libraries
 				}
+			}
+		}
+	}
+
+	// 3b. Resolve & download Fabric loader libraries and profile (if Fabric loader configured)
+	if inst.Loader == domain.LoaderFabric {
+		loaderVer := inst.LoaderVer
+		if loaderVer == "" && s.fabricClient != nil {
+			if loadersList, err := s.fabricClient.GetLoadersForGameVersion(ctx, inst.GameVersion); err == nil && len(loadersList) > 0 {
+				loaderVer = loadersList[0].Version
+			}
+		}
+
+		if s.fabricClient != nil && loaderVer != "" {
+			profile, err := s.fabricClient.GetProfile(ctx, inst.GameVersion, loaderVer)
+			if err != nil {
+				return nil, fmt.Errorf("resolve fabric profile: %w", err)
+			}
+
+			// N1: Dynamic launcherMainClass from Fabric profile JSON (KnotClient fallback only)
+			mainClass := profile.LauncherMainClass
+			if mainClass == "" {
+				mainClass = profile.MainClass
+			}
+			if mainClass == "" {
+				mainClass = "net.fabricmc.loader.impl.launch.knot.KnotClient"
+			}
+			versionMeta.MainClass = mainClass
+
+			for _, lib := range profile.Libraries {
+				if lib.Name == "" {
+					continue
+				}
+				relPath := MavenCoordinatesToPath(lib.Name)
+				baseURL := lib.URL
+				if baseURL == "" {
+					baseURL = "https://maven.fabricmc.net/"
+				}
+				url := fmt.Sprintf("%s/%s", strings.TrimRight(baseURL, "/"), strings.TrimLeft(relPath, "/"))
+				fullPath := filepath.Join(librariesDir, filepath.FromSlash(relPath))
+
+				if !s.fs.Exists(fullPath) {
+					if err := s.fs.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
+						return nil, fmt.Errorf("mkdir fabric library dir: %w", err)
+					}
+					if err := s.http.DownloadFile(ctx, url, fullPath, "", nil); err != nil {
+						return nil, fmt.Errorf("%w: download fabric library %s: %v", domain.ErrDownloadFailed, lib.Name, err)
+					}
+				}
+				libraryJarList = append(libraryJarList, fullPath)
 			}
 		}
 	}
