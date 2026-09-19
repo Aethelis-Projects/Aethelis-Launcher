@@ -159,18 +159,16 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           >
             <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
             <Show
-              when={searchError().includes("CF_RATE_LIMITED:")}
-              fallback={
-                <span>
-                  {searchError().includes("401") || searchError().includes("403")
-                    ? hasBuiltinKey()
-                      ? "Лимит запросов к CurseForge исчерпан или ключ недействителен. Вы можете указать собственный ключ в Настройках."
-                      : "Для поиска модов CurseForge требуется API-ключ (сайдкар-файл cf.key не обнаружен). Укажите ключ в настройках."
-                    : `Ошибка поиска модов: ${searchError()}`}
-                </span>
-              }
+              when={searchError().includes("CF_RATE_LIMITED:") || searchError().includes("401") || searchError().includes("403")}
+              fallback={<span>{`Ошибка поиска модов: ${searchError()}`}</span>}
             >
-              <span>Лимит запросов CurseForge исчерпан. Укажите свой персональный API-ключ в Настройках для снятия ограничений.</span>
+              <span>
+                {hasBuiltinKey()
+                  ? "CurseForge временно ограничил запросы — попробуйте позже"
+                  : import.meta.env.DEV
+                  ? "Встроенный ключ каталога временно недоступен. [DEV] Проверьте cf.key или настройте в Dev Settings."
+                  : "Встроенный ключ каталога временно недоступен"}
+              </span>
             </Show>
           </div>
         </Show>

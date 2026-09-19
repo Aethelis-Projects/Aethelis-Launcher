@@ -55,7 +55,8 @@ Section "Nord Launcher Core" SecCore
     SectionIn RO
 
     SetOutPath "$INSTDIR"
-    File /r "..\..\dist\windows\*"
+    File "..\..\dist\windows\NordLauncher.exe"
+    File /nonfatal "..\..\dist\windows\cf.key"
 
     ; Write registry configuration
     WriteRegStr HKCU "Software\NordLauncher" "InstallDir" "$INSTDIR"

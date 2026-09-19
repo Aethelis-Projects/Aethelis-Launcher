@@ -25,7 +25,8 @@ mkdir -p "$DIST_LINUX"
 
 if [ -n "$CF_KEY" ]; then
     printf "%s" "$CF_KEY" > "$DIST_LINUX/cf.key"
-    echo "Wrote sidecar key to: $DIST_LINUX/cf.key"
+    chmod 0644 "$DIST_LINUX/cf.key"
+    echo "Wrote sidecar key to: $DIST_LINUX/cf.key (mode 0644)"
 fi
 
 echo "==> [2/5] Building Frontend (SolidJS)..."

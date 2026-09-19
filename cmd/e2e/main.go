@@ -800,8 +800,64 @@ func main() {
 	}
 	logf("PASS: Sidecar key resolved from file and verified in x-api-key HTTP header.")
 
+	// --- STEP 10: Installer & Sidecar Delivery Contract E2E ---
+	logf("\n--- STEP 10: Installer & Sidecar Delivery Contract E2E ---")
+	instDir, err := os.MkdirTemp("", "e2e_instdir_*")
+	if err != nil {
+		logf("FAIL: MkdirTemp for STEP 10 failed: %v", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(instDir)
+
+	// Simulate $INSTDIR: NordLauncher.exe and cf.key placed side-by-side
+	simulatedExe := filepath.Join(instDir, "NordLauncher.exe")
+	if err := os.WriteFile(simulatedExe, []byte("fake-binary-content"), 0755); err != nil {
+		logf("FAIL: Write simulated exe failed: %v", err)
+		os.Exit(1)
+	}
+
+	testInstKey := "$2a$10$instdir_delivery_contract_key_abcdef12345"
+	simulatedKeyFile := filepath.Join(instDir, "cf.key")
+	if err := os.WriteFile(simulatedKeyFile, []byte(testInstKey+"\r\n"), 0644); err != nil {
+		logf("FAIL: Write simulated cf.key failed: %v", err)
+		os.Exit(1)
+	}
+
+	// 1. Resolve via production curseforge.ResolveSidecarKey
+	resolvedInstKey, err := curseforge.ResolveSidecarKey(simulatedExe)
+	if err != nil {
+		logf("FAIL: ResolveSidecarKey failed: %v", err)
+		os.Exit(1)
+	}
+	if resolvedInstKey != testInstKey {
+		logf("FAIL: Expected resolved key %q, got %q", testInstKey, resolvedInstKey)
+		os.Exit(1)
+	}
+	logf("PASS: Production curseforge.ResolveSidecarKey verified against $INSTDIR layout.")
+
+	// 2. Verify missing sidecar returns empty string safely
+	emptyDir, err := os.MkdirTemp("", "e2e_empty_instdir_*")
+	if err != nil {
+		logf("FAIL: MkdirTemp empty dir failed: %v", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(emptyDir)
+
+	emptyExe := filepath.Join(emptyDir, "NordLauncher.exe")
+	_ = os.WriteFile(emptyExe, []byte("fake"), 0755) // errcheck:ok simulated empty binary
+	resolvedEmpty, err := curseforge.ResolveSidecarKey(emptyExe)
+	if err != nil {
+		logf("FAIL: ResolveSidecarKey on empty dir returned error: %v", err)
+		os.Exit(1)
+	}
+	if resolvedEmpty != "" {
+		logf("FAIL: Expected empty key on missing sidecar, got %q", resolvedEmpty)
+		os.Exit(1)
+	}
+	logf("PASS: Missing sidecar safely resolved to empty string.")
+
 	logf("\n=================================================================")
-	logf(" ALL 9 E2E STAGES PASSED")
+	logf(" ALL 10 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt

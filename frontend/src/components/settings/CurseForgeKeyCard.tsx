@@ -55,7 +55,8 @@ export const CurseForgeKeyCard: Component = () => {
   };
 
   return (
-    <div class="bg-nord-surface/80 border border-white/5 rounded-xl p-5 backdrop-blur-md shadow-lg space-y-4">
+    <Show when={import.meta.env.DEV}>
+      <div class="bg-nord-surface/80 border border-white/5 rounded-xl p-5 backdrop-blur-md shadow-lg space-y-4">
       <div class="flex items-center justify-between border-b border-white/5 pb-3">
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-lg bg-nord-cyan/10 border border-nord-cyan/30 flex items-center justify-center text-nord-cyan">
@@ -153,5 +154,6 @@ export const CurseForgeKeyCard: Component = () => {
         </form>
       </Show>
     </div>
-  );
+  </Show>
+);
 };

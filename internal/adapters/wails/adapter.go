@@ -777,5 +777,6 @@ func (a *WailsAdapter) SetSetting(req SetSettingRequest) error {
 }
 
 func (a *WailsAdapter) HasBuiltinCurseForgeKey() (bool, error) {
-	return curseforge.HasBuiltinKey() || os.Getenv("CURSEFORGE_API_KEY") != "", nil
+	key, _ := curseforge.ResolveSidecarKey("") // errcheck:ok fallback to empty if sidecar not found
+	return key != "" || curseforge.HasBuiltinKey(), nil
 }

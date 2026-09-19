@@ -41,27 +41,6 @@ func init() {
 	version = strings.TrimPrefix(version, "v")
 }
 
-func resolveSidecarKey() string {
-	// 1. Check adjacent to current running executable
-	if exePath, err := os.Executable(); err == nil {
-		sidecar := filepath.Join(filepath.Dir(exePath), "cf.key")
-		if data, err := os.ReadFile(sidecar); err == nil {
-			k := strings.TrimSpace(string(data))
-			if k != "" {
-				return k
-			}
-		}
-	}
-	// 2. Check in current working directory
-	if data, err := os.ReadFile("cf.key"); err == nil {
-		k := strings.TrimSpace(string(data))
-		if k != "" {
-			return k
-		}
-	}
-	return ""
-}
-
 func main() {
 	startInit := time.Now()
 
@@ -115,10 +94,7 @@ func main() {
 	}
 
 	// 4. Initialize Core Domain Services with Injected Configuration
-	builtinCFKey := os.Getenv("CURSEFORGE_API_KEY")
-	if builtinCFKey == "" {
-		builtinCFKey = resolveSidecarKey()
-	}
+	builtinCFKey, _ := curseforge.ResolveSidecarKey("") // errcheck:ok fallback to empty if sidecar not found
 	curseforge.SetBuiltinAPIKey(builtinCFKey)
 
 	cfKey := ""

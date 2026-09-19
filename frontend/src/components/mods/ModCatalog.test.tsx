@@ -196,8 +196,7 @@ describe("ModCatalog Component", () => {
     ));
 
     const errorBanner = await screen.findByTestId("mods-search-error-banner");
-    expect(errorBanner.textContent).toContain("Лимит запросов CurseForge исчерпан");
-    expect(errorBanner.textContent).toContain("Укажите свой персональный API-ключ в Настройках");
+    expect(errorBanner.textContent).toContain("Встроенный ключ каталога временно недоступен");
   });
 
   it("displays missing sidecar message on 401/403 when no builtin key exists (A-остатки)", async () => {
@@ -215,8 +214,7 @@ describe("ModCatalog Component", () => {
     ));
 
     const errorBanner = await screen.findByTestId("mods-search-error-banner");
-    expect(errorBanner.textContent).toContain("сайдкар-файл cf.key не обнаружен");
-    expect(errorBanner.textContent).toContain("Укажите ключ в настройках");
+    expect(errorBanner.textContent).toContain("Встроенный ключ каталога временно недоступен");
   });
 
   it("displays invalid/exhausted message on 401/403 when builtin key exists (A-остатки)", async () => {
@@ -234,6 +232,6 @@ describe("ModCatalog Component", () => {
     ));
 
     const errorBanner = await screen.findByTestId("mods-search-error-banner");
-    expect(errorBanner.textContent).toContain("Лимит запросов к CurseForge исчерпан или ключ недействителен");
+    expect(errorBanner.textContent).toContain("CurseForge временно ограничил запросы — попробуйте позже");
   });
 });
