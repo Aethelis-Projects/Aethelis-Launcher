@@ -198,12 +198,7 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 		return 0, domain.ErrNoActiveAccount
 	}
 
-	// 2. Offline account check (O2)
-	if acc.Type == domain.AccountOffline {
-		return 0, domain.ErrOfflineLaunchUnsupported
-	}
-
-	// 3. Microsoft token freshness check (V1)
+	// 2. Microsoft token freshness check (V1)
 	if acc.Type == domain.AccountMicrosoft && !acc.ExpiresAt.IsZero() {
 		if s.clock.Now().After(acc.ExpiresAt.Add(-5*time.Minute)) && s.sessionRefresher != nil {
 			refreshed, err := s.sessionRefresher.RefreshSession(ctx, acc.UUID)
@@ -265,10 +260,14 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 			gameDir = filepath.Join(".", "instances", inst.Name)
 		}
 		cfg = &domain.LaunchConfig{
-			Instance:    inst,
-			Account:     acc,
-			VersionMeta: &domain.VersionJSON{ID: inst.GameVersion, MainClass: "net.minecraft.client.main.Main"},
-			GameDir:     gameDir,
+			Instance: inst,
+			Account:  acc,
+			VersionMeta: &domain.VersionJSON{
+				ID:                 inst.GameVersion,
+				MainClass:          "net.minecraft.client.main.Main",
+				MinecraftArguments: "--username ${auth_player_name} --version ${version_name} --gameDir ${game_directory} --uuid ${auth_uuid} --accessToken ${auth_access_token} --userType ${user_type}",
+			},
+			GameDir: gameDir,
 		}
 	}
 

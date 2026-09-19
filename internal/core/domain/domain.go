@@ -9,7 +9,6 @@ var (
 	ErrInstanceNotFound          = errors.New("instance not found")
 	ErrAccountNotFound           = errors.New("account not found")
 	ErrInvalidConfig             = errors.New("invalid configuration")
-	ErrOfflineLaunchUnsupported = errors.New("offline mode is unsupported in v0.1.1, Microsoft account is required to launch Minecraft")
 	ErrNoActiveAccount           = errors.New("no active account selected: please log in or select an account")
 	ErrVersionNotFound           = errors.New("requested Minecraft version not found in manifest")
 	ErrDownloadFailed            = errors.New("failed to download required game files")

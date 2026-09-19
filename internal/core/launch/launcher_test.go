@@ -45,8 +45,9 @@ func (m *mockProcessHandle) Kill() error {
 }
 
 type mockProcessManager struct {
-	handle ports.ProcessHandle
-	err    error
+	handle   ports.ProcessHandle
+	err      error
+	lastArgs []string
 }
 
 func (m *mockProcessManager) StartProcess(
@@ -57,6 +58,7 @@ func (m *mockProcessManager) StartProcess(
 	env []string,
 	stdout, stderr io.Writer,
 ) (ports.ProcessHandle, error) {
+	m.lastArgs = args
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -331,16 +333,19 @@ func TestMonitorProcess_ExitOne_Crash(t *testing.T) {
 	}
 }
 
-func TestInstanceService_OfflineUnsupported(t *testing.T) {
+func TestInstanceService_OfflineSupported(t *testing.T) {
 	fileSys := fs.NewOSFileSystem()
-	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 555}}
+	waitCh := make(chan struct{})
+	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 555, waitCh: waitCh}}
 	kr := keyring.NewMemoryKeyring()
 	clk := clock.NewMockClock(time.Now())
 
 	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
 	svc.SetActiveAccount(&domain.Account{
-		Username: "OfflinePlayer",
-		Type:     domain.AccountOffline,
+		UUID:        "offline-uuid-123",
+		Username:    "OfflinePlayer",
+		Type:        domain.AccountOffline,
+		AccessToken: "0",
 	})
 
 	inst, err := svc.CreateInstance("Offline-Pack", "1.21.1", domain.LoaderVanilla)
@@ -348,10 +353,29 @@ func TestInstanceService_OfflineUnsupported(t *testing.T) {
 		t.Fatalf("create failed: %v", err)
 	}
 
-	_, err = svc.Launch(context.Background(), inst.ID)
-	if !errors.Is(err, domain.ErrOfflineLaunchUnsupported) {
-		t.Errorf("expected ErrOfflineLaunchUnsupported, got %v", err)
+	pid, err := svc.Launch(context.Background(), inst.ID)
+	if err != nil {
+		t.Fatalf("launch failed for offline account: %v", err)
 	}
+	if pid != 555 {
+		t.Errorf("expected PID 555, got %d", pid)
+	}
+	if inst.State != domain.StateRunning {
+		t.Errorf("expected instance state Running, got %s", inst.State)
+	}
+
+	hasTokenZero := false
+	for i, arg := range mockProc.lastArgs {
+		if arg == "--accessToken" && i+1 < len(mockProc.lastArgs) && mockProc.lastArgs[i+1] == "0" {
+			hasTokenZero = true
+			break
+		}
+	}
+	if !hasTokenZero {
+		t.Errorf("expected --accessToken 0 in arguments, got: %v", mockProc.lastArgs)
+	}
+
+	close(waitCh)
 }
 
 func TestInstanceService_NoActiveAccount(t *testing.T) {

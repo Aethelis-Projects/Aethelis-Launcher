@@ -1,5 +1,5 @@
 import { Component, createSignal, createResource, For, Show } from "solid-js";
-import { User, Plus, Key, ShieldCheck, Loader2 } from "lucide-solid";
+import { User, Plus, Key, ShieldCheck, Loader2, AlertCircle, X } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 
 export const AccountManager: Component = () => {
@@ -7,6 +7,9 @@ export const AccountManager: Component = () => {
   const [offlineName, setOfflineName] = createSignal("");
   const [isLoggingInMS, setIsLoggingInMS] = createSignal(false);
   const [showOfflineModal, setShowOfflineModal] = createSignal(false);
+  const [msLoginError, setMsLoginError] = createSignal<string | null>(null);
+
+  const hasOfflineAccount = () => accounts()?.some((a) => a.type === "offline") ?? false;
 
   const handleSetActive = async (uuid: string) => {
     await launcherAPI.setActiveAccount(uuid);
@@ -25,11 +28,14 @@ export const AccountManager: Component = () => {
 
   const handleMicrosoftLogin = async () => {
     setIsLoggingInMS(true);
+    setMsLoginError(null);
     try {
       await launcherAPI.loginMicrosoft();
       refetch();
-    } catch (err) {
+    } catch (err: unknown) {
       console.error("Microsoft login failed:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setMsLoginError(msg || "Ошибка авторизации Microsoft");
     } finally {
       setIsLoggingInMS(false);
     }
@@ -79,6 +85,42 @@ export const AccountManager: Component = () => {
           </button>
         </div>
       </div>
+
+      {/* Microsoft Login Error Banner with 1-Click Fallback */}
+      <Show when={msLoginError()}>
+        <div
+          class="p-3 bg-red-950/40 border border-red-500/30 rounded-lg flex items-center justify-between gap-3 text-xs text-red-200"
+          data-testid="ms-login-error-banner"
+        >
+          <div class="flex items-center gap-2">
+            <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
+            <span>{msLoginError()}</span>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <Show when={!hasOfflineAccount()}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowOfflineModal(true);
+                  setMsLoginError(null);
+                }}
+                class="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-[#00D4B2] rounded font-mono text-[11px] transition-colors"
+                data-testid="create-offline-fallback-btn"
+              >
+                Создать офлайн-аккаунт
+              </button>
+            </Show>
+            <button
+              type="button"
+              onClick={() => setMsLoginError(null)}
+              class="text-zinc-400 hover:text-zinc-200 p-1"
+              title="Закрыть"
+            >
+              <X class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </Show>
 
       {/* Offline Login Modal */}
       <Show when={showOfflineModal()}>
@@ -136,6 +178,15 @@ export const AccountManager: Component = () => {
                   <span class="text-[10px] font-mono text-zinc-500 truncate block mt-0.5 max-w-[180px]">
                     UUID: {acc.uuid}
                   </span>
+                  <Show when={acc.type === "offline"}>
+                    <div
+                      class="text-[10px] font-mono text-amber-400/90 mt-1 flex items-center gap-1"
+                      data-testid="offline-capability-badge"
+                    >
+                      <span class="w-1.5 h-1.5 rounded-full bg-amber-400/80 inline-block" />
+                      <span>Одиночная игра и серверы без проверки лицензии</span>
+                    </div>
+                  </Show>
                 </div>
               </div>
 
