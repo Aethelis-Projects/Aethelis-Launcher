@@ -93,6 +93,28 @@ func (s *LogSupervisor) ProcessLine(line string) {
 	}
 }
 
+// GetTail returns up to the last n lines from the supervisor's ring buffer.
+// If n <= 0 or n > total, it returns all currently buffered lines.
+// It returns a safe copy of the lines, or an empty slice if the buffer is empty.
+func (s *LogSupervisor) GetTail(n int) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	total := len(s.recentLines)
+	if total == 0 {
+		return []string{}
+	}
+
+	if n <= 0 || n > total {
+		n = total
+	}
+
+	start := total - n
+	res := make([]string, n)
+	copy(res, s.recentLines[start:])
+	return res
+}
+
 // AttachPipes starts scanning stdout and stderr in background goroutines.
 func (s *LogSupervisor) AttachPipes(stdout, stderr io.Reader) {
 	if stdout != nil {

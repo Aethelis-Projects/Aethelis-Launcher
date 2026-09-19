@@ -35,6 +35,7 @@ type InstanceService struct {
 	sessionRefresher SessionRefresher
 	onCrash          func(instanceID string, report *CrashReport)
 	instances        map[string]*domain.Instance
+	supervisors      map[string]*LogSupervisor
 	mu               sync.RWMutex
 }
 
@@ -46,12 +47,13 @@ func NewInstanceService(
 	clock ports.Clock,
 ) *InstanceService {
 	return &InstanceService{
-		repo:      repo,
-		fs:        fs,
-		proc:      proc,
-		keyring:   keyring,
-		clock:     clock,
-		instances: make(map[string]*domain.Instance),
+		repo:        repo,
+		fs:          fs,
+		proc:        proc,
+		keyring:     keyring,
+		clock:       clock,
+		instances:   make(map[string]*domain.Instance),
+		supervisors: make(map[string]*LogSupervisor),
 	}
 }
 
@@ -367,6 +369,13 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 		return 0, err
 	}
 
+	s.mu.Lock()
+	if s.supervisors == nil {
+		s.supervisors = make(map[string]*LogSupervisor)
+	}
+	s.supervisors[inst.ID] = supervisor
+	s.mu.Unlock()
+
 	// 7. Supervise in background (C2)
 	go MonitorProcess(handle, inst, supervisor, s.onCrash, s.repo, &s.mu)
 
@@ -491,4 +500,22 @@ func (s *InstanceService) LaunchWithSupervisor(
 	s.mu.Unlock()
 
 	return handle, supervisor, nil
+}
+
+// GetLogTail returns up to the last n log lines for the given instance.
+// If the instance is idle or has no active/recent supervisor, an empty slice and nil error are returned (R9).
+func (s *InstanceService) GetLogTail(instanceID string, n int) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.supervisors == nil {
+		return []string{}, nil
+	}
+
+	sup, ok := s.supervisors[instanceID]
+	if !ok || sup == nil {
+		return []string{}, nil
+	}
+
+	return sup.GetTail(n), nil
 }

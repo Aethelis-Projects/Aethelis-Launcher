@@ -206,6 +206,13 @@ func (a *WailsAdapter) LaunchInstance(id string) (*LaunchResponse, error) {
 	}, nil
 }
 
+func (a *WailsAdapter) GetLogTail(instanceID string, n int) ([]string, error) {
+	if a.svc == nil {
+		return []string{}, nil
+	}
+	return a.svc.GetLogTail(instanceID, n)
+}
+
 func (a *WailsAdapter) ListAccounts() ([]AccountDTO, error) {
 	if a.accountRepo == nil {
 		return []AccountDTO{}, nil

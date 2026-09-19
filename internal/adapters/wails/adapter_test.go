@@ -379,6 +379,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetSetting",
 		"HasBuiltinCurseForgeKey",
 		"UpdateInstance",
+		"GetLogTail",
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1136,5 +1137,31 @@ func TestWailsAdapter_UpdateInstance(t *testing.T) {
 	_, err = adapter.UpdateInstance(wails.UpdateInstanceRequest{ID: ""})
 	if err == nil {
 		t.Error("expected error for empty ID, got nil")
+	}
+}
+
+func TestWailsAdapter_GetLogTail(t *testing.T) {
+	clk := clock.NewMockClock(time.Now())
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcMgr{}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
+	adapter := wails.NewWailsAdapter(svc)
+
+	// 1. Idle instance with no supervisor returns empty slice, nil error
+	tail, err := adapter.GetLogTail("nonexistent-inst", 50)
+	if err != nil {
+		t.Fatalf("expected nil error on idle GetLogTail, got: %v", err)
+	}
+	if len(tail) != 0 {
+		t.Fatalf("expected empty tail, got: %+v", tail)
+	}
+
+	// 2. Adapter with nil service also returns empty slice, nil error
+	nilAdapter := wails.NewWailsAdapter(nil)
+	nilTail, err := nilAdapter.GetLogTail("any", 50)
+	if err != nil || len(nilTail) != 0 {
+		t.Fatalf("expected empty slice from nil adapter, got %v, err: %v", nilTail, err)
 	}
 }

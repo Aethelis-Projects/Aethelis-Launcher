@@ -834,3 +834,53 @@ func TestInstanceService_Setters(t *testing.T) {
 	svc.SetSessionRefresher(nil)
 	svc.SetOnCrash(nil)
 }
+
+func TestLogSupervisor_GetTail(t *testing.T) {
+	sup := launch.NewLogSupervisor(10)
+	// Empty buffer returns empty slice
+	if tail := sup.GetTail(5); len(tail) != 0 {
+		t.Errorf("expected empty tail, got: %+v", tail)
+	}
+
+	// Add 5 lines
+	for i := 1; i <= 5; i++ {
+		sup.ProcessLine(fmt.Sprintf("line %d", i))
+	}
+
+	// Request last 3 lines
+	tail := sup.GetTail(3)
+	if len(tail) != 3 || tail[0] != "line 3" || tail[2] != "line 5" {
+		t.Errorf("expected lines 3, 4, 5, got %+v", tail)
+	}
+
+	// Request more lines than buffer has (n = 10, len = 5)
+	allTail := sup.GetTail(10)
+	if len(allTail) != 5 || allTail[0] != "line 1" {
+		t.Errorf("expected all 5 lines, got %+v", allTail)
+	}
+
+	// Request n <= 0 returns all
+	zeroTail := sup.GetTail(0)
+	if len(zeroTail) != 5 {
+		t.Errorf("expected 5 lines for n=0, got %d", len(zeroTail))
+	}
+}
+
+func TestInstanceService_GetLogTail(t *testing.T) {
+	now := time.Now()
+	clk := clock.NewMockClock(now)
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 9999, exitCode: 0}}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
+
+	// 1. Idle instance without supervisor returns empty slice, nil error
+	tail, err := svc.GetLogTail("no-such-id", 50)
+	if err != nil {
+		t.Fatalf("expected nil error on idle GetLogTail, got %v", err)
+	}
+	if len(tail) != 0 {
+		t.Fatalf("expected empty slice, got %+v", tail)
+	}
+}

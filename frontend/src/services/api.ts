@@ -40,6 +40,7 @@ interface WailsAdapterBindings {
   SetSetting?: (req: SetSettingRequest) => Promise<void>;
   InstallMod?: (req: InstallModRequest) => Promise<InstallModResponse>;
   HasBuiltinCurseForgeKey?: () => Promise<boolean>;
+  GetLogTail?: (instanceId: string, n: number) => Promise<string[]>;
   [key: string]: unknown;
 }
 
@@ -531,5 +532,9 @@ export const launcherAPI = {
 
   async hasBuiltinCurseForgeKey(): Promise<boolean> {
     return invokeWails("HasBuiltinCurseForgeKey", () => mockHasBuiltinCurseForgeKey);
+  },
+
+  async getLogTail(instanceId: string, n = 100): Promise<string[]> {
+    return invokeWails<string[]>("GetLogTail", () => [], instanceId, n);
   },
 };
