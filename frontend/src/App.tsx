@@ -1,5 +1,5 @@
 import { Component, createSignal, onCleanup, onMount, Show } from "solid-js";
-import { LayoutGrid, Layers, Package, User, Settings, Terminal, Cpu, AlertTriangle } from "lucide-solid";
+import { LayoutGrid, Layers, Package, User, Settings, AlertTriangle } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
@@ -18,47 +18,86 @@ export const App: Component = () => {
   // Navigation
   const [currentNav, setCurrentNav] = createSignal<NavTab>("instances");
 
-  // Instances state
-  const [instances, setInstances] = createSignal<InstanceDTO[]>([
-    {
-      id: "nord-opti-1",
-      name: "Nordic Optimized 1.21",
-      game_version: "1.21.1",
-      loader: "fabric",
-      loader_version: "0.16.5",
-      state: "idle",
-      total_play_seconds: 7320,
-    },
-    {
-      id: "nord-vanilla-2",
-      name: "Vanilla Survival",
-      game_version: "1.20.6",
-      loader: "vanilla",
-      state: "idle",
-      total_play_seconds: 14200,
-    },
-  ]);
-
-  const [selectedInstanceId, setSelectedInstanceId] = createSignal("nord-opti-1");
+  // Instances state initialized empty and populated via launcherAPI.listInstances() (B2)
+  const [instances, setInstances] = createSignal<InstanceDTO[]>([]);
+  const [selectedInstanceId, setSelectedInstanceId] = createSignal("");
   const [launchState, setLaunchState] = createSignal<LaunchButtonState>("default");
   const [launchError, setLaunchError] = createSignal<string | undefined>();
   const [searchQuery, setSearchQuery] = createSignal("");
   const [crashReport, setCrashReport] = createSignal<CrashReportDTO | null>(null);
   const [availableUpdate, setAvailableUpdate] = createSignal<UpdateInfoDTO | null>(null);
 
-  // 100-tick fine-grained progress benchmark
-  const [tickProgress, setTickProgress] = createSignal(0);
-  const [tickCount, setTickCount] = createSignal(0);
-  const [renderCount] = createSignal(1);
-
-  let timer: ReturnType<typeof setInterval>;
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
   let updateTimer: ReturnType<typeof setTimeout>;
 
+  const stopStatePolling = () => {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  };
+
+  // State polling with race protection (D2 & M1)
+  const startStatePolling = (targetInstanceId: string) => {
+    stopStatePolling();
+    let hasObservedRunning = false;
+    let consecutiveIdleCount = 0;
+
+    pollInterval = setInterval(async () => {
+      try {
+        const list = await launcherAPI.listInstances();
+        setInstances(list);
+
+        const current = list.find((i) => i.id === targetInstanceId);
+        if (!current) {
+          stopStatePolling();
+          setLaunchState("default");
+          return;
+        }
+
+        if (current.state === "running") {
+          hasObservedRunning = true;
+          consecutiveIdleCount = 0;
+          setLaunchState("success");
+        } else if (current.state === "crashed") {
+          stopStatePolling();
+          setLaunchState("error");
+          setLaunchError("Игра аварийно завершилась");
+          try {
+            const crash = await launcherAPI.getLastCrashReport(targetInstanceId);
+            if (crash) {
+              setCrashReport(crash);
+            }
+          } catch (_e: unknown) {
+            // non-fatal crash report fetch
+          }
+        } else if (current.state === "idle") {
+          consecutiveIdleCount++;
+          // D2: Exit only after having observed running once, OR after >= 2 consecutive idle samples
+          if (hasObservedRunning || consecutiveIdleCount >= 2) {
+            stopStatePolling();
+            setLaunchState("default");
+          }
+        }
+      } catch (err: unknown) {
+        console.error("Polling error:", err);
+      }
+    }, typeof process !== "undefined" && process.env?.NODE_ENV === "test" ? 50 : 1000);
+  };
+
   onMount(() => {
-    timer = setInterval(() => {
-      setTickProgress((prev) => (prev >= 100 ? 0 : prev + 1));
-      setTickCount((prev) => prev + 1);
-    }, 10);
+    const loadInstances = async () => {
+      try {
+        const list = await launcherAPI.listInstances();
+        setInstances(list);
+        if (list.length > 0 && !list.some((i) => i.id === selectedInstanceId())) {
+          setSelectedInstanceId(list[0].id);
+        }
+      } catch (err: unknown) {
+        console.error("Failed to list instances:", err);
+      }
+    };
+    loadInstances();
 
     // Quiet background update check 3 seconds after mounting (Decision D1)
     updateTimer = setTimeout(async () => {
@@ -74,12 +113,25 @@ export const App: Component = () => {
   });
 
   onCleanup(() => {
-    clearInterval(timer);
+    stopStatePolling();
     clearTimeout(updateTimer);
   });
 
-  const activeInstance = () =>
-    instances().find((i) => i.id === selectedInstanceId()) || instances()[0];
+  const activeInstance = () => {
+    const list = instances();
+    if (list.length === 0) {
+      return {
+        id: "",
+        name: "Сборка не выбрана",
+        game_version: "1.21.1",
+        loader: "fabric",
+        loader_version: "",
+        state: "idle",
+        total_play_seconds: 0,
+      } as InstanceDTO;
+    }
+    return list.find((i) => i.id === selectedInstanceId()) || list[0];
+  };
 
   const filteredInstances = () => {
     const q = searchQuery().toLowerCase().trim();
@@ -92,22 +144,32 @@ export const App: Component = () => {
     );
   };
 
-  const handleLaunch = () => {
+  const handleLaunch = async () => {
+    const inst = activeInstance();
+    if (!inst || !inst.id) return;
+
     setLaunchState("loading");
     setLaunchError(undefined);
 
-    setTimeout(() => {
+    try {
+      const res = await launcherAPI.launchInstance(inst.id);
+      if (!res.success) {
+        setLaunchState("error");
+        setLaunchError(res.error || "Failed to launch instance");
+        return;
+      }
+
       setLaunchState("success");
       setInstances((prev) =>
-        prev.map((inst) =>
-          inst.id === selectedInstanceId() ? { ...inst, state: "running" } : inst
-        )
+        prev.map((i) => (i.id === inst.id ? { ...i, state: "running" } : i))
       );
 
-      setTimeout(() => {
-        setLaunchState("default");
-      }, 2500);
-    }, 1000);
+      startStatePolling(inst.id);
+    } catch (err: unknown) {
+      setLaunchState("error");
+      const msg = err instanceof Error ? err.message : String(err);
+      setLaunchError(msg || "Launch failed");
+    }
   };
 
   const triggerMockCrash = () => {
@@ -257,15 +319,8 @@ export const App: Component = () => {
             </Show>
           </div>
 
-          {/* Spike Metrics Indicator */}
+          {/* System Status Indicator */}
           <div class="flex items-center gap-4 text-xs font-mono text-zinc-400">
-            <div class="flex items-center gap-2 px-2.5 py-1 rounded bg-zinc-900 border border-white/5">
-              <Cpu class="w-3.5 h-3.5 text-nord-cyan" />
-              <span>DOM Renders: <strong class="text-zinc-200">{renderCount()}</strong></span>
-              <span class="text-zinc-600">|</span>
-              <span>Ticks: <strong class="text-nord-cyan">{tickCount()}</strong></span>
-            </div>
-
             <div class="flex items-center gap-1.5 px-2 py-0.5 rounded bg-nord-emerald/10 text-nord-emerald border border-nord-emerald/20 text-[11px]">
               <span class="w-1.5 h-1.5 rounded-full bg-nord-emerald" />
               SolidJS Fine-Grained
@@ -304,28 +359,8 @@ export const App: Component = () => {
                   </div>
                 </div>
 
-                {/* High-frequency Stream Progress Indicator */}
-                <div class="my-6 p-4 rounded-xl bg-zinc-950/60 border border-white/5">
-                  <div class="flex items-center justify-between text-xs font-mono text-zinc-400 mb-2">
-                    <span class="flex items-center gap-1.5">
-                      <Terminal class="w-3.5 h-3.5 text-zinc-500" />
-                      Синхронизация ассетов (100 тиков/с):
-                    </span>
-                    <span class="text-nord-cyan font-bold" data-testid="tick-progress-text">
-                      {tickProgress()}%
-                    </span>
-                  </div>
-                  <div class="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-                    <div
-                      class="h-full bg-nord-cyan transition-all duration-75 ease-out rounded-full"
-                      style={{ width: `${tickProgress()}%` }}
-                      data-testid="tick-progress-bar"
-                    />
-                  </div>
-                </div>
-
                 {/* Launch Actions */}
-                <div class="pt-4 border-t border-white/5 flex items-center justify-between">
+                <div class="pt-6 mt-6 border-t border-white/5 flex items-center justify-between">
                   <div class="flex flex-col text-xs text-zinc-400">
                     <span>Память JVM: <strong class="text-zinc-200 font-mono">2048 - 4096 МБ</strong></span>
                     <span class="text-zinc-500 text-[11px] mt-0.5">Adoptium OpenJDK 21 x64 (Clean environment)</span>
