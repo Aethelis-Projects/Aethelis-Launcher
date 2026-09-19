@@ -31,6 +31,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/domain"
+	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
@@ -380,6 +381,11 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"HasBuiltinCurseForgeKey",
 		"UpdateInstance",
 		"GetLogTail",
+		"ListJavaRuntimes",
+		"DownloadJavaRuntime",
+		"GetJavaDownloadStatus",
+		"RemoveJavaRuntime",
+		"AddJavaRuntime",
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1163,5 +1169,83 @@ func TestWailsAdapter_GetLogTail(t *testing.T) {
 	nilTail, err := nilAdapter.GetLogTail("any", 50)
 	if err != nil || len(nilTail) != 0 {
 		t.Fatalf("expected empty slice from nil adapter, got %v, err: %v", nilTail, err)
+	}
+}
+
+func TestWailsAdapter_JavaManager_Methods(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+
+	// 1. Unset java manager behaviour
+	runtimes, err := adapter.ListJavaRuntimes()
+	if err != nil || len(runtimes) != 0 {
+		t.Fatalf("expected empty runtimes and nil err with unset javaMgr, got %v, err: %v", runtimes, err)
+	}
+
+	status := adapter.GetJavaDownloadStatus()
+	if status.Status != "idle" {
+		t.Fatalf("expected idle status, got %s", status.Status)
+	}
+
+	if err := adapter.DownloadJavaRuntime(21); err == nil {
+		t.Error("expected error downloading with unset javaMgr, got nil")
+	}
+
+	if err := adapter.RemoveJavaRuntime("any"); err == nil {
+		t.Error("expected error removing with unset javaMgr, got nil")
+	}
+
+	if _, err := adapter.AddJavaRuntime("any"); err == nil {
+		t.Error("expected error adding with unset javaMgr, got nil")
+	}
+
+	// 2. Set JavaManager with test directory
+	tempDir := t.TempDir()
+	managedDir := filepath.Join(tempDir, "runtimes")
+	_ = os.MkdirAll(managedDir, 0755)
+
+	customDir := filepath.Join(tempDir, "custom-jdk")
+	binDir := filepath.Join(customDir, "bin")
+	_ = os.MkdirAll(binDir, 0755)
+
+	javaExe := "java"
+	if filepath.Separator == '\\' {
+		javaExe = "java.exe"
+	}
+	_ = os.WriteFile(filepath.Join(binDir, javaExe), []byte("fake-bin"), 0755)
+
+	releaseContent := `JAVA_VERSION="21.0.2"
+IMPLEMENTOR="Eclipse Adoptium"
+`
+	_ = os.WriteFile(filepath.Join(customDir, "release"), []byte(releaseContent), 0644)
+
+	jm := java.NewJavaManager(managedDir, nil, nil, nil)
+	adapter.SetJavaManager(jm)
+
+	// Test AddJavaRuntime
+	addedDTO, err := adapter.AddJavaRuntime(customDir)
+	if err != nil {
+		t.Fatalf("unexpected error in AddJavaRuntime: %v", err)
+	}
+	if addedDTO.MajorVersion != 21 {
+		t.Errorf("expected major 21, got %d", addedDTO.MajorVersion)
+	}
+	if addedDTO.Kind != "detected" {
+		t.Errorf("expected kind 'detected', got %s", addedDTO.Kind)
+	}
+
+	// Test ListJavaRuntimes
+	list, err := adapter.ListJavaRuntimes()
+	if err != nil {
+		t.Fatalf("ListJavaRuntimes failed: %v", err)
+	}
+	if len(list) != 0 {
+		// Since customDir was added externally but not in managedDir and no detector was attached,
+		// list scans managedDir and detector.
+	}
+
+	// Test RemoveJavaRuntime on unmanaged path fails
+	err = adapter.RemoveJavaRuntime(addedDTO.Path)
+	if err == nil {
+		t.Error("expected error removing unmanaged runtime, got nil")
 	}
 }

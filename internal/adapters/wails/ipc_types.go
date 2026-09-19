@@ -158,3 +158,23 @@ type SetSettingRequest struct {
 type GetSettingsResponse struct {
 	Settings map[string]string `json:"settings"`
 }
+
+type JavaInstallationDTO struct {
+	Path         string   `json:"path"`
+	HomeDir      string   `json:"home_dir"`
+	MajorVersion int      `json:"major_version"`
+	FullVersion  string   `json:"full_version"`
+	Vendor       string   `json:"vendor"`
+	Kind         string   `json:"kind"`
+	UsedBy       []string `json:"used_by"`
+}
+
+type JavaDownloadStatusDTO struct {
+	TaskID     string  `json:"task_id"`
+	Major      int     `json:"major"`
+	Status     string  `json:"status"`
+	BytesRead  int64   `json:"bytes_read"`
+	TotalBytes int64   `json:"total_bytes"`
+	Percentage float64 `json:"percentage"`
+	Error      string  `json:"error,omitempty"`
+}

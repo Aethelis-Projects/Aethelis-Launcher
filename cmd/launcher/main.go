@@ -26,6 +26,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content/loaders"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/game"
+	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
@@ -118,11 +119,14 @@ func main() {
 	mrClient := modrinth.NewClient(modrinth.DefaultBaseURL, sharedHTTPClient)
 	cfClient := curseforge.NewClient(curseforge.DefaultBaseURL, cfKey, sharedHTTPClient)
 
-	// Java detector with local instance and runtime directory scanning
-	javaDetector := javaadapter.NewJavaDetector(filepath.Join(dbDir, "runtimes"))
+	// Java detector and manager with local instance and runtime directory scanning
+	runtimesDir := filepath.Join(dbDir, "runtimes")
+	javaDetector := javaadapter.NewJavaDetector(runtimesDir)
 	instanceSvc.SetJavaDetector(javaDetector)
 	instanceSvc.SetAccountRepository(accRepo)
 	instanceSvc.SetSessionRefresher(authSvc)
+
+	javaMgr := java.NewJavaManager(runtimesDir, javaDetector, instRepo, sharedHTTPClient)
 
 	// Game provisioner
 	fabricClient := loaders.NewFabricClient(loaders.DefaultFabricMetaURL, sharedHTTPClient)
@@ -149,6 +153,7 @@ func main() {
 	adapter.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
 	adapter.SetUpdater(autoUpdater)
 	adapter.SetJavaDetector(javaDetector)
+	adapter.SetJavaManager(javaMgr)
 	adapter.SetSettings(settingsRepo)
 	adapter.SetVersion(version)
 

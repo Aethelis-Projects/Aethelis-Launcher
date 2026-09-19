@@ -16,6 +16,8 @@ import type {
   SetSettingRequest,
   InstallModRequest,
   InstallModResponse,
+  JavaInstallationDTO,
+  JavaDownloadStatusDTO,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -41,6 +43,11 @@ interface WailsAdapterBindings {
   InstallMod?: (req: InstallModRequest) => Promise<InstallModResponse>;
   HasBuiltinCurseForgeKey?: () => Promise<boolean>;
   GetLogTail?: (instanceId: string, n: number) => Promise<string[]>;
+  ListJavaRuntimes?: () => Promise<JavaInstallationDTO[]>;
+  DownloadJavaRuntime?: (major: number) => Promise<void>;
+  GetJavaDownloadStatus?: () => Promise<JavaDownloadStatusDTO>;
+  RemoveJavaRuntime?: (path: string) => Promise<void>;
+  AddJavaRuntime?: (path: string) => Promise<JavaInstallationDTO>;
   [key: string]: unknown;
 }
 
@@ -264,6 +271,34 @@ let mockApplyResult: UpdateApplyResultDTO = {
 
 let mockSettings: Record<string, string> = {};
 let mockHasBuiltinCurseForgeKey = false;
+let mockJavaRuntimes: JavaInstallationDTO[] = [
+  {
+    path: "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.2.13-hotspot\\bin\\java.exe",
+    home_dir: "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.2.13-hotspot",
+    major_version: 21,
+    full_version: "21.0.2",
+    vendor: "Eclipse Adoptium",
+    kind: "managed",
+    used_by: ["Nordic Optimized 1.21"],
+  },
+  {
+    path: "C:\\Program Files\\Java\\jdk-17\\bin\\java.exe",
+    home_dir: "C:\\Program Files\\Java\\jdk-17",
+    major_version: 17,
+    full_version: "17.0.10",
+    vendor: "Oracle Corporation",
+    kind: "detected",
+    used_by: [],
+  },
+];
+let mockJavaDownloadStatus: JavaDownloadStatusDTO = {
+  task_id: "",
+  major: 0,
+  status: "idle",
+  bytes_read: 0,
+  total_bytes: 0,
+  percentage: 0,
+};
 
 export const launcherAPI = {
   setMockUpdateInfo(info: UpdateInfoDTO): void {
@@ -536,5 +571,68 @@ export const launcherAPI = {
 
   async getLogTail(instanceId: string, n = 100): Promise<string[]> {
     return invokeWails<string[]>("GetLogTail", () => [], instanceId, n);
+  },
+
+  async listJavaRuntimes(): Promise<JavaInstallationDTO[]> {
+    return invokeWails<JavaInstallationDTO[]>("ListJavaRuntimes", () => [...mockJavaRuntimes]);
+  },
+
+  async downloadJavaRuntime(major: number): Promise<void> {
+    return invokeWails<void>(
+      "DownloadJavaRuntime",
+      () => {
+        mockJavaDownloadStatus = {
+          task_id: `adoptium-${major}-mock`,
+          major,
+          status: "downloading",
+          bytes_read: 1024,
+          total_bytes: 2048,
+          percentage: 50,
+        };
+      },
+      major
+    );
+  },
+
+  async getJavaDownloadStatus(): Promise<JavaDownloadStatusDTO> {
+    return invokeWails<JavaDownloadStatusDTO>("GetJavaDownloadStatus", () => ({ ...mockJavaDownloadStatus }));
+  },
+
+  async removeJavaRuntime(path: string): Promise<void> {
+    return invokeWails<void>(
+      "RemoveJavaRuntime",
+      () => {
+        mockJavaRuntimes = mockJavaRuntimes.filter((r) => r.path !== path);
+      },
+      path
+    );
+  },
+
+  async addJavaRuntime(path: string): Promise<JavaInstallationDTO> {
+    return invokeWails<JavaInstallationDTO>(
+      "AddJavaRuntime",
+      () => {
+        const added: JavaInstallationDTO = {
+          path,
+          home_dir: path,
+          major_version: 21,
+          full_version: "21.0.2",
+          vendor: "Custom",
+          kind: "detected",
+          used_by: [],
+        };
+        mockJavaRuntimes.push(added);
+        return added;
+      },
+      path
+    );
+  },
+
+  setMockJavaRuntimes(runtimes: JavaInstallationDTO[]): void {
+    mockJavaRuntimes = [...runtimes];
+  },
+
+  setMockJavaDownloadStatus(status: JavaDownloadStatusDTO): void {
+    mockJavaDownloadStatus = { ...status };
   },
 };

@@ -160,3 +160,23 @@ export interface SetSettingRequest {
 export interface GetSettingsResponse {
   settings: Record<string, string>;
 }
+
+export interface JavaInstallationDTO {
+  path: string;
+  home_dir: string;
+  major_version: number;
+  full_version: string;
+  vendor: string;
+  kind: "detected" | "managed";
+  used_by: string[];
+}
+
+export interface JavaDownloadStatusDTO {
+  task_id: string;
+  major: number;
+  status: "idle" | "downloading" | "extracting" | "ready" | "failed";
+  bytes_read: number;
+  total_bytes: number;
+  percentage: number;
+  error?: string;
+}

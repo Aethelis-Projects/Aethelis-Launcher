@@ -25,6 +25,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/domain"
+	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
@@ -47,9 +48,16 @@ type WailsAdapter struct {
 	settingsRepo *storage.SettingsRepository
 	httpClient   *http.Client
 	allowedHosts []string
+	javaMgr      *java.JavaManager
 
 	lastCrashes map[string]*CrashReportDTO
 	mu          sync.RWMutex
+}
+
+func (a *WailsAdapter) SetJavaManager(jm *java.JavaManager) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.javaMgr = jm
 }
 
 func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
@@ -807,4 +815,103 @@ func (a *WailsAdapter) SetSetting(req SetSettingRequest) error {
 func (a *WailsAdapter) HasBuiltinCurseForgeKey() (bool, error) {
 	key, _ := curseforge.ResolveSidecarKey("") // errcheck:ok fallback to empty if sidecar not found
 	return key != "" || curseforge.HasBuiltinKey(), nil
+}
+
+func toJavaInstallationDTO(inst ports.JavaInstallation) JavaInstallationDTO {
+	usedBy := inst.UsedBy
+	if usedBy == nil {
+		usedBy = []string{}
+	}
+	return JavaInstallationDTO{
+		Path:         inst.Path,
+		HomeDir:      inst.HomeDir,
+		MajorVersion: inst.MajorVersion,
+		FullVersion:  inst.FullVersion,
+		Vendor:       inst.Vendor,
+		Kind:         inst.Kind,
+		UsedBy:       usedBy,
+	}
+}
+
+func (a *WailsAdapter) ListJavaRuntimes() ([]JavaInstallationDTO, error) {
+	a.mu.RLock()
+	jm := a.javaMgr
+	a.mu.RUnlock()
+
+	if jm == nil {
+		return []JavaInstallationDTO{}, nil
+	}
+
+	installs, err := jm.ListRuntimes(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("list java runtimes: %w", err)
+	}
+
+	dtos := make([]JavaInstallationDTO, 0, len(installs))
+	for _, inst := range installs {
+		dtos = append(dtos, toJavaInstallationDTO(inst))
+	}
+	return dtos, nil
+}
+
+func (a *WailsAdapter) DownloadJavaRuntime(major int) error {
+	a.mu.RLock()
+	jm := a.javaMgr
+	a.mu.RUnlock()
+
+	if jm == nil {
+		return fmt.Errorf("java manager not configured")
+	}
+
+	go func() {
+		_ = jm.DownloadRuntime(context.Background(), major) // errcheck:ok async download error captured in GetJavaDownloadStatus
+	}()
+	return nil
+}
+
+func (a *WailsAdapter) GetJavaDownloadStatus() JavaDownloadStatusDTO {
+	a.mu.RLock()
+	jm := a.javaMgr
+	a.mu.RUnlock()
+
+	if jm == nil {
+		return JavaDownloadStatusDTO{Status: "idle"}
+	}
+	status := jm.GetDownloadStatus()
+	return JavaDownloadStatusDTO{
+		TaskID:     status.TaskID,
+		Major:      status.Major,
+		Status:     status.Status,
+		BytesRead:  status.BytesRead,
+		TotalBytes: status.TotalBytes,
+		Percentage: status.Percentage,
+		Error:      status.Error,
+	}
+}
+
+func (a *WailsAdapter) RemoveJavaRuntime(path string) error {
+	a.mu.RLock()
+	jm := a.javaMgr
+	a.mu.RUnlock()
+
+	if jm == nil {
+		return fmt.Errorf("java manager not configured")
+	}
+	return jm.RemoveRuntime(path)
+}
+
+func (a *WailsAdapter) AddJavaRuntime(path string) (*JavaInstallationDTO, error) {
+	a.mu.RLock()
+	jm := a.javaMgr
+	a.mu.RUnlock()
+
+	if jm == nil {
+		return nil, fmt.Errorf("java manager not configured")
+	}
+	install, err := jm.AddRuntime(context.Background(), path)
+	if err != nil {
+		return nil, err
+	}
+	dto := toJavaInstallationDTO(*install)
+	return &dto, nil
 }

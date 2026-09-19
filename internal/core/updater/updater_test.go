@@ -213,6 +213,9 @@ func TestAutoUpdater_EdgeCases(t *testing.T) {
 	if u.httpClient == nil {
 		t.Fatalf("expected default httpClient, got nil")
 	}
+	if u.CurrentVersion() != "0.1.0" {
+		t.Fatalf("expected 0.1.0, got %s", u.CurrentVersion())
+	}
 
 	// Test manifest server error 500
 	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

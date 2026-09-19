@@ -3,9 +3,13 @@ package java
 import (
 	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/nord-launcher/launcher/internal/core/ports"
 )
 
 var (
@@ -90,4 +94,50 @@ func digitsOnly(s string) string {
 		}
 	}
 	return sb.String()
+}
+
+// ParseReleaseFile reads a JDK 'release' file and constructs a JavaInstallation if valid.
+func ParseReleaseFile(homeDir string) (*ports.JavaInstallation, error) {
+	releasePath := filepath.Join(homeDir, "release")
+	f, err := os.Open(releasePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var javaVersion string
+	var vendor string
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "JAVA_VERSION=") {
+			javaVersion = strings.Trim(strings.TrimPrefix(line, "JAVA_VERSION="), `"'`)
+		} else if strings.HasPrefix(line, "IMPLEMENTOR=") {
+			vendor = strings.Trim(strings.TrimPrefix(line, "IMPLEMENTOR="), `"'`)
+		}
+	}
+
+	if javaVersion == "" {
+		return nil, os.ErrNotExist
+	}
+
+	major, err := ParseJavaMajor(javaVersion)
+	if err != nil || major == 0 {
+		return nil, os.ErrNotExist
+	}
+
+	javaExe := "java"
+	if filepath.Separator == '\\' {
+		javaExe = "java.exe"
+	}
+	binPath := filepath.Join(homeDir, "bin", javaExe)
+
+	return &ports.JavaInstallation{
+		Path:         binPath,
+		HomeDir:      homeDir,
+		MajorVersion: major,
+		FullVersion:  javaVersion,
+		Vendor:       vendor,
+	}, nil
 }
