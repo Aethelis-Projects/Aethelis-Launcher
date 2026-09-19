@@ -29,9 +29,9 @@ describe("App Component (B1, B2, D2, M1)", () => {
     vi.restoreAllMocks();
     vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
       has_update: false,
-      version: "0.1.7",
-      current_version: "0.1.7",
-      release_date: "2026-09-18T12:00:00Z",
+      version: "0.2.0",
+      current_version: "0.2.0",
+      release_date: "2026-09-19T18:00:00Z",
       release_notes: "",
       download_url: "",
       sha256: "",
