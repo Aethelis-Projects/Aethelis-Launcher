@@ -12,6 +12,10 @@ describe("App Component (B1, B2, D2, M1)", () => {
       game_version: "1.21.1",
       loader: "fabric",
       loader_version: "0.16.5",
+      min_ram_mb: 2048,
+      max_ram_mb: 4096,
+      jvm_args: [],
+      skip_java_check: false,
       state: "idle",
       total_play_seconds: 120,
     },
@@ -20,6 +24,10 @@ describe("App Component (B1, B2, D2, M1)", () => {
       name: "Vanilla Survival",
       game_version: "1.20.6",
       loader: "vanilla",
+      min_ram_mb: 2048,
+      max_ram_mb: 4096,
+      jvm_args: [],
+      skip_java_check: false,
       state: "idle",
       total_play_seconds: 500,
     },
@@ -179,6 +187,10 @@ describe("App Component (B1, B2, D2, M1)", () => {
         name: "Vanilla 1.21.1",
         game_version: "1.21.1",
         loader: "vanilla",
+        min_ram_mb: 2048,
+        max_ram_mb: 4096,
+        jvm_args: [],
+        skip_java_check: false,
         state: "idle",
         total_play_seconds: 0,
       },
@@ -190,6 +202,10 @@ describe("App Component (B1, B2, D2, M1)", () => {
       game_version: "1.21.1",
       loader: "vanilla",
       java_path: "C:\\Java21\\bin\\java.exe",
+      min_ram_mb: 2048,
+      max_ram_mb: 4096,
+      jvm_args: [],
+      skip_java_check: false,
       state: "idle",
       total_play_seconds: 0,
     });
@@ -209,4 +225,64 @@ describe("App Component (B1, B2, D2, M1)", () => {
       });
     });
   });
+
+  it("renders cockpit data density badges and log tail panel (J3)", async () => {
+    vi.spyOn(launcherAPI, "listInstances").mockResolvedValue([
+      {
+        id: "cockpit-inst-1",
+        name: "Cockpit Heavy Pack",
+        game_version: "1.21.1",
+        loader: "fabric",
+        loader_version: "0.16.5",
+        min_ram_mb: 4096,
+        max_ram_mb: 8192,
+        jvm_args: [],
+        skip_java_check: false,
+        state: "idle",
+        total_play_seconds: 14400,
+      },
+    ]);
+    vi.spyOn(launcherAPI, "listInstalledMods").mockResolvedValue([
+      { file_name: "mod1.jar", name: "Mod 1", version: "1.0", enabled: true, size_bytes: 100 },
+      { file_name: "mod2.jar", name: "Mod 2", version: "1.0", enabled: true, size_bytes: 200 },
+    ]);
+    vi.spyOn(launcherAPI, "getLogTail").mockResolvedValue([
+      "[12:00:01] [main/INFO]: Loading Minecraft 1.21.1...",
+      "[12:00:03] [main/INFO]: Minecraft client ready.",
+    ]);
+
+    render(() => <App />);
+
+    const ramBadge = await screen.findByTestId("cockpit-ram-badge");
+    expect(ramBadge.textContent).toContain("4096 - 8192 MB");
+
+    const playtimeBadge = await screen.findByTestId("cockpit-playtime-badge");
+    expect(playtimeBadge.textContent).toContain("4 ч 0 мин");
+
+    const modsBadge = await screen.findByTestId("cockpit-mods-count-badge");
+    await vi.waitFor(() => {
+      expect(modsBadge.textContent).toContain("2 модов");
+    });
+
+    const javaChip = await screen.findByTestId("cockpit-java-chip");
+    expect(javaChip.textContent).toContain("Adoptium (Auto)");
+
+    const logTail = await screen.findByTestId("cockpit-log-tail");
+    await vi.waitFor(() => {
+      expect(logTail.textContent).toContain("Loading Minecraft 1.21.1...");
+    });
+  });
+
+  it("opens InstanceSettingsModal from cockpit button", async () => {
+    vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
+
+    render(() => <App />);
+
+    const openSettingsBtn = await screen.findByTestId("open-instance-settings-button");
+    fireEvent.click(openSettingsBtn);
+
+    const modal = await screen.findByTestId("instance-settings-modal");
+    expect(modal).toBeTruthy();
+  });
 });
+

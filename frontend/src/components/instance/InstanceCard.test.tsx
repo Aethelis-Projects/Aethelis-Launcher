@@ -10,6 +10,10 @@ describe("InstanceCard", () => {
     game_version: "1.21.1",
     loader: "fabric",
     loader_version: "0.16.5",
+    min_ram_mb: 2048,
+    max_ram_mb: 4096,
+    jvm_args: [],
+    skip_java_check: false,
     state: "idle",
     total_play_seconds: 3600,
   };

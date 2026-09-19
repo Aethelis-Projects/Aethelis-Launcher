@@ -148,6 +148,10 @@ let mockInstances: InstanceDTO[] = [
     game_version: "1.21.1",
     loader: "fabric",
     loader_version: "0.16.5",
+    min_ram_mb: 2048,
+    max_ram_mb: 4096,
+    jvm_args: [],
+    skip_java_check: false,
     state: "idle",
     total_play_seconds: 14200,
   },
@@ -156,6 +160,10 @@ let mockInstances: InstanceDTO[] = [
     name: "Vanilla Exploration",
     game_version: "1.21.1",
     loader: "vanilla",
+    min_ram_mb: 2048,
+    max_ram_mb: 4096,
+    jvm_args: [],
+    skip_java_check: false,
     state: "idle",
     total_play_seconds: 3600,
   },
@@ -344,6 +352,10 @@ export const launcherAPI = {
           name: req.name,
           game_version: req.game_version,
           loader: req.loader,
+          min_ram_mb: 2048,
+          max_ram_mb: 4096,
+          jvm_args: [],
+          skip_java_check: false,
           state: "idle",
           total_play_seconds: 0,
         };
@@ -363,7 +375,15 @@ export const launcherAPI = {
           throw new Error("Instance not found");
         }
         if (req.name) inst.name = req.name;
-        inst.java_path = req.java_path;
+        if (req.clear_java_path) {
+          inst.java_path = undefined;
+        } else if (req.java_path !== undefined) {
+          inst.java_path = req.java_path;
+        }
+        if (req.min_ram_mb !== undefined) inst.min_ram_mb = req.min_ram_mb;
+        if (req.max_ram_mb !== undefined) inst.max_ram_mb = req.max_ram_mb;
+        if (req.jvm_args !== undefined) inst.jvm_args = req.jvm_args;
+        if (req.skip_java_check !== undefined) inst.skip_java_check = req.skip_java_check;
         return { ...inst };
       },
       req

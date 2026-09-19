@@ -1,8 +1,10 @@
-import { Component, createSignal, createEffect, onCleanup, onMount, Show } from "solid-js";
-import { LayoutGrid, Layers, Package, User, Settings, AlertTriangle, AlertCircle } from "lucide-solid";
+import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
+import { LayoutGrid, Layers, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
+import { InstanceSettingsModal } from "./components/instance/InstanceSettingsModal";
+import { JavaManager } from "./components/java/JavaManager";
 import { ModCatalog } from "./components/mods/ModCatalog";
 import { InstalledModsManager } from "./components/mods/InstalledModsManager";
 import { AccountManager } from "./components/accounts/AccountManager";
@@ -12,7 +14,7 @@ import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
-type NavTab = "instances" | "mods_catalog" | "mods_manager" | "accounts" | "settings";
+type NavTab = "instances" | "mods_catalog" | "mods_manager" | "accounts" | "settings" | "java_manager";
 
 export const App: Component = () => {
   // Navigation
@@ -27,6 +29,9 @@ export const App: Component = () => {
   const [crashReport, setCrashReport] = createSignal<CrashReportDTO | null>(null);
   const [availableUpdate, setAvailableUpdate] = createSignal<UpdateInfoDTO | null>(null);
   const [systemError, setSystemError] = createSignal<string>("");
+  const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
+  const [installedModsCount, setInstalledModsCount] = createSignal(0);
+  const [logTail, setLogTail] = createSignal<string[]>([]);
 
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let updateTimer: ReturnType<typeof setTimeout>;
@@ -60,6 +65,12 @@ export const App: Component = () => {
           hasObservedRunning = true;
           consecutiveIdleCount = 0;
           setLaunchState("success");
+          try {
+            const tail = await launcherAPI.getLogTail(targetInstanceId, 100);
+            setLogTail(tail);
+          } catch (_err: unknown) {
+            // non-fatal log tail fetch
+          }
         } else if (current.state === "crashed") {
           stopStatePolling();
           setLaunchState("error");
@@ -151,9 +162,36 @@ export const App: Component = () => {
 
   const [customJavaPath, setCustomJavaPath] = createSignal("");
 
+  const loadModsCount = async (instId: string) => {
+    if (!instId) return;
+    try {
+      const mods = await launcherAPI.listInstalledMods(instId);
+      setInstalledModsCount(mods.length);
+    } catch (_err: unknown) {
+      // non-fatal
+    }
+  };
+
+  const formatPlaytime = (seconds: number): string => {
+    if (!seconds || seconds <= 0) return "0 ч";
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours} ч ${minutes} мин`;
+    }
+    return `${minutes} мин`;
+  };
+
   createEffect(() => {
     const inst = activeInstance();
     setCustomJavaPath(inst.java_path || "");
+    if (inst.id) {
+      loadModsCount(inst.id);
+      launcherAPI
+        .getLogTail(inst.id, 100)
+        .then((tail) => setLogTail(tail))
+        .catch(() => {});
+    }
   });
 
   const saveInstanceJavaPath = async () => {
@@ -273,6 +311,20 @@ export const App: Component = () => {
 
             <button
               type="button"
+              onClick={() => setCurrentNav("java_manager")}
+              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                currentNav() === "java_manager"
+                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+              title="Менеджер Java (Java Runtimes)"
+              data-testid="nav-java-manager"
+            >
+              <Cpu class="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => setCurrentNav("accounts")}
               class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
                 currentNav() === "accounts"
@@ -385,31 +437,110 @@ export const App: Component = () => {
             <div class="flex gap-6 h-full">
               {/* Active Instance Cockpit */}
               <section class="flex-1 flex flex-col justify-between p-6 rounded-2xl bg-nord-surface border border-white/10 shadow-xl relative overflow-hidden">
-                <div>
+                <div class="space-y-4">
                   <div class="flex items-center justify-between">
-                    <span class="px-2 py-0.5 rounded text-[11px] font-mono font-medium uppercase tracking-wider bg-white/5 text-zinc-400 border border-white/5">
-                      Активная сборка
-                    </span>
-                    <span class="font-mono text-xs text-zinc-500">
-                      ID: {activeInstance().id}
-                    </span>
+                    <div class="flex items-center gap-2">
+                      <span class="px-2 py-0.5 rounded text-[11px] font-mono font-medium uppercase tracking-wider bg-white/5 text-zinc-400 border border-white/5">
+                        Активная сборка
+                      </span>
+                      <span class="font-mono text-xs text-zinc-500">
+                        ID: {activeInstance().id}
+                      </span>
+                    </div>
+
+                    {/* Instance Settings Button */}
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsOpen(true)}
+                      class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Настройки сборки"
+                      data-testid="open-instance-settings-button"
+                    >
+                      <Sliders class="w-3.5 h-3.5 text-nord-cyan" />
+                      <span>Настройки</span>
+                    </button>
                   </div>
 
-                  <h1 class="text-2xl font-bold text-white tracking-tight mt-3">
-                    {activeInstance().name}
-                  </h1>
+                  <div>
+                    <h1 class="text-2xl font-bold text-white tracking-tight">
+                      {activeInstance().name}
+                    </h1>
 
-                  <div class="flex items-center gap-2.5 mt-3">
-                    <span class="px-2.5 py-1 rounded-md text-xs font-mono font-semibold bg-zinc-800 text-zinc-200 border border-white/10">
-                      Minecraft {activeInstance().game_version}
-                    </span>
-                    <span class="px-2.5 py-1 rounded-md text-xs font-mono font-medium capitalize bg-nord-cyan/10 text-nord-cyan border border-nord-cyan/20">
-                      {activeInstance().loader} {activeInstance().loader_version || ""}
-                    </span>
+                    <div class="flex items-center gap-2.5 mt-2">
+                      <span class="px-2.5 py-1 rounded-md text-xs font-mono font-semibold bg-zinc-800 text-zinc-200 border border-white/10">
+                        Minecraft {activeInstance().game_version}
+                      </span>
+                      <span class="px-2.5 py-1 rounded-md text-xs font-mono font-medium capitalize bg-nord-cyan/10 text-nord-cyan border border-nord-cyan/20">
+                        {activeInstance().loader} {activeInstance().loader_version || ""}
+                      </span>
+                    </div>
                   </div>
 
-                  {/* Java Runtime Path Control (S3) */}
-                  <div class="mt-6 p-4 rounded-xl bg-black/20 border border-white/5 flex flex-col gap-2.5">
+                  {/* Cockpit Data Density Grid (J3) */}
+                  <div class="grid grid-cols-4 gap-3 pt-1">
+                    {/* RAM Badge */}
+                    <div
+                      class="p-3 rounded-xl bg-black/20 border border-white/5 space-y-1"
+                      data-testid="cockpit-ram-badge"
+                    >
+                      <div class="flex items-center gap-1.5 text-zinc-500 text-[11px] font-mono">
+                        <Activity class="w-3.5 h-3.5 text-nord-cyan" />
+                        <span>Память JVM</span>
+                      </div>
+                      <p class="text-white font-mono font-bold text-xs truncate">
+                        {activeInstance().min_ram_mb || 2048} - {activeInstance().max_ram_mb || 4096} MB
+                      </p>
+                    </div>
+
+                    {/* Playtime Badge */}
+                    <div
+                      class="p-3 rounded-xl bg-black/20 border border-white/5 space-y-1"
+                      data-testid="cockpit-playtime-badge"
+                    >
+                      <div class="flex items-center gap-1.5 text-zinc-500 text-[11px] font-mono">
+                        <Clock class="w-3.5 h-3.5 text-nord-emerald" />
+                        <span>Время в игре</span>
+                      </div>
+                      <p class="text-white font-mono font-bold text-xs">
+                        {formatPlaytime(activeInstance().total_play_seconds)}
+                      </p>
+                    </div>
+
+                    {/* Installed Mods Badge */}
+                    <div
+                      class="p-3 rounded-xl bg-black/20 border border-white/5 space-y-1"
+                      data-testid="cockpit-mods-count-badge"
+                    >
+                      <div class="flex items-center gap-1.5 text-zinc-500 text-[11px] font-mono">
+                        <Package class="w-3.5 h-3.5 text-nord-amber" />
+                        <span>Моды</span>
+                      </div>
+                      <p class="text-white font-mono font-bold text-xs">
+                        {installedModsCount()} модов
+                      </p>
+                    </div>
+
+                    {/* Java Status Chip */}
+                    <div
+                      class="p-3 rounded-xl bg-black/20 border border-white/5 space-y-1 cursor-pointer hover:border-nord-cyan/30 transition-colors"
+                      onClick={() => setCurrentNav("java_manager")}
+                      title="Нажмите для открытия Java Manager"
+                      data-testid="cockpit-java-chip"
+                    >
+                      <div class="flex items-center justify-between text-zinc-500 text-[11px] font-mono">
+                        <div class="flex items-center gap-1.5">
+                          <Cpu class="w-3.5 h-3.5 text-nord-cyan" />
+                          <span>Java Рантайм</span>
+                        </div>
+                      </div>
+                      <p class="text-nord-cyan font-mono font-bold text-xs truncate">
+                        {activeInstance().java_path ? "Кастомный" : "Adoptium (Auto)"}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Java Runtime Path Control (S3: preserved for backward compat & test coverage) */}
+                  <div class="p-3.5 rounded-xl bg-black/20 border border-white/5 flex flex-col gap-2">
                     <div class="flex items-center justify-between">
                       <span class="text-xs font-semibold text-zinc-300">Среда выполнения Java (JavaPath)</span>
                       <span class="text-[11px] font-mono text-zinc-500">
@@ -438,13 +569,62 @@ export const App: Component = () => {
                       При запуске выполняется строгая проверка соответствия мажорной версии Java (fail-closed).
                     </p>
                   </div>
+
+                  {/* Live Console Log Tail (J3) */}
+                  <div
+                    class="p-3.5 rounded-xl bg-black/30 border border-white/5 flex flex-col gap-2"
+                    data-testid="cockpit-log-tail"
+                  >
+                    <div class="flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        <Terminal class="w-3.5 h-3.5 text-nord-cyan" />
+                        <span class="text-xs font-semibold text-zinc-300">
+                          Консоль процесса игры (Log Tail)
+                        </span>
+                        <Show when={activeInstance().state === "running"}>
+                          <span class="w-2 h-2 rounded-full bg-nord-emerald animate-pulse" />
+                        </Show>
+                      </div>
+                      <span class="text-[10px] font-mono text-zinc-500">
+                        {logTail().length > 0 ? `${logTail().length} строк` : "Ожидание запуска"}
+                      </span>
+                    </div>
+
+                    <div class="h-24 overflow-y-auto bg-black/60 rounded-lg p-2 font-mono text-[11px] text-zinc-400 select-text leading-relaxed border border-white/5">
+                      <Show
+                        when={logTail().length > 0}
+                        fallback={
+                          <div class="text-zinc-600 italic">
+                            {activeInstance().state === "running"
+                              ? "Загрузка логов процесса..."
+                              : "Консоль ожидает запуска игры. Логи будут отображаться здесь в реальном времени."}
+                          </div>
+                        }
+                      >
+                        <For each={logTail()}>
+                          {(line) => (
+                            <div class="truncate text-zinc-300 font-mono py-0.5">
+                              {line}
+                            </div>
+                          )}
+                        </For>
+                      </Show>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Launch Actions */}
-                <div class="pt-6 mt-6 border-t border-white/5 flex items-center justify-between">
+                <div class="pt-4 mt-4 border-t border-white/5 flex items-center justify-between">
                   <div class="flex flex-col text-xs text-zinc-400">
-                    <span>Память JVM: <strong class="text-zinc-200 font-mono">2048 - 4096 МБ</strong></span>
-                    <span class="text-zinc-500 text-[11px] mt-0.5">Adoptium OpenJDK 21 x64 (Clean environment)</span>
+                    <span>
+                      Память JVM:{" "}
+                      <strong class="text-zinc-200 font-mono">
+                        {activeInstance().min_ram_mb || 2048} - {activeInstance().max_ram_mb || 4096} МБ
+                      </strong>
+                    </span>
+                    <span class="text-zinc-500 text-[11px] mt-0.5">
+                      {activeInstance().java_path ? "Пользовательский JVM" : "Adoptium OpenJDK (Изолированная среда)"}
+                    </span>
                   </div>
 
                   <LaunchButton
@@ -515,8 +695,28 @@ export const App: Component = () => {
               />
             </div>
           </Show>
+
+          {/* VIEW 6: Java Runtime Manager (J1) */}
+          <Show when={currentNav() === "java_manager"}>
+            <div class="max-w-4xl mx-auto">
+              <JavaManager onClose={() => setCurrentNav("instances")} />
+            </div>
+          </Show>
         </div>
       </main>
+
+      {/* Instance Settings Modal (J2) */}
+      <InstanceSettingsModal
+        instance={activeInstance()}
+        isOpen={isSettingsOpen()}
+        onClose={() => setIsSettingsOpen(false)}
+        onSaved={(updated) => {
+          setInstances((prev) =>
+            prev.map((i) => (i.id === updated.id ? updated : i))
+          );
+        }}
+        onOpenJavaManager={() => setCurrentNav("java_manager")}
+      />
     </div>
   );
 };
