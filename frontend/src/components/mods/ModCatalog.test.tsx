@@ -181,4 +181,22 @@ describe("ModCatalog Component", () => {
     expect(onModInstalled).toHaveBeenCalledWith(mockMod);
     expect(screen.queryByTestId("mods-install-error-banner")).toBeNull();
   });
+
+  it("displays rate-limit banner when searchMods fails with CF_RATE_LIMITED (D6)", async () => {
+    vi.spyOn(launcherAPI, "searchMods").mockRejectedValue(
+      new Error("CF_RATE_LIMITED: curseforge api rate limit exceeded (status 403)")
+    );
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    const errorBanner = await screen.findByTestId("mods-search-error-banner");
+    expect(errorBanner.textContent).toContain("Лимит запросов CurseForge исчерпан");
+    expect(errorBanner.textContent).toContain("Укажите свой персональный API-ключ в Настройках");
+  });
 });

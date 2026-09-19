@@ -2,7 +2,8 @@
 # Nord Launcher - Windows Production Release Builder
 # ==============================================================================
 param(
-    [string]$Version = "0.1.0"
+    [string]$Version = "0.1.0",
+    [string]$CurseForgeKey = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,7 +28,16 @@ try {
 
 Write-Host "==> [3/5] Compiling Launcher Executable with Go..." -ForegroundColor Cyan
 $BinaryPath = Join-Path $DistWin "NordLauncher.exe"
-go build -ldflags="-s -w -H=windowsgui -X main.version=$Version" -o $BinaryPath ./cmd/launcher/main.go
+go build "-ldflags=-s -w -H=windowsgui -X main.version=$Version -X main.CurseForgeKey=$CurseForgeKey" -o $BinaryPath ./cmd/launcher/main.go
+
+if ($CurseForgeKey) {
+    $found = Select-String -Path $BinaryPath -Pattern $CurseForgeKey -SimpleMatch -Quiet
+    if (-not $found) {
+        Write-Error "ERROR: Built-in CurseForge API key was not baked into executable!"
+    } else {
+        Write-Host "PASS: Built-in CurseForge API key verified in Windows executable." -ForegroundColor Green
+    }
+}
 
 $BinaryBytes = (Get-Item $BinaryPath).Length
 $BinaryMB = [math]::Round($BinaryBytes / 1MB, 2)

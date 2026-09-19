@@ -688,4 +688,8 @@ func (a *WailsAdapter) SetSetting(req SetSettingRequest) error {
 	}
 
 	return nil
+}
+
+func (a *WailsAdapter) HasBuiltinCurseForgeKey() (bool, error) {
+	return curseforge.BuiltinAPIKey != "" || os.Getenv("CURSEFORGE_API_KEY") != "", nil
 }

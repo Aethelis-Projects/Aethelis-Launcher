@@ -3,6 +3,7 @@ package curseforge_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content"
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 )
@@ -194,4 +196,119 @@ func TestCurseForgeClient_SetAPIKey_ThreadSafe(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestCurseForgeClient_SearchMods_CacheAndTTL(t *testing.T) {
+	hitCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hitCount++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":            12345,
+					"slug":          "cached-mod",
+					"name":          "Cached Mod",
+					"summary":       "Summary",
+					"downloadCount": 1000.0,
+					"authors":       []map[string]string{{"name": "author1"}},
+					"categories":    []map[string]string{{"name": "Utility"}},
+					"dateModified":  time.Now().Format(time.RFC3339),
+				},
+			},
+			"pagination": map[string]any{
+				"index":      0,
+				"pageSize":   20,
+				"totalCount": 1,
+			},
+		})
+	}))
+	defer server.Close()
+
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	mockClock := clock.NewMockClock(now)
+
+	client := curseforge.NewClient(server.URL, "test-key", server.Client())
+	client.SetClock(mockClock)
+
+	// First call: cache miss, hits server
+	mods1, total1, err := client.SearchMods(context.Background(), "cached", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hitCount != 1 || total1 != 1 || len(mods1) != 1 {
+		t.Fatalf("expected 1 hit, got %d hits", hitCount)
+	}
+
+	// Mutate returned slice to verify cache isolation (D3)
+	mods1[0].Name = "Mutated In Place"
+
+	// Advance clock by 5 minutes (within 10-minute TTL)
+	mockClock.CurrentTime = mockClock.CurrentTime.Add(5 * time.Minute)
+
+	// Second call: cache hit, no server hit
+	mods2, total2, err := client.SearchMods(context.Background(), "cached", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hitCount != 1 {
+		t.Fatalf("expected cache hit (still 1 server hit), got %d hits", hitCount)
+	}
+	if total2 != 1 || len(mods2) != 1 {
+		t.Fatalf("expected 1 mod item from cache")
+	}
+	// Verify D3: mutation of mods1 did not mutate cache
+	if mods2[0].Name != "Cached Mod" {
+		t.Errorf("expected original Cached Mod name, got %s (shared mutation detected!)", mods2[0].Name)
+	}
+
+	// Advance clock past 10 minutes (TTL expired)
+	mockClock.CurrentTime = mockClock.CurrentTime.Add(6 * time.Minute) // total 11 min
+
+	// Third call: cache expired, hits server again
+	mods3, _, err := client.SearchMods(context.Background(), "cached", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hitCount != 2 {
+		t.Fatalf("expected cache expiration (2 server hits), got %d hits", hitCount)
+	}
+	if len(mods3) != 1 {
+		t.Fatalf("expected 1 mod item after refresh")
+	}
+}
+
+func TestCurseForgeClient_RateLimited_401_403(t *testing.T) {
+	statusCode := http.StatusUnauthorized
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "Limit exceeded or unauthorized", statusCode)
+	}))
+	defer server.Close()
+
+	client := curseforge.NewClient(server.URL, "test-key", server.Client())
+
+	// Test 401
+	_, _, err := client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0)
+	if err == nil {
+		t.Fatalf("expected error on HTTP 401, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "CF_RATE_LIMITED:") {
+		t.Errorf("expected CF_RATE_LIMITED: prefix, got %v", err)
+	}
+	if !errors.Is(err, curseforge.ErrCurseForgeRateLimited) {
+		t.Errorf("expected errors.Is ErrCurseForgeRateLimited, got %v", err)
+	}
+
+	// Test 403
+	statusCode = http.StatusForbidden
+	_, _, err = client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0)
+	if err == nil {
+		t.Fatalf("expected error on HTTP 403, got nil")
+	}
+	if !strings.HasPrefix(err.Error(), "CF_RATE_LIMITED:") {
+		t.Errorf("expected CF_RATE_LIMITED: prefix, got %v", err)
+	}
+	if !errors.Is(err, curseforge.ErrCurseForgeRateLimited) {
+		t.Errorf("expected errors.Is ErrCurseForgeRateLimited, got %v", err)
+	}
 }

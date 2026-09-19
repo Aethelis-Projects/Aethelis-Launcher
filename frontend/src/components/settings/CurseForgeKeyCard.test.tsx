@@ -3,13 +3,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CurseForgeKeyCard } from "./CurseForgeKeyCard";
 import { launcherAPI } from "../../services/api";
 
-describe("CurseForgeKeyCard Component (B5, N6)", () => {
+describe("CurseForgeKeyCard Component (B5, N6, R2)", () => {
   beforeEach(() => {
     launcherAPI.setMockSettings({});
+    launcherAPI.setMockHasBuiltinCurseForgeKey(false);
     vi.restoreAllMocks();
   });
 
-  it("renders with loaded key from settings", async () => {
+  it("renders with loaded key from settings and 32-hex placeholder", async () => {
     launcherAPI.setMockSettings({ curseforge_api_key: "$2a$10$existingkey" });
 
     render(() => <CurseForgeKeyCard />);
@@ -19,6 +20,7 @@ describe("CurseForgeKeyCard Component (B5, N6)", () => {
       expect(input.value).toBe("$2a$10$existingkey");
     });
     expect(input.type).toBe("password");
+    expect(input.placeholder).toBe("32-значный hex-ключ CurseForge (например, a1b2c3d4...)");
   });
 
   it("toggles password visibility mask", async () => {
@@ -61,5 +63,41 @@ describe("CurseForgeKeyCard Component (B5, N6)", () => {
 
     const status = await screen.findByTestId("cf-key-status");
     expect(status.textContent).toContain("Не удалось сохранить");
+  });
+
+  it("shows builtin key badge and collapses spoiler by default when builtin key exists (R2)", async () => {
+    launcherAPI.setMockHasBuiltinCurseForgeKey(true);
+
+    render(() => <CurseForgeKeyCard />);
+
+    const badge = await screen.findByTestId("cf-builtin-badge");
+    expect(badge.textContent).toContain("Встроенный ключ активен");
+
+    // Input should be hidden initially in spoiler
+    expect(screen.queryByTestId("cf-key-input")).toBeNull();
+
+    // Toggle spoiler open
+    const spoilerToggle = screen.getByTestId("cf-custom-key-spoiler-toggle");
+    expect(spoilerToggle.textContent).toContain("Использовать свой ключ");
+    fireEvent.click(spoilerToggle);
+
+    const input = (await screen.findByTestId("cf-key-input")) as HTMLInputElement;
+    expect(input).toBeTruthy();
+    expect(input.placeholder).toBe("32-значный hex-ключ CurseForge (например, a1b2c3d4...)");
+  });
+
+  it("opens spoiler automatically when builtin key is active but custom key is configured (R2)", async () => {
+    launcherAPI.setMockHasBuiltinCurseForgeKey(true);
+    launcherAPI.setMockSettings({ curseforge_api_key: "custom-overridden-key" });
+
+    render(() => <CurseForgeKeyCard />);
+
+    const badge = await screen.findByTestId("cf-builtin-badge");
+    expect(badge.textContent).toContain("Встроенный ключ активен");
+
+    const input = (await screen.findByTestId("cf-key-input")) as HTMLInputElement;
+    await vi.waitFor(() => {
+      expect(input.value).toBe("custom-overridden-key");
+    });
   });
 });

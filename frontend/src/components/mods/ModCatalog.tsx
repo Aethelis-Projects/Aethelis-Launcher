@@ -148,7 +148,12 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
             data-testid="mods-search-error-banner"
           >
             <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
-            <span>Ошибка поиска модов: {searchError()}</span>
+            <Show
+              when={searchError().includes("CF_RATE_LIMITED:")}
+              fallback={<span>Ошибка поиска модов: {searchError()}</span>}
+            >
+              <span>Лимит запросов CurseForge исчерпан. Укажите свой персональный API-ключ в Настройках для снятия ограничений.</span>
+            </Show>
           </div>
         </Show>
 

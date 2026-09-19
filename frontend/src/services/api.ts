@@ -37,6 +37,7 @@ interface WailsAdapterBindings {
   GetSettings?: () => Promise<GetSettingsResponse>;
   SetSetting?: (req: SetSettingRequest) => Promise<void>;
   InstallMod?: (req: InstallModRequest) => Promise<InstallModResponse>;
+  HasBuiltinCurseForgeKey?: () => Promise<boolean>;
   [key: string]: unknown;
 }
 
@@ -259,6 +260,7 @@ let mockApplyResult: UpdateApplyResultDTO = {
 };
 
 let mockSettings: Record<string, string> = {};
+let mockHasBuiltinCurseForgeKey = false;
 
 export const launcherAPI = {
   setMockUpdateInfo(info: UpdateInfoDTO): void {
@@ -503,5 +505,13 @@ export const launcherAPI = {
       },
       { key, value }
     );
+  },
+
+  setMockHasBuiltinCurseForgeKey(val: boolean): void {
+    mockHasBuiltinCurseForgeKey = val;
+  },
+
+  async hasBuiltinCurseForgeKey(): Promise<boolean> {
+    return invokeWails("HasBuiltinCurseForgeKey", () => mockHasBuiltinCurseForgeKey);
   },
 };

@@ -376,6 +376,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"InstallMod",
 		"GetSettings",
 		"SetSetting",
+		"HasBuiltinCurseForgeKey",
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -876,5 +877,36 @@ func TestWailsAdapter_InstallMod_Validation(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "unsupported mod source") {
 		t.Fatalf("expected unsupported mod source, got: %v", err)
+	}
+}
+
+func TestWailsAdapter_HasBuiltinCurseForgeKey(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+
+	origEnv := os.Getenv("CURSEFORGE_API_KEY")
+	origBuiltin := curseforge.BuiltinAPIKey
+	defer func() {
+		_ = os.Setenv("CURSEFORGE_API_KEY", origEnv) // errcheck:ok restore env
+		curseforge.BuiltinAPIKey = origBuiltin
+	}()
+
+	_ = os.Unsetenv("CURSEFORGE_API_KEY") // errcheck:ok unset env
+	curseforge.BuiltinAPIKey = ""
+
+	hasKey, err := adapter.HasBuiltinCurseForgeKey()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if hasKey {
+		t.Errorf("expected hasKey=false when neither builtin nor env is set")
+	}
+
+	curseforge.BuiltinAPIKey = "0123456789abcdef0123456789abcdef"
+	hasKey, err = adapter.HasBuiltinCurseForgeKey()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !hasKey {
+		t.Errorf("expected hasKey=true when builtin is set")
 	}
 }

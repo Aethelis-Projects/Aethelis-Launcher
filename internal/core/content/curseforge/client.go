@@ -12,22 +12,36 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content"
+	"github.com/nord-launcher/launcher/internal/core/ports"
 )
 
 const (
-	DefaultBaseURL = "https://api.curseforge.com"
+	DefaultBaseURL  = "https://api.curseforge.com"
 	MinecraftGameID = 432
 )
+
+// ErrCurseForgeRateLimited indicates CurseForge returned HTTP 401 or 403 (quota or auth issue).
+var ErrCurseForgeRateLimited = errors.New("curseforge rate limit or authentication error")
 
 // BuiltinAPIKey holds an optional CurseForge API key. In official releases, CurseForge uses BYOK via CURSEFORGE_API_KEY (or -X main.CurseForgeKey in custom builds).
 var BuiltinAPIKey = ""
 
+type searchCacheEntry struct {
+	rawJSON    []byte
+	totalCount int64
+	expiresAt  time.Time
+}
+
 type Client struct {
-	baseURL    string
-	apiKey     string
-	httpClient *http.Client
-	mu         sync.RWMutex
+	baseURL     string
+	apiKey      string
+	httpClient  *http.Client
+	clock       ports.Clock
+	searchCache map[string]searchCacheEntry
+	cacheKeys   []string
+	mu          sync.RWMutex
 }
 
 func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
@@ -41,10 +55,27 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	return &Client{
-		baseURL:    baseURL,
-		apiKey:     apiKey,
-		httpClient: httpClient,
+		baseURL:     baseURL,
+		apiKey:      apiKey,
+		httpClient:  httpClient,
+		clock:       clock.NewRealClock(),
+		searchCache: make(map[string]searchCacheEntry),
 	}
+}
+
+func (c *Client) SetClock(clk ports.Clock) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clock = clk
+}
+
+func (c *Client) now() time.Time {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.clock != nil {
+		return c.clock.Now()
+	}
+	return time.Now()
 }
 
 func (c *Client) SetAPIKey(key string) {
@@ -102,6 +133,44 @@ type cfMod struct {
 	DateModified time.Time `json:"dateModified"`
 }
 
+func decodeSearchItems(rawJSON []byte) ([]content.ModItem, int64, error) {
+	var searchRes cfSearchResponse
+	if err := json.Unmarshal(rawJSON, &searchRes); err != nil {
+		return nil, 0, fmt.Errorf("decode curseforge response: %w", err)
+	}
+
+	items := make([]content.ModItem, 0, len(searchRes.Data))
+	for _, m := range searchRes.Data {
+		author := ""
+		if len(m.Authors) > 0 {
+			author = m.Authors[0].Name
+		}
+		iconURL := ""
+		if m.Logo != nil {
+			iconURL = m.Logo.URL
+		}
+		cats := make([]string, 0, len(m.Categories))
+		for _, cat := range m.Categories {
+			cats = append(cats, cat.Name)
+		}
+
+		items = append(items, content.ModItem{
+			ID:         strconv.FormatInt(m.ID, 10),
+			Slug:       m.Slug,
+			Source:     content.SourceCurseForge,
+			Name:       m.Name,
+			Author:     author,
+			Summary:    m.Summary,
+			IconURL:    iconURL,
+			Downloads:  int64(m.DownloadCount),
+			Categories: cats,
+			UpdatedAt:  m.DateModified,
+		})
+	}
+
+	return items, searchRes.Pagination.TotalCount, nil
+}
+
 func (c *Client) SearchMods(
 	ctx context.Context,
 	query string,
@@ -113,6 +182,18 @@ func (c *Client) SearchMods(
 	if apiKey == "" {
 		return nil, 0, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
 	}
+
+	cacheKey := fmt.Sprintf("%s|%s|%s|%d|%d", query, gameVersion, loader, pageSize, index)
+	now := c.now()
+
+	c.mu.RLock()
+	if entry, found := c.searchCache[cacheKey]; found {
+		if now.Before(entry.expiresAt) {
+			c.mu.RUnlock()
+			return decodeSearchItems(entry.rawJSON)
+		}
+	}
+	c.mu.RUnlock()
 
 	u, err := url.Parse(c.baseURL + "/v1/mods/search")
 	if err != nil {
@@ -153,46 +234,40 @@ func (c *Client) SearchMods(
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return nil, 0, fmt.Errorf("CF_RATE_LIMITED: %w (HTTP %d)", ErrCurseForgeRateLimited, resp.StatusCode)
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		return nil, 0, fmt.Errorf("curseforge search HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var searchRes cfSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchRes); err != nil {
-		return nil, 0, fmt.Errorf("decode curseforge response: %w", err)
+	rawBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read curseforge response: %w", err)
 	}
 
-	items := make([]content.ModItem, 0, len(searchRes.Data))
-	for _, m := range searchRes.Data {
-		author := ""
-		if len(m.Authors) > 0 {
-			author = m.Authors[0].Name
-		}
-		iconURL := ""
-		if m.Logo != nil {
-			iconURL = m.Logo.URL
-		}
-		cats := make([]string, 0, len(m.Categories))
-		for _, cat := range m.Categories {
-			cats = append(cats, cat.Name)
-		}
-
-		items = append(items, content.ModItem{
-			ID:         strconv.FormatInt(m.ID, 10),
-			Slug:       m.Slug,
-			Source:     content.SourceCurseForge,
-			Name:       m.Name,
-			Author:     author,
-			Summary:    m.Summary,
-			IconURL:    iconURL,
-			Downloads:  int64(m.DownloadCount),
-			Categories: cats,
-			UpdatedAt:  m.DateModified,
-		})
+	items, total, err := decodeSearchItems(rawBytes)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	return items, searchRes.Pagination.TotalCount, nil
+	c.mu.Lock()
+	if len(c.searchCache) >= 64 && len(c.cacheKeys) > 0 {
+		oldest := c.cacheKeys[0]
+		c.cacheKeys = c.cacheKeys[1:]
+		delete(c.searchCache, oldest)
+	}
+	c.searchCache[cacheKey] = searchCacheEntry{
+		rawJSON:    rawBytes,
+		totalCount: total,
+		expiresAt:  now.Add(10 * time.Minute),
+	}
+	c.cacheKeys = append(c.cacheKeys, cacheKey)
+	c.mu.Unlock()
+
+	return items, total, nil
 }
 
 type cfFilesResponse struct {

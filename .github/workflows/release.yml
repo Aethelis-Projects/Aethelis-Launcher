@@ -40,10 +40,28 @@ jobs:
           pnpm build
 
       - name: Compile Windows Executable
+        env:
+          CURSEFORGE_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+        shell: pwsh
         run: |
-          mkdir -p dist/windows
-          go build -ldflags="-s -w -H=windowsgui -X main.version=${{ github.ref_name }}" -o dist/windows/NordLauncher.exe cmd/launcher/main.go
-        shell: bash
+          New-Item -ItemType Directory -Force -Path dist/windows
+          go build "-ldflags=-s -w -H=windowsgui -X main.version=$($env:GITHUB_REF_NAME) -X main.CurseForgeKey=$($env:CURSEFORGE_KEY)" -o dist/windows/NordLauncher.exe cmd/launcher/main.go
+
+      - name: Verify Baked CurseForge Key (D2)
+        env:
+          CF_SECRET: ${{ secrets.CURSEFORGE_API_KEY }}
+        shell: pwsh
+        run: |
+          if (-not $env:CF_SECRET) {
+            Write-Host "NOTE: CURSEFORGE_API_KEY secret is not set, skipping baked verification."
+            exit 0
+          }
+          $matches = Select-String -Path "dist/windows/NordLauncher.exe" -Pattern $env:CF_SECRET -SimpleMatch -Quiet
+          if (-not $matches) {
+            Write-Error "ERROR: Built-in CurseForge API key was not baked into executable!"
+            exit 1
+          }
+          Write-Host "PASS: Built-in CurseForge API key verified in Windows executable binary."
 
       - name: Check Binary Size Budget (<= 40 MB)
         run: |
@@ -125,9 +143,17 @@ jobs:
           sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config
 
       - name: Build Release Tarball
+        env:
+          CURSEFORGE_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
         run: |
+          if [ -n "$CURSEFORGE_KEY" ]; then
+            if [ ${#CURSEFORGE_KEY} -lt 16 ]; then
+              echo "ERROR: Invalid CURSEFORGE_API_KEY secret length (expected at least 16 chars)"
+              exit 1
+            fi
+          fi
           chmod +x scripts/build_release.sh
-          ./scripts/build_release.sh ${{ github.ref_name }}
+          ./scripts/build_release.sh "${{ github.ref_name }}" "$CURSEFORGE_KEY"
         shell: bash
 
       - name: Upload Linux Artifacts
