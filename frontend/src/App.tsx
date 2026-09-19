@@ -1,5 +1,5 @@
 import { Component, createSignal, onCleanup, onMount, Show } from "solid-js";
-import { LayoutGrid, Layers, Package, User, Settings, AlertTriangle } from "lucide-solid";
+import { LayoutGrid, Layers, Package, User, Settings, AlertTriangle, AlertCircle } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
@@ -26,6 +26,7 @@ export const App: Component = () => {
   const [searchQuery, setSearchQuery] = createSignal("");
   const [crashReport, setCrashReport] = createSignal<CrashReportDTO | null>(null);
   const [availableUpdate, setAvailableUpdate] = createSignal<UpdateInfoDTO | null>(null);
+  const [systemError, setSystemError] = createSignal<string>("");
 
   let pollInterval: ReturnType<typeof setInterval> | null = null;
   let updateTimer: ReturnType<typeof setTimeout>;
@@ -81,6 +82,8 @@ export const App: Component = () => {
         }
       } catch (err: unknown) {
         console.error("Polling error:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setSystemError(`Ошибка мониторинга состояния игры: ${msg}`);
       }
     }, import.meta.env.MODE === "test" ? 50 : 1000);
   };
@@ -95,6 +98,8 @@ export const App: Component = () => {
         }
       } catch (err: unknown) {
         console.error("Failed to list instances:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        setSystemError(`Не удалось загрузить список сборок: ${msg}`);
       }
     };
     loadInstances();
@@ -279,17 +284,19 @@ export const App: Component = () => {
           </nav>
         </div>
 
-        {/* Bottom crash simulator trigger for demonstration */}
-        <div class="flex flex-col items-center gap-3">
-          <button
-            type="button"
-            onClick={triggerMockCrash}
-            title="Тест диагностики сбоя (Crash Diagnostic Modal)"
-            class="w-9 h-9 rounded-full bg-zinc-900 border border-red-500/30 text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-colors"
-          >
-            <AlertTriangle class="w-4 h-4" />
-          </button>
-        </div>
+        {/* Bottom crash simulator trigger for demonstration (H5: dev-gated) */}
+        <Show when={import.meta.env.DEV}>
+          <div class="flex flex-col items-center gap-3">
+            <button
+              type="button"
+              onClick={triggerMockCrash}
+              title="Тест диагностики сбоя (Crash Diagnostic Modal)"
+              class="w-9 h-9 rounded-full bg-zinc-900 border border-red-500/30 text-red-400 hover:bg-red-500/10 flex items-center justify-center transition-colors"
+            >
+              <AlertTriangle class="w-4 h-4" />
+            </button>
+          </div>
+        </Show>
       </aside>
 
       {/* Main Workspace (Workbench Layout) */}
@@ -327,6 +334,26 @@ export const App: Component = () => {
             </div>
           </div>
         </header>
+
+        {/* System Error Banner (H6) */}
+        <Show when={systemError()}>
+          <div
+            class="mx-6 mt-4 p-3 rounded-lg bg-nord-rose/10 border border-nord-rose/20 text-xs text-nord-rose flex items-center justify-between gap-3 font-mono"
+            data-testid="system-error-banner"
+          >
+            <div class="flex items-center gap-2">
+              <AlertCircle class="w-4 h-4 text-nord-rose shrink-0" />
+              <span>{systemError()}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSystemError("")}
+              class="text-[11px] text-zinc-400 hover:text-zinc-200 underline cursor-pointer"
+            >
+              Закрыть
+            </button>
+          </div>
+        </Show>
 
         {/* Content Area */}
         <div class="flex-1 p-6 overflow-y-auto">

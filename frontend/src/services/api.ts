@@ -244,10 +244,10 @@ const mockModCatalog: ModItemDTO[] = [
 
 let mockUpdateInfo: UpdateInfoDTO = {
   has_update: false,
-  version: "0.2.0",
-  current_version: "0.2.0",
+  version: "0.2.1",
+  current_version: "0.2.1",
   release_date: "2026-09-19T18:00:00Z",
-  release_notes: "Nord Launcher v0.2.0 (stable channel) release.",
+  release_notes: "Nord Launcher v0.2.1 (stable channel) release.",
   download_url: "",
   sha256: "",
   size: 0,
@@ -274,10 +274,10 @@ export const launcherAPI = {
   resetMockUpdater(): void {
     mockUpdateInfo = {
       has_update: false,
-      version: "0.2.0",
-      current_version: "0.2.0",
+      version: "0.2.1",
+      current_version: "0.2.1",
       release_date: "2026-09-19T18:00:00Z",
-      release_notes: "Nord Launcher v0.2.0 (stable channel) release.",
+      release_notes: "Nord Launcher v0.2.1 (stable channel) release.",
       download_url: "",
       sha256: "",
       size: 0,
@@ -290,7 +290,7 @@ export const launcherAPI = {
   },
 
   async getCurrentVersion(): Promise<string> {
-    return invokeWails("GetCurrentVersion", () => "0.2.0");
+    return invokeWails("GetCurrentVersion", () => "0.2.1");
   },
 
   async listInstances(): Promise<InstanceDTO[]> {

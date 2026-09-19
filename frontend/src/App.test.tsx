@@ -29,8 +29,8 @@ describe("App Component (B1, B2, D2, M1)", () => {
     vi.restoreAllMocks();
     vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
       has_update: false,
-      version: "0.2.0",
-      current_version: "0.2.0",
+      version: "0.2.1",
+      current_version: "0.2.1",
       release_date: "2026-09-19T18:00:00Z",
       release_notes: "",
       download_url: "",
@@ -160,5 +160,15 @@ describe("App Component (B1, B2, D2, M1)", () => {
     await vi.waitFor(() => {
       expect(launchBtn.textContent).toContain("Запустить игру");
     });
+  });
+
+  it("displays system error banner when listInstances fails on mount (H6)", async () => {
+    vi.spyOn(launcherAPI, "listInstances").mockRejectedValue(new Error("Database connection lost"));
+
+    render(() => <App />);
+
+    const banner = await screen.findByTestId("system-error-banner");
+    expect(banner.textContent).toContain("Не удалось загрузить список сборок");
+    expect(banner.textContent).toContain("Database connection lost");
   });
 });
