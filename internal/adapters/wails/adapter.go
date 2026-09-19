@@ -119,20 +119,25 @@ func (a *WailsAdapter) SetSettings(repo *storage.SettingsRepository) {
 	a.settingsRepo = repo
 }
 
+func toInstanceDTO(inst *domain.Instance) InstanceDTO {
+	return InstanceDTO{
+		ID:               inst.ID,
+		Name:             inst.Name,
+		GameVersion:      inst.GameVersion,
+		Loader:           string(inst.Loader),
+		LoaderVersion:    inst.LoaderVer,
+		IconPath:         inst.IconPath,
+		JavaPath:         inst.JavaPath,
+		State:            string(inst.State),
+		TotalPlaySeconds: inst.TotalPlaySec,
+	}
+}
+
 func (a *WailsAdapter) ListInstances() []InstanceDTO {
 	coreList := a.svc.ListInstances()
 	dtoList := make([]InstanceDTO, 0, len(coreList))
 	for _, inst := range coreList {
-		dtoList = append(dtoList, InstanceDTO{
-			ID:               inst.ID,
-			Name:             inst.Name,
-			GameVersion:      inst.GameVersion,
-			Loader:           string(inst.Loader),
-			LoaderVersion:    inst.LoaderVer,
-			IconPath:         inst.IconPath,
-			State:            string(inst.State),
-			TotalPlaySeconds: inst.TotalPlaySec,
-		})
+		dtoList = append(dtoList, toInstanceDTO(inst))
 	}
 	return dtoList
 }
@@ -142,17 +147,27 @@ func (a *WailsAdapter) CreateInstance(req CreateInstanceRequest) (*InstanceDTO, 
 	if err != nil {
 		return nil, fmt.Errorf("create instance: %w", err)
 	}
+	if req.JavaPath != "" {
+		if updated, err := a.svc.UpdateInstance(context.Background(), inst.ID, "", req.JavaPath); err == nil {
+			inst = updated
+		}
+	}
 
-	return &InstanceDTO{
-		ID:               inst.ID,
-		Name:             inst.Name,
-		GameVersion:      inst.GameVersion,
-		Loader:           string(inst.Loader),
-		LoaderVersion:    inst.LoaderVer,
-		IconPath:         inst.IconPath,
-		State:            string(inst.State),
-		TotalPlaySeconds: inst.TotalPlaySec,
-	}, nil
+	dto := toInstanceDTO(inst)
+	return &dto, nil
+}
+
+func (a *WailsAdapter) UpdateInstance(req UpdateInstanceRequest) (*InstanceDTO, error) {
+	if req.ID == "" {
+		return nil, fmt.Errorf("instance ID cannot be empty")
+	}
+	inst, err := a.svc.UpdateInstance(context.Background(), req.ID, req.Name, req.JavaPath)
+	if err != nil {
+		return nil, fmt.Errorf("update instance: %w", err)
+	}
+
+	dto := toInstanceDTO(inst)
+	return &dto, nil
 }
 
 func (a *WailsAdapter) LaunchInstance(id string) (*LaunchResponse, error) {

@@ -10,6 +10,7 @@ type InstanceDTO struct {
 	Loader           string `json:"loader"`
 	LoaderVersion    string `json:"loader_version,omitempty"`
 	IconPath         string `json:"icon_path,omitempty"`
+	JavaPath         string `json:"java_path,omitempty"`
 	State            string `json:"state"`
 	TotalPlaySeconds int64  `json:"total_play_seconds"`
 }
@@ -18,6 +19,13 @@ type CreateInstanceRequest struct {
 	Name        string `json:"name"`
 	GameVersion string `json:"game_version"`
 	Loader      string `json:"loader"`
+	JavaPath    string `json:"java_path,omitempty"`
+}
+
+type UpdateInstanceRequest struct {
+	ID       string `json:"id"`
+	Name     string `json:"name,omitempty"`
+	JavaPath string `json:"java_path,omitempty"`
 }
 
 type LaunchResponse struct {

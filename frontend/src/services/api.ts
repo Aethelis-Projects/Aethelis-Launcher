@@ -1,6 +1,7 @@
 import type {
   InstanceDTO,
   CreateInstanceRequest,
+  UpdateInstanceRequest,
   LaunchResponse,
   AccountDTO,
   ModItemDTO,
@@ -26,6 +27,7 @@ interface WailsAdapterBindings {
   LoginOffline?: (username: string) => Promise<AccountDTO>;
   ListInstances?: () => Promise<InstanceDTO[]>;
   CreateInstance?: (req: CreateInstanceRequest) => Promise<InstanceDTO>;
+  UpdateInstance?: (req: UpdateInstanceRequest) => Promise<InstanceDTO>;
   LaunchInstance?: (id: string) => Promise<LaunchResponse>;
   ListAccounts?: () => Promise<AccountDTO[]>;
   SetActiveAccount?: (uuid: string) => Promise<void>;
@@ -311,6 +313,22 @@ export const launcherAPI = {
         };
         mockInstances.push(newInst);
         return newInst;
+      },
+      req
+    );
+  },
+
+  async updateInstance(req: UpdateInstanceRequest): Promise<InstanceDTO> {
+    return invokeWails(
+      "UpdateInstance",
+      () => {
+        const inst = mockInstances.find((i) => i.id === req.id);
+        if (!inst) {
+          throw new Error("Instance not found");
+        }
+        if (req.name) inst.name = req.name;
+        inst.java_path = req.java_path;
+        return { ...inst };
       },
       req
     );

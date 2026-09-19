@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"time"
@@ -162,6 +163,49 @@ func (s *InstanceService) GetInstance(id string) (*domain.Instance, error) {
 	return &copyInst, nil
 }
 
+// UpdateInstance updates mutable properties (Name, JavaPath) of an existing instance.
+// It loads the instance first to preserve all other fields, then persists the updated instance.
+func (s *InstanceService) UpdateInstance(ctx context.Context, id, name, javaPath string) (*domain.Instance, error) {
+	if id == "" {
+		return nil, fmt.Errorf("%w: instance ID cannot be empty", domain.ErrInvalidConfig)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var inst *domain.Instance
+	if s.repo != nil {
+		var err error
+		inst, err = s.repo.GetByID(ctx, id)
+		if err != nil || inst == nil {
+			return nil, domain.ErrInstanceNotFound
+		}
+	} else {
+		existing, ok := s.instances[id]
+		if !ok {
+			return nil, domain.ErrInstanceNotFound
+		}
+		inst = existing
+	}
+
+	if name != "" {
+		inst.Name = name
+	}
+	inst.JavaPath = javaPath
+	inst.UpdatedAt = s.clock.Now()
+
+	s.instances[id] = inst
+
+	if s.repo != nil {
+		if err := s.repo.Save(ctx, inst); err != nil {
+			return nil, fmt.Errorf("persist updated instance: %w", err)
+		}
+	}
+
+	copyInst := *inst
+	return &copyInst, nil
+}
+
 func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 	s.mu.RLock()
 	inst, ok := s.instances[id]
@@ -208,23 +252,42 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 		}
 	}
 
-	// 4. Resolve Java executable (V2)
+	// 4. Resolve Java executable & enforce fail-closed major validation (S3)
 	javaExec := inst.JavaPath
-	if javaExec == "" && s.java != nil {
+	if javaExec != "" {
 		reqMajor, _ := java.ResolveJavaMajor(inst.GameVersion)
-		if installs, err := s.java.DetectInstallations(ctx); err == nil {
-			for _, install := range installs {
-				if install.MajorVersion == reqMajor {
-					javaExec = install.Path
-					break
-				}
+		cmd := exec.CommandContext(ctx, javaExec, "-version")
+		out, runErr := cmd.CombinedOutput()
+		major, parseErr := java.ParseJavaMajor(string(out))
+		if parseErr != nil {
+			if runErr != nil {
+				return 0, fmt.Errorf("failed to execute configured Java at %s: %w", javaExec, runErr)
 			}
-			if javaExec == "" && len(installs) > 0 {
-				javaExec = installs[0].Path
+			return 0, fmt.Errorf("could not determine Java version for %s: %w", javaExec, parseErr)
+		}
+		if reqMajor > 0 && major != reqMajor {
+			return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d or set Java path in instance settings", reqMajor, inst.GameVersion, major, javaExec, reqMajor)
+		}
+	} else if s.java != nil {
+		reqMajor, _ := java.ResolveJavaMajor(inst.GameVersion)
+		installs, err := s.java.DetectInstallations(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("detect Java installations: %w", err)
+		}
+		for _, install := range installs {
+			if install.MajorVersion == reqMajor {
+				javaExec = install.Path
+				break
 			}
 		}
-	}
-	if javaExec == "" {
+		if javaExec == "" {
+			if len(installs) > 0 {
+				return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d or set Java path in instance settings", reqMajor, inst.GameVersion, installs[0].MajorVersion, installs[0].Path, reqMajor)
+			}
+			return 0, fmt.Errorf("no compatible Java %d installation found for Minecraft %s; install Temurin %d or configure custom Java path in instance settings", reqMajor, inst.GameVersion, reqMajor)
+		}
+	} else {
+		// Headless / mock test environment fallback
 		javaExec = "java"
 	}
 

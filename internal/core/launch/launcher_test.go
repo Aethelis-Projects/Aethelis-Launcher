@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -570,6 +571,134 @@ func TestInstanceService_Launch_WithJavaDetector(t *testing.T) {
 		t.Errorf("expected pid 1111, got %d", pid)
 	}
 	close(waitCh)
+}
+
+func TestInstanceService_Launch_FailClosed_IncompatibleJava(t *testing.T) {
+	now := time.Now()
+	clk := clock.NewMockClock(now)
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 2222, exitCode: 0}}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
+	svc.SetActiveAccount(&domain.Account{
+		UUID:        "uuid-alex",
+		Username:    "Alex",
+		Type:        domain.AccountOffline,
+		AccessToken: "mock-offline",
+	})
+
+	inst, _ := svc.CreateInstance("Incompatible-Java-Pack", "1.21.1", domain.LoaderVanilla)
+
+	// Only Java 8 and Java 17 available, but 1.21.1 requires Java 21!
+	detector := &mockJavaDetector{
+		installs: []ports.JavaInstallation{
+			{Path: "/custom/java8/bin/java", MajorVersion: 8},
+			{Path: "/custom/java17/bin/java", MajorVersion: 17},
+		},
+	}
+	svc.SetJavaDetector(detector)
+
+	_, err := svc.Launch(context.Background(), inst.ID)
+	if err == nil {
+		t.Fatal("expected fail-closed error for incompatible Java version, got nil")
+	}
+	expectedSubstring := "Java 21 required for Minecraft 1.21.1"
+	if !strings.Contains(err.Error(), expectedSubstring) {
+		t.Fatalf("expected error containing %q, got: %v", expectedSubstring, err)
+	}
+}
+
+func TestInstanceService_Launch_FailClosed_NoJava(t *testing.T) {
+	now := time.Now()
+	clk := clock.NewMockClock(now)
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 3333, exitCode: 0}}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
+	svc.SetActiveAccount(&domain.Account{
+		UUID:        "uuid-alex",
+		Username:    "Alex",
+		Type:        domain.AccountOffline,
+		AccessToken: "mock-offline",
+	})
+
+	inst, _ := svc.CreateInstance("No-Java-Pack", "1.21.1", domain.LoaderVanilla)
+
+	detector := &mockJavaDetector{
+		installs: []ports.JavaInstallation{},
+	}
+	svc.SetJavaDetector(detector)
+
+	_, err := svc.Launch(context.Background(), inst.ID)
+	if err == nil {
+		t.Fatal("expected fail-closed error for empty Java detector, got nil")
+	}
+	expectedSubstring := "no compatible Java 21 installation found for Minecraft 1.21.1"
+	if !strings.Contains(err.Error(), expectedSubstring) {
+		t.Fatalf("expected error containing %q, got: %v", expectedSubstring, err)
+	}
+}
+
+func TestInstanceService_UpdateInstance_FullUpsertPreservesFields(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := storage.Open(filepath.Join(tempDir, "nord.db"))
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer db.Close()
+
+	instRepo := storage.NewInstanceRepository(db)
+	now := time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
+	clk := clock.NewMockClock(now)
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcessManager{}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(instRepo, fileSys, mockProc, kr, clk)
+
+	// Create initial instance
+	created, err := svc.CreateInstance("Original-Pack", "1.20.1", domain.LoaderFabric)
+	if err != nil {
+		t.Fatalf("create instance failed: %v", err)
+	}
+
+	// Advance clock
+	nowLater := now.Add(1 * time.Hour)
+	clk.CurrentTime = nowLater
+
+	// Update instance with custom JavaPath and new name
+	updated, err := svc.UpdateInstance(context.Background(), created.ID, "Renamed-Pack", "C:\\Java21\\bin\\java.exe")
+	if err != nil {
+		t.Fatalf("update instance failed: %v", err)
+	}
+
+	if updated.Name != "Renamed-Pack" {
+		t.Errorf("expected updated name %q, got %q", "Renamed-Pack", updated.Name)
+	}
+	if updated.JavaPath != "C:\\Java21\\bin\\java.exe" {
+		t.Errorf("expected updated JavaPath, got %q", updated.JavaPath)
+	}
+	if !updated.UpdatedAt.Equal(nowLater) {
+		t.Errorf("expected UpdatedAt %v, got %v", nowLater, updated.UpdatedAt)
+	}
+
+	// Load from SQLite repository to verify persistence & preserved fields
+	persisted, err := instRepo.GetByID(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetByID failed: %v", err)
+	}
+
+	if persisted.Name != "Renamed-Pack" || persisted.JavaPath != "C:\\Java21\\bin\\java.exe" {
+		t.Errorf("persisted fields mismatch: name=%q java=%q", persisted.Name, persisted.JavaPath)
+	}
+	if persisted.GameVersion != "1.20.1" || persisted.Loader != domain.LoaderFabric {
+		t.Errorf("original fields corrupted: version=%q loader=%q", persisted.GameVersion, persisted.Loader)
+	}
+	if persisted.MinRAMMB != 2048 || persisted.MaxRAMMB != 4096 {
+		t.Errorf("RAM settings corrupted: min=%d max=%d", persisted.MinRAMMB, persisted.MaxRAMMB)
+	}
 }
 
 func TestInstanceService_Setters(t *testing.T) {

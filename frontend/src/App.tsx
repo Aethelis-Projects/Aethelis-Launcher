@@ -1,4 +1,4 @@
-import { Component, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { Component, createSignal, createEffect, onCleanup, onMount, Show } from "solid-js";
 import { LayoutGrid, Layers, Package, User, Settings, AlertTriangle, AlertCircle } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
@@ -147,6 +147,29 @@ export const App: Component = () => {
         i.game_version.toLowerCase().includes(q) ||
         i.loader.toLowerCase().includes(q)
     );
+  };
+
+  const [customJavaPath, setCustomJavaPath] = createSignal("");
+
+  createEffect(() => {
+    const inst = activeInstance();
+    setCustomJavaPath(inst.java_path || "");
+  });
+
+  const saveInstanceJavaPath = async () => {
+    const targetId = activeInstance().id;
+    if (!targetId) return;
+    try {
+      const updated = await launcherAPI.updateInstance({
+        id: targetId,
+        java_path: customJavaPath().trim(),
+      });
+      setInstances((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+    } catch (err: unknown) {
+      console.error("Failed to update instance Java path:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      setSystemError(`Ошибка обновления параметров инстанса: ${msg}`);
+    }
   };
 
   const handleLaunch = async () => {
@@ -383,6 +406,37 @@ export const App: Component = () => {
                     <span class="px-2.5 py-1 rounded-md text-xs font-mono font-medium capitalize bg-nord-cyan/10 text-nord-cyan border border-nord-cyan/20">
                       {activeInstance().loader} {activeInstance().loader_version || ""}
                     </span>
+                  </div>
+
+                  {/* Java Runtime Path Control (S3) */}
+                  <div class="mt-6 p-4 rounded-xl bg-black/20 border border-white/5 flex flex-col gap-2.5">
+                    <div class="flex items-center justify-between">
+                      <span class="text-xs font-semibold text-zinc-300">Среда выполнения Java (JavaPath)</span>
+                      <span class="text-[11px] font-mono text-zinc-500">
+                        {activeInstance().java_path ? "Пользовательский путь" : "Авто (Java 21 / 17 / 8)"}
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={customJavaPath()}
+                        placeholder="Авто-определение или путь к java.exe"
+                        onInput={(e) => setCustomJavaPath(e.currentTarget.value)}
+                        class="flex-1 px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-nord-cyan"
+                        data-testid="instance-java-path-input"
+                      />
+                      <button
+                        type="button"
+                        onClick={saveInstanceJavaPath}
+                        class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white transition-colors cursor-pointer"
+                        data-testid="save-java-path-button"
+                      >
+                        Сохранить
+                      </button>
+                    </div>
+                    <p class="text-[11px] text-zinc-500">
+                      При запуске выполняется строгая проверка соответствия мажорной версии Java (fail-closed).
+                    </p>
                   </div>
                 </div>
 

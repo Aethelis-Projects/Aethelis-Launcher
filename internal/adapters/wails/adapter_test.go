@@ -378,6 +378,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"GetSettings",
 		"SetSetting",
 		"HasBuiltinCurseForgeKey",
+		"UpdateInstance",
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1023,5 +1024,65 @@ func TestWailsAdapter_InstallMod_RedirectToUnauthorizedHost(t *testing.T) {
 	entries, _ := os.ReadDir(modsDir)
 	if len(entries) != 0 {
 		t.Fatalf("expected mods directory to be clean after redirect rejection, found %d entries", len(entries))
+	}
+}
+
+func TestWailsAdapter_UpdateInstance(t *testing.T) {
+	clk := clock.NewMockClock(time.Now())
+	fileSys := fs.NewOSFileSystem()
+	procMgr := &mockProcMgr{}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+	adapter := wails.NewWailsAdapter(svc)
+
+	// 1. Create with initial JavaPath
+	createReq := wails.CreateInstanceRequest{
+		Name:        "Vanilla-1.21",
+		GameVersion: "1.21.1",
+		Loader:      "vanilla",
+		JavaPath:    "/initial/java/bin/java",
+	}
+	dto, err := adapter.CreateInstance(createReq)
+	if err != nil {
+		t.Fatalf("CreateInstance failed: %v", err)
+	}
+	if dto.JavaPath != "/initial/java/bin/java" {
+		t.Errorf("expected JavaPath %q, got %q", "/initial/java/bin/java", dto.JavaPath)
+	}
+
+	// 2. Update Name and JavaPath
+	updateReq := wails.UpdateInstanceRequest{
+		ID:       dto.ID,
+		Name:     "Vanilla-1.21-CustomJava",
+		JavaPath: "/opt/temurin-21/bin/java",
+	}
+	updatedDTO, err := adapter.UpdateInstance(updateReq)
+	if err != nil {
+		t.Fatalf("UpdateInstance failed: %v", err)
+	}
+	if updatedDTO.Name != "Vanilla-1.21-CustomJava" {
+		t.Errorf("expected updated name, got %q", updatedDTO.Name)
+	}
+	if updatedDTO.JavaPath != "/opt/temurin-21/bin/java" {
+		t.Errorf("expected updated JavaPath, got %q", updatedDTO.JavaPath)
+	}
+	if updatedDTO.GameVersion != "1.21.1" || updatedDTO.Loader != "vanilla" {
+		t.Errorf("preserved fields altered: version=%q loader=%q", updatedDTO.GameVersion, updatedDTO.Loader)
+	}
+
+	// 3. Verify ListInstances reflects update
+	list := adapter.ListInstances()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 instance, got %d", len(list))
+	}
+	if list[0].JavaPath != "/opt/temurin-21/bin/java" {
+		t.Errorf("ListInstances JavaPath mismatch: %q", list[0].JavaPath)
+	}
+
+	// 4. Update with empty ID returns error
+	_, err = adapter.UpdateInstance(wails.UpdateInstanceRequest{ID: ""})
+	if err == nil {
+		t.Error("expected error for empty ID, got nil")
 	}
 }

@@ -171,4 +171,42 @@ describe("App Component (B1, B2, D2, M1)", () => {
     expect(banner.textContent).toContain("Не удалось загрузить список сборок");
     expect(banner.textContent).toContain("Database connection lost");
   });
+
+  it("configures instance Java path via updateInstance (S3)", async () => {
+    vi.spyOn(launcherAPI, "listInstances").mockResolvedValue([
+      {
+        id: "inst-1",
+        name: "Vanilla 1.21.1",
+        game_version: "1.21.1",
+        loader: "vanilla",
+        state: "idle",
+        total_play_seconds: 0,
+      },
+    ]);
+
+    const updateSpy = vi.spyOn(launcherAPI, "updateInstance").mockResolvedValue({
+      id: "inst-1",
+      name: "Vanilla 1.21.1",
+      game_version: "1.21.1",
+      loader: "vanilla",
+      java_path: "C:\\Java21\\bin\\java.exe",
+      state: "idle",
+      total_play_seconds: 0,
+    });
+
+    render(() => <App />);
+
+    const input = await screen.findByTestId("instance-java-path-input");
+    const saveBtn = await screen.findByTestId("save-java-path-button");
+
+    fireEvent.input(input, { target: { value: "C:\\Java21\\bin\\java.exe" } });
+    fireEvent.click(saveBtn);
+
+    await vi.waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith({
+        id: "inst-1",
+        java_path: "C:\\Java21\\bin\\java.exe",
+      });
+    });
+  });
 });

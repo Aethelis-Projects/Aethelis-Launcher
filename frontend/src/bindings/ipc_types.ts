@@ -12,6 +12,7 @@ export interface InstanceDTO {
   loader: LoaderType;
   loader_version?: string;
   icon_path?: string;
+  java_path?: string;
   state: InstanceState;
   total_play_seconds: number;
 }
@@ -20,6 +21,13 @@ export interface CreateInstanceRequest {
   name: string;
   game_version: string;
   loader: LoaderType;
+  java_path?: string;
+}
+
+export interface UpdateInstanceRequest {
+  id: string;
+  name?: string;
+  java_path?: string;
 }
 
 export interface LaunchResponse {

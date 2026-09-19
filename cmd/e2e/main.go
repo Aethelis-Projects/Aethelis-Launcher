@@ -338,15 +338,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	if runtime.GOOS == "windows" {
-		cleanInst.JVMArgs = []string{"/c", "exit 0"}
-		cleanInst.JavaPath = "cmd.exe"
-	} else {
-		cleanScript := filepath.Join(tempDir, "fake-clean.sh")
-		_ = os.WriteFile(cleanScript, []byte("#!/bin/sh\nexit 0\n"), 0755) // errcheck:ok write fake clean java runner
-		cleanInst.JavaPath = cleanScript
-		cleanInst.JVMArgs = nil
+	fakeJavaCode := `package main
+import (
+	"fmt"
+	"os"
+)
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-version" {
+		fmt.Fprintln(os.Stderr, "openjdk version \"21.0.2\" 2024-01-16 LTS")
+		os.Exit(0)
 	}
+	for _, arg := range os.Args[1:] {
+		if arg == "simulate-oom" {
+			fmt.Fprintln(os.Stderr, "java.lang.OutOfMemoryError: Java heap space")
+			os.Exit(1)
+		}
+	}
+	os.Exit(0)
+}
+`
+	fakeJavaSrc := filepath.Join(tempDir, "fake_java.go")
+	_ = os.WriteFile(fakeJavaSrc, []byte(fakeJavaCode), 0644) // errcheck:ok write fake java source
+	fakeJavaExe := filepath.Join(tempDir, "fake-java.exe")
+	if runtime.GOOS != "windows" {
+		fakeJavaExe = filepath.Join(tempDir, "fake-java")
+	}
+	buildCmd := exec.Command("go", "build", "-o", fakeJavaExe, fakeJavaSrc)
+	if out, err := buildCmd.CombinedOutput(); err != nil {
+		logf("FAIL: Failed to build fake java: %v\n%s", err, string(out))
+		os.Exit(1)
+	}
+
+	cleanInst.JavaPath = fakeJavaExe
+	cleanInst.JVMArgs = nil
 
 	cleanPID, err := instSvc.Launch(context.Background(), cleanInst.ID)
 	if err != nil {
@@ -380,15 +404,8 @@ func main() {
 		logf("FAIL: Create crash instance failed: %v", err)
 		os.Exit(1)
 	}
-	if runtime.GOOS == "windows" {
-		crashInst.JVMArgs = []string{"/c", "echo java.lang.OutOfMemoryError: Java heap space 1>&2 && exit 1"}
-		crashInst.JavaPath = "cmd.exe"
-	} else {
-		crashScript := filepath.Join(tempDir, "fake-crash.sh")
-		_ = os.WriteFile(crashScript, []byte("#!/bin/sh\necho 'java.lang.OutOfMemoryError: Java heap space' >&2\nexit 1\n"), 0755) // errcheck:ok write fake crash java runner
-		crashInst.JavaPath = crashScript
-		crashInst.JVMArgs = nil
-	}
+	crashInst.JavaPath = fakeJavaExe
+	crashInst.JVMArgs = []string{"simulate-oom"}
 
 	crashPID, err := instSvc.Launch(context.Background(), crashInst.ID)
 	if err != nil {
@@ -569,7 +586,7 @@ func main() {
 		genmanifestBin += ".exe"
 	}
 
-	buildCmd := exec.Command("go", "build", "-o", genmanifestBin, "./scripts/generate_manifest.go")
+	buildCmd = exec.Command("go", "build", "-o", genmanifestBin, "./scripts/generate_manifest.go")
 	if out, buildErr := buildCmd.CombinedOutput(); buildErr != nil {
 		logf("FAIL: Failed to compile generate_manifest.go: %v\nOutput: %s", buildErr, string(out))
 		os.Exit(1)
