@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,6 +66,37 @@ func TestModrinthClient_SearchMods(t *testing.T) {
 	}
 	if mod.Source != content.SourceModrinth {
 		t.Fatalf("expected SourceModrinth, got %s", mod.Source)
+	}
+}
+
+func TestModrinthClient_SearchMods_SortAndCategory(t *testing.T) {
+	var capturedIndex string
+	var capturedFacets string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedIndex = r.URL.Query().Get("index")
+		capturedFacets = r.URL.Query().Get("facets")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"hits":       []map[string]any{},
+			"total_hits": 0,
+			"offset":     0,
+			"limit":      20,
+		})
+	}))
+	defer server.Close()
+
+	client := modrinth.NewClient(server.URL, server.Client())
+
+	_, _, err := client.SearchMods(context.Background(), "query", "1.21.1", "fabric", 20, 0, "newest", "technology")
+	if err != nil {
+		t.Fatalf("search mods failed: %v", err)
+	}
+
+	if capturedIndex != "newest" {
+		t.Fatalf("expected index 'newest', got '%s'", capturedIndex)
+	}
+	if capturedFacets == "" || !strings.Contains(capturedFacets, "categories:technology") {
+		t.Fatalf("expected facets to contain 'categories:technology', got '%s'", capturedFacets)
 	}
 }
 

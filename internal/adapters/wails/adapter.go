@@ -294,12 +294,12 @@ func openBrowserCrossPlatform(url string) error {
 	return cmd.Start()
 }
 
-func (a *WailsAdapter) SearchMods(req SearchModsRequest) ([]ModItemDTO, error) {
+func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, error) {
 	if req.Source == "curseforge" {
 		if a.curseforge == nil {
 			return nil, fmt.Errorf("curseforge client not initialized")
 		}
-		items, _, err := a.curseforge.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset)
+		items, total, err := a.curseforge.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category)
 		if err != nil {
 			return nil, err
 		}
@@ -317,14 +317,17 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) ([]ModItemDTO, error) {
 				Categories: it.Categories,
 			})
 		}
-		return dtos, nil
+		return &SearchModsResultDTO{
+			Items:      dtos,
+			TotalCount: total,
+		}, nil
 	}
 
 	// Default to Modrinth
 	if a.modrinth == nil {
 		return nil, fmt.Errorf("modrinth client not initialized")
 	}
-	items, _, err := a.modrinth.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset)
+	items, total, err := a.modrinth.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +345,10 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) ([]ModItemDTO, error) {
 			Categories: it.Categories,
 		})
 	}
-	return dtos, nil
+	return &SearchModsResultDTO{
+		Items:      dtos,
+		TotalCount: int64(total),
+	}, nil
 }
 
 func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, error) {

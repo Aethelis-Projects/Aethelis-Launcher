@@ -77,6 +77,61 @@ func TestCurseForgeClient_SearchMods(t *testing.T) {
 	}
 }
 
+func TestCurseForgeClient_SearchMods_SortAndCategory(t *testing.T) {
+	var capturedSortField string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedSortField = r.URL.Query().Get("sortField")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":            101,
+					"slug":          "opti",
+					"name":          "Opti",
+					"summary":       "Optimization mod",
+					"downloadCount": 500.0,
+					"authors":       []map[string]string{{"name": "author1"}},
+					"categories":    []map[string]string{{"name": "Optimization"}},
+					"dateModified":  time.Now().Format(time.RFC3339),
+				},
+				{
+					"id":            102,
+					"slug":          "magic",
+					"name":          "Magic Mod",
+					"summary":       "Magic items",
+					"downloadCount": 300.0,
+					"authors":       []map[string]string{{"name": "author2"}},
+					"categories":    []map[string]string{{"name": "Magic"}},
+					"dateModified":  time.Now().Format(time.RFC3339),
+				},
+			},
+			"pagination": map[string]any{
+				"index":      0,
+				"pageSize":   20,
+				"totalCount": 2,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := curseforge.NewClient(server.URL, "test-api-key", server.Client())
+
+	// Test sort mapping and category filtering
+	mods, total, err := client.SearchMods(context.Background(), "", "1.21.1", "fabric", 20, 0, "popularity", "magic")
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	if capturedSortField != "2" {
+		t.Fatalf("expected sortField 2 for popularity, got %s", capturedSortField)
+	}
+	if len(mods) != 1 || mods[0].Slug != "magic" {
+		t.Fatalf("expected only magic mod to be returned after category filter, got %+v", mods)
+	}
+	if total != 2 {
+		t.Fatalf("expected total 2 from API, got %d", total)
+	}
+}
+
 func TestCurseForgeClient_GetModFiles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/mods/238222/files" {

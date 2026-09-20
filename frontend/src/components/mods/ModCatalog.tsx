@@ -18,6 +18,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const [searchError, setSearchError] = createSignal<string>("");
   const [installError, setInstallError] = createSignal<string>("");
   const [hasBuiltinKey, setHasBuiltinKey] = createSignal(false);
+  const [totalCount, setTotalCount] = createSignal(0);
 
   onMount(async () => {
     try {
@@ -33,7 +34,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
     async ({ q, s, gv, l }) => {
       setSearchError("");
       try {
-        return await launcherAPI.searchMods({
+        const res = await launcherAPI.searchMods({
           query: q,
           source: s,
           game_version: gv,
@@ -41,9 +42,12 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           limit: 20,
           offset: 0,
         });
+        setTotalCount(res.total_count);
+        return res.items;
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         setSearchError(msg || "Failed to search mods");
+        setTotalCount(0);
         return [];
       }
     }
@@ -77,6 +81,9 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           </h2>
           <p class="text-xs text-zinc-400 mt-0.5">
             Поиск проверенных модификаций для {props.loader} {props.gameVersion}
+            <Show when={totalCount() > 0}>
+              <span class="ml-1 text-zinc-500 font-mono">({totalCount()})</span>
+            </Show>
           </p>
         </div>
 

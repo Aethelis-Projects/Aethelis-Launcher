@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/content"
@@ -59,17 +60,26 @@ type searchHit struct {
 	DateModified time.Time `json:"date_modified"`
 }
 
-// SearchMods queries Modrinth for mods matching query, game version, and loader.
+// SearchMods queries Modrinth for mods matching query, game version, loader, sort, and category.
 func (c *Client) SearchMods(
 	ctx context.Context,
 	query string,
 	gameVersion string,
 	loader string,
 	limit, offset int,
+	opts ...string,
 ) ([]content.ModItem, int, error) {
 	u, err := url.Parse(c.baseURL + "/v2/search")
 	if err != nil {
 		return nil, 0, err
+	}
+
+	var sort, category string
+	if len(opts) > 0 {
+		sort = opts[0]
+	}
+	if len(opts) > 1 {
+		category = opts[1]
 	}
 
 	q := u.Query()
@@ -85,10 +95,33 @@ func (c *Client) SearchMods(
 	if gameVersion != "" {
 		facets = append(facets, []string{"versions:" + gameVersion})
 	}
+	if category != "" {
+		facets = append(facets, []string{"categories:" + category})
+	}
 
 	facetsJSON, err := json.Marshal(facets)
 	if err == nil {
 		q.Set("facets", string(facetsJSON))
+	}
+
+	// Map sort to Modrinth index ("relevance", "downloads", "follows", "newest", "updated")
+	switch strings.ToLower(sort) {
+	case "relevance":
+		q.Set("index", "relevance")
+	case "downloads":
+		q.Set("index", "downloads")
+	case "follows":
+		q.Set("index", "follows")
+	case "newest":
+		q.Set("index", "newest")
+	case "updated":
+		q.Set("index", "updated")
+	default:
+		if sort != "" {
+			q.Set("index", sort)
+		} else {
+			q.Set("index", "downloads")
+		}
 	}
 
 	if limit <= 0 {

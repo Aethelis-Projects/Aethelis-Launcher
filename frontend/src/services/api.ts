@@ -8,6 +8,7 @@ import type {
   InstalledModDTO,
   CrashReportDTO,
   SearchModsRequest,
+  SearchModsResultDTO,
   ToggleModRequest,
   DeleteModRequest,
   UpdateInfoDTO,
@@ -33,7 +34,7 @@ interface WailsAdapterBindings {
   LaunchInstance?: (id: string) => Promise<LaunchResponse>;
   ListAccounts?: () => Promise<AccountDTO[]>;
   SetActiveAccount?: (uuid: string) => Promise<void>;
-  SearchMods?: (req: SearchModsRequest) => Promise<ModItemDTO[]>;
+  SearchMods?: (req: SearchModsRequest) => Promise<SearchModsResultDTO>;
   ListInstalledMods?: (instanceId: string) => Promise<InstalledModDTO[]>;
   ToggleMod?: (req: ToggleModRequest) => Promise<void>;
   DeleteMod?: (req: DeleteModRequest) => Promise<void>;
@@ -454,13 +455,15 @@ export const launcherAPI = {
     });
   },
 
-  async searchMods(req: SearchModsRequest): Promise<ModItemDTO[]> {
+  async searchMods(req: SearchModsRequest): Promise<SearchModsResultDTO> {
     return invokeWails(
       "SearchMods",
       () => {
         const q = req.query.toLowerCase().trim();
-        return mockModCatalog.filter((m) => {
+        const cat = req.category ? req.category.toLowerCase().trim() : "";
+        const filtered = mockModCatalog.filter((m) => {
           if (req.source && m.source !== req.source) return false;
+          if (cat && !m.categories.some((c) => c.toLowerCase().includes(cat))) return false;
           if (!q) return true;
           return (
             m.name.toLowerCase().includes(q) ||
@@ -468,6 +471,10 @@ export const launcherAPI = {
             m.slug.toLowerCase().includes(q)
           );
         });
+        return {
+          items: filtered,
+          total_count: filtered.length,
+        };
       },
       req
     );

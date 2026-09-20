@@ -1249,3 +1249,94 @@ IMPLEMENTOR="Eclipse Adoptium"
 		t.Error("expected error removing unmanaged runtime, got nil")
 	}
 }
+
+func TestWailsAdapter_SearchMods(t *testing.T) {
+	// 1. Modrinth mock server
+	mrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"hits": []map[string]any{
+				{
+					"project_id":  "mr-1",
+					"slug":        "mr-mod",
+					"title":       "Modrinth Mod",
+					"description": "Modrinth description",
+					"author":      "author1",
+					"downloads":   12345,
+					"categories":  []string{"fabric", "utility"},
+				},
+			},
+			"total_hits": 42,
+		})
+	}))
+	defer mrServer.Close()
+
+	// 2. CurseForge mock server
+	cfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":            999,
+					"slug":          "cf-mod",
+					"name":          "CurseForge Mod",
+					"summary":       "CurseForge summary",
+					"downloadCount": 54321.0,
+					"authors":       []map[string]string{{"name": "cf-author"}},
+					"categories":    []map[string]string{{"name": "Optimization"}},
+				},
+			},
+			"pagination": map[string]any{
+				"totalCount": 100,
+			},
+		})
+	}))
+	defer cfServer.Close()
+
+	adapter := wails.NewWailsAdapter(nil)
+	mrClient := modrinth.NewClient(mrServer.URL, mrServer.Client())
+	cfClient := curseforge.NewClient(cfServer.URL, "dummy-cf-key", cfServer.Client())
+	adapter.SetContent(mrClient, cfClient)
+
+	// Test Modrinth search
+	mrRes, err := adapter.SearchMods(wails.SearchModsRequest{
+		Query:       "test",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+		Source:      "modrinth",
+		Limit:       20,
+		Offset:      0,
+		Sort:        "downloads",
+		Category:    "utility",
+	})
+	if err != nil {
+		t.Fatalf("Modrinth SearchMods failed: %v", err)
+	}
+	if mrRes.TotalCount != 42 {
+		t.Errorf("expected TotalCount 42, got %d", mrRes.TotalCount)
+	}
+	if len(mrRes.Items) != 1 || mrRes.Items[0].Slug != "mr-mod" {
+		t.Errorf("unexpected Modrinth items: %+v", mrRes.Items)
+	}
+
+	// Test CurseForge search
+	cfRes, err := adapter.SearchMods(wails.SearchModsRequest{
+		Query:       "test",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+		Source:      "curseforge",
+		Limit:       20,
+		Offset:      0,
+		Sort:        "popularity",
+		Category:    "optimization",
+	})
+	if err != nil {
+		t.Fatalf("CurseForge SearchMods failed: %v", err)
+	}
+	if cfRes.TotalCount != 100 {
+		t.Errorf("expected TotalCount 100, got %d", cfRes.TotalCount)
+	}
+	if len(cfRes.Items) != 1 || cfRes.Items[0].Slug != "cf-mod" {
+		t.Errorf("unexpected CurseForge items: %+v", cfRes.Items)
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -201,13 +202,22 @@ func (c *Client) SearchMods(
 	gameVersion string,
 	loader string,
 	pageSize, index int,
+	opts ...string,
 ) ([]content.ModItem, int64, error) {
 	apiKey := c.APIKey()
 	if apiKey == "" {
 		return nil, 0, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
 	}
 
-	cacheKey := fmt.Sprintf("%s|%s|%s|%d|%d", query, gameVersion, loader, pageSize, index)
+	var sort, category string
+	if len(opts) > 0 {
+		sort = opts[0]
+	}
+	if len(opts) > 1 {
+		category = opts[1]
+	}
+
+	cacheKey := fmt.Sprintf("%s|%s|%s|%d|%d|%s|%s", query, gameVersion, loader, pageSize, index, sort, category)
 	now := c.now()
 
 	c.mu.RLock()
@@ -242,6 +252,26 @@ func (c *Client) SearchMods(
 	q.Set("pageSize", strconv.Itoa(pageSize))
 	q.Set("index", strconv.Itoa(index))
 
+	// Map sort to CurseForge sortField (1=Featured, 2=Popularity, 3=LastUpdated, 4=Name, 5=TotalDownloads)
+	switch strings.ToLower(sort) {
+	case "relevance", "featured":
+		q.Set("sortField", "1")
+	case "popularity":
+		q.Set("sortField", "2")
+	case "updated":
+		q.Set("sortField", "3")
+	case "name":
+		q.Set("sortField", "4")
+	case "downloads":
+		q.Set("sortField", "5")
+	default:
+		if sort != "" {
+			q.Set("sortField", sort)
+		} else {
+			q.Set("sortField", "5") // default: TotalDownloads
+		}
+	}
+
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -275,6 +305,24 @@ func (c *Client) SearchMods(
 	items, total, err := decodeSearchItems(rawBytes)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	if category != "" {
+		catLower := strings.ToLower(strings.TrimSpace(category))
+		var filtered []content.ModItem
+		for _, it := range items {
+			matched := false
+			for _, cat := range it.Categories {
+				if strings.Contains(strings.ToLower(cat), catLower) {
+					matched = true
+					break
+				}
+			}
+			if matched {
+				filtered = append(filtered, it)
+			}
+		}
+		items = filtered
 	}
 
 	c.mu.Lock()

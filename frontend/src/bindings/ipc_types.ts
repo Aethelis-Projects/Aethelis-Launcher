@@ -90,6 +90,13 @@ export interface SearchModsRequest {
   source: ModSource;
   limit: number;
   offset: number;
+  sort?: string;
+  category?: string;
+}
+
+export interface SearchModsResultDTO {
+  items: ModItemDTO[];
+  total_count: number;
 }
 
 export interface ToggleModRequest {

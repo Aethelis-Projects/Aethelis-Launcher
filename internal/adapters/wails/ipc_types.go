@@ -88,6 +88,13 @@ type SearchModsRequest struct {
 	Source      string `json:"source"`
 	Limit       int    `json:"limit"`
 	Offset      int    `json:"offset"`
+	Sort        string `json:"sort,omitempty"`
+	Category    string `json:"category,omitempty"`
+}
+
+type SearchModsResultDTO struct {
+	Items      []ModItemDTO `json:"items"`
+	TotalCount int64        `json:"total_count"`
 }
 
 type ToggleModRequest struct {

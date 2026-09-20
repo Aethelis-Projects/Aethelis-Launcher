@@ -57,7 +57,7 @@ describe("ModCatalog Component", () => {
   });
 
   it("displays empty state when searchMods returns empty list", async () => {
-    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue([]);
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [], total_count: 0 });
 
     render(() => (
       <ModCatalog
@@ -75,18 +75,21 @@ describe("ModCatalog Component", () => {
   it("clears search error when switching source tab to successful source", async () => {
     const searchSpy = vi.spyOn(launcherAPI, "searchMods")
       .mockRejectedValueOnce(new Error("CF network failure"))
-      .mockResolvedValueOnce([
-        {
-          id: "mod-1",
-          slug: "sodium",
-          source: "modrinth",
-          name: "Sodium",
-          author: "jellysquid",
-          summary: "Modern rendering engine",
-          downloads: 5000000,
-          categories: ["optimization"],
-        },
-      ]);
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "mod-1",
+            slug: "sodium",
+            source: "modrinth",
+            name: "Sodium",
+            author: "jellysquid",
+            summary: "Modern rendering engine",
+            downloads: 5000000,
+            categories: ["optimization"],
+          },
+        ],
+        total_count: 1,
+      });
 
     render(() => (
       <ModCatalog
@@ -121,7 +124,7 @@ describe("ModCatalog Component", () => {
       categories: ["utility"],
     };
 
-    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue([mockMod]);
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [mockMod], total_count: 1 });
     vi.spyOn(launcherAPI, "installMod").mockRejectedValue(
       new Error("Demo mode: mod installation backend ships in v0.2.0")
     );
@@ -162,7 +165,7 @@ describe("ModCatalog Component", () => {
     });
     const onModInstalled = vi.fn();
 
-    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue([mockMod]);
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [mockMod], total_count: 1 });
 
     render(() => (
       <ModCatalog
