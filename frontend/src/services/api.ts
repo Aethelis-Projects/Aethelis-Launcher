@@ -9,6 +9,9 @@ import type {
   CrashReportDTO,
   SearchModsRequest,
   SearchModsResultDTO,
+  ListModVersionsRequest,
+  ModFileDTO,
+  ModInstallProgressDTO,
   ToggleModRequest,
   DeleteModRequest,
   UpdateInfoDTO,
@@ -35,6 +38,8 @@ interface WailsAdapterBindings {
   ListAccounts?: () => Promise<AccountDTO[]>;
   SetActiveAccount?: (uuid: string) => Promise<void>;
   SearchMods?: (req: SearchModsRequest) => Promise<SearchModsResultDTO>;
+  ListModVersions?: (req: ListModVersionsRequest) => Promise<ModFileDTO[]>;
+  GetModInstallStatus?: (instanceId: string) => Promise<ModInstallProgressDTO>;
   ListInstalledMods?: (instanceId: string) => Promise<InstalledModDTO[]>;
   ToggleMod?: (req: ToggleModRequest) => Promise<void>;
   DeleteMod?: (req: DeleteModRequest) => Promise<void>;
@@ -477,6 +482,44 @@ export const launcherAPI = {
         };
       },
       req
+    );
+  },
+
+  async listModVersions(req: ListModVersionsRequest): Promise<ModFileDTO[]> {
+    return invokeWails<ModFileDTO[]>(
+      "ListModVersions",
+      () => [
+        {
+          id: `${req.mod_id}-v1`,
+          mod_id: req.mod_id,
+          file_name: `${req.mod_id}-1.0.0.jar`,
+          display_name: `${req.mod_id} 1.0.0`,
+          release_type: "release",
+          file_size: 1048576,
+          file_date: "2026-09-20T12:00:00Z",
+          game_versions: ["1.21.1"],
+          loaders: ["fabric"],
+          download_url: "https://cdn.modrinth.com/mock.jar",
+        },
+      ],
+      req
+    );
+  },
+
+  async getModInstallStatus(instanceId: string): Promise<ModInstallProgressDTO> {
+    return invokeWails<ModInstallProgressDTO>(
+      "GetModInstallStatus",
+      () => ({
+        task_id: `install-${instanceId}-mock`,
+        instance_id: instanceId,
+        mod_id: "mock",
+        file_name: "mock.jar",
+        status: "idle",
+        bytes_read: 0,
+        total_bytes: 0,
+        percentage: 0,
+      }),
+      instanceId
     );
   },
 

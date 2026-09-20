@@ -50,8 +50,24 @@ type WailsAdapter struct {
 	allowedHosts []string
 	javaMgr      *java.JavaManager
 
-	lastCrashes map[string]*CrashReportDTO
-	mu          sync.RWMutex
+	lastCrashes        map[string]*CrashReportDTO
+	modVersionsCache   map[string]modVersionCacheEntry
+	modInstallProgress map[string]*ModInstallProgressDTO
+	mu                 sync.RWMutex
+}
+
+type modVersionCacheEntry struct {
+	files     []ModFileDTO
+	timestamp time.Time
+}
+
+func (a *WailsAdapter) setInstallProgress(instanceID string, p *ModInstallProgressDTO) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.modInstallProgress == nil {
+		a.modInstallProgress = make(map[string]*ModInstallProgressDTO)
+	}
+	a.modInstallProgress[instanceID] = p
 }
 
 func (a *WailsAdapter) SetJavaManager(jm *java.JavaManager) {
@@ -62,9 +78,11 @@ func (a *WailsAdapter) SetJavaManager(jm *java.JavaManager) {
 
 func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 	a := &WailsAdapter{
-		svc:         svc,
-		relauncher:  updater.DefaultRelauncher,
-		lastCrashes: make(map[string]*CrashReportDTO),
+		svc:                svc,
+		relauncher:         updater.DefaultRelauncher,
+		lastCrashes:        make(map[string]*CrashReportDTO),
+		modVersionsCache:   make(map[string]modVersionCacheEntry),
+		modInstallProgress: make(map[string]*ModInstallProgressDTO),
 	}
 	if svc != nil {
 		svc.SetOnCrash(func(instanceID string, report *launch.CrashReport) {
@@ -351,6 +369,170 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 	}, nil
 }
 
+func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO, error) {
+	if strings.TrimSpace(req.ModID) == "" {
+		return nil, errors.New("mod_id is required")
+	}
+
+	gameVersion := req.GameVersion
+	loader := req.Loader
+	if (gameVersion == "" || loader == "") && req.InstanceID != "" && a.svc != nil {
+		if inst, err := a.svc.GetInstance(req.InstanceID); err == nil && inst != nil {
+			if gameVersion == "" {
+				gameVersion = inst.GameVersion
+			}
+			if loader == "" {
+				loader = string(inst.Loader)
+			}
+		}
+	}
+
+	source := strings.ToLower(strings.TrimSpace(req.Source))
+	if source == "" {
+		source = "modrinth"
+	}
+
+	cacheKey := fmt.Sprintf("%s|%s|%s|%s", source, req.ModID, gameVersion, loader)
+	a.mu.RLock()
+	if entry, ok := a.modVersionsCache[cacheKey]; ok {
+		if time.Since(entry.timestamp) < 10*time.Minute {
+			a.mu.RUnlock()
+			return entry.files, nil
+		}
+	}
+	a.mu.RUnlock()
+
+	var result []ModFileDTO
+	ctx := context.Background()
+
+	switch source {
+	case "curseforge":
+		a.mu.RLock()
+		cf := a.curseforge
+		a.mu.RUnlock()
+		if cf == nil {
+			return nil, errors.New("curseforge client not initialized")
+		}
+
+		cfModID, err := strconv.ParseInt(req.ModID, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid curseforge mod id: %w", err)
+		}
+
+		files, err := cf.GetModFiles(ctx, cfModID, gameVersion, loader)
+		if (err != nil || len(files) == 0) && (gameVersion != "" || loader != "") {
+			if fFallback, err2 := cf.GetModFiles(ctx, cfModID, "", ""); err2 == nil && len(fFallback) > 0 {
+				files = fFallback
+				err = nil
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("fetch curseforge files: %w", err)
+		}
+
+		for _, f := range files {
+			relType := f.ReleaseType
+			if relType == "" {
+				relType = "release"
+			}
+			fDate := ""
+			if !f.FileDate.IsZero() {
+				fDate = f.FileDate.Format(time.RFC3339)
+			}
+			result = append(result, ModFileDTO{
+				ID:           f.ID,
+				ModID:        req.ModID,
+				FileName:     f.FileName,
+				DisplayName:  f.FileName,
+				ReleaseType:  relType,
+				FileSize:     f.Size,
+				FileDate:     fDate,
+				GameVersions: f.GameVersions,
+				Loaders:      f.Loaders,
+				DownloadURL:  f.URL,
+			})
+		}
+
+	case "modrinth":
+		a.mu.RLock()
+		mr := a.modrinth
+		a.mu.RUnlock()
+		if mr == nil {
+			return nil, errors.New("modrinth client not initialized")
+		}
+
+		versions, err := mr.GetProjectVersions(ctx, req.ModID, gameVersion, loader)
+		if (err != nil || len(versions) == 0) && (gameVersion != "" || loader != "") {
+			if vFallback, err2 := mr.GetProjectVersions(ctx, req.ModID, "", ""); err2 == nil && len(vFallback) > 0 {
+				versions = vFallback
+				err = nil
+			}
+		}
+		if err != nil {
+			return nil, fmt.Errorf("fetch modrinth versions: %w", err)
+		}
+
+		for _, v := range versions {
+			relType := v.VersionType
+			if relType == "" {
+				relType = "release"
+			}
+			dateStr := ""
+			if !v.ReleaseDate.IsZero() {
+				dateStr = v.ReleaseDate.Format(time.RFC3339)
+			}
+			for _, f := range v.Files {
+				dispName := f.FileName
+				if v.Name != "" && v.Name != f.FileName {
+					dispName = fmt.Sprintf("%s (%s)", v.Name, f.FileName)
+				}
+				result = append(result, ModFileDTO{
+					ID:           f.ID,
+					ModID:        req.ModID,
+					FileName:     f.FileName,
+					DisplayName:  dispName,
+					ReleaseType:  relType,
+					FileSize:     f.Size,
+					FileDate:     dateStr,
+					GameVersions: v.GameVersions,
+					Loaders:      v.Loaders,
+					DownloadURL:  f.URL,
+				})
+			}
+		}
+
+	default:
+		return nil, fmt.Errorf("unsupported mod source: %s", req.Source)
+	}
+
+	a.mu.Lock()
+	if a.modVersionsCache == nil {
+		a.modVersionsCache = make(map[string]modVersionCacheEntry)
+	}
+	a.modVersionsCache[cacheKey] = modVersionCacheEntry{
+		files:     result,
+		timestamp: time.Now(),
+	}
+	a.mu.Unlock()
+
+	return result, nil
+}
+
+func (a *WailsAdapter) GetModInstallStatus(instanceID string) (*ModInstallProgressDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.modInstallProgress != nil {
+		if p, ok := a.modInstallProgress[instanceID]; ok && p != nil {
+			copy := *p
+			return &copy, nil
+		}
+	}
+	return &ModInstallProgressDTO{
+		Status:     "idle",
+		InstanceID: instanceID,
+	}, nil
+}
+
 func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, error) {
 	modsDir := a.getModsDir(instanceID)
 	entries, err := os.ReadDir(modsDir)
@@ -555,6 +737,27 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		return nil, errors.New("mod_id is required")
 	}
 
+	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+		TaskID:     fmt.Sprintf("install-%s", req.ModID),
+		InstanceID: req.InstanceID,
+		ModID:      req.ModID,
+		Status:     "resolving_dependencies",
+		Percentage: 10,
+	})
+
+	var installErr error
+	defer func() {
+		if installErr != nil {
+			a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+				TaskID:     fmt.Sprintf("install-%s", req.ModID),
+				InstanceID: req.InstanceID,
+				ModID:      req.ModID,
+				Status:     "failed",
+				Error:      installErr.Error(),
+			})
+		}
+	}()
+
 	source := strings.ToLower(strings.TrimSpace(req.Source))
 	if source == "" {
 		source = "modrinth"
@@ -567,6 +770,12 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 			loader = string(inst.Loader)
 		}
 	}
+	if req.GameVersion != "" {
+		gameVersion = req.GameVersion
+	}
+	if req.Loader != "" {
+		loader = req.Loader
+	}
 
 	var fileToDownload *content.ModFile
 
@@ -576,7 +785,8 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		mr := a.modrinth
 		a.mu.RUnlock()
 		if mr == nil {
-			return nil, errors.New("modrinth client not initialized")
+			installErr = errors.New("modrinth client not initialized")
+			return nil, installErr
 		}
 
 		ctx := context.Background()
@@ -588,29 +798,80 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("fetch modrinth versions: %w", err)
+			installErr = fmt.Errorf("fetch modrinth versions: %w", err)
+			return nil, installErr
 		}
 		if len(versions) == 0 {
-			return nil, errors.New("no compatible versions found for mod")
+			installErr = errors.New("no compatible versions found for mod")
+			return nil, installErr
 		}
 
-		for _, v := range versions {
-			if len(v.Files) == 0 {
-				continue
-			}
-			for i := range v.Files {
-				if v.Files[i].Primary {
-					fileToDownload = &v.Files[i]
+		var selectedVersion *content.ModVersion
+		if req.VersionID != "" {
+			for i := range versions {
+				v := &versions[i]
+				if v.ID == req.VersionID {
+					selectedVersion = v
+					for j := range v.Files {
+						if v.Files[j].Primary {
+							fileToDownload = &v.Files[j]
+							break
+						}
+					}
+					if fileToDownload == nil && len(v.Files) > 0 {
+						fileToDownload = &v.Files[0]
+					}
+					break
+				}
+				for j := range v.Files {
+					if v.Files[j].ID == req.VersionID {
+						selectedVersion = v
+						fileToDownload = &v.Files[j]
+						break
+					}
+				}
+				if fileToDownload != nil {
 					break
 				}
 			}
-			if fileToDownload == nil {
-				fileToDownload = &v.Files[0]
-			}
-			break
 		}
+
 		if fileToDownload == nil {
-			return nil, errors.New("no downloadable files found for mod")
+			selRes, err := content.SelectBestModVersion(versions, gameVersion, loader)
+			if err != nil {
+				installErr = err
+				return nil, installErr
+			}
+			selectedVersion = selRes.Version
+			fileToDownload = selRes.File
+		}
+
+		// Dependency resolution: recursively install required dependencies (DepRequired)
+		if selectedVersion != nil && len(selectedVersion.Dependencies) > 0 {
+			modsDir := a.getModsDir(req.InstanceID)
+			for _, dep := range selectedVersion.Dependencies {
+				if dep.Type == content.DepRequired && dep.ProjectID != "" {
+					depInstalled := false
+					if existing, err := os.ReadDir(modsDir); err == nil {
+						for _, entry := range existing {
+							nameLower := strings.ToLower(entry.Name())
+							if strings.Contains(nameLower, strings.ToLower(dep.ProjectID)) {
+								depInstalled = true
+								break
+							}
+						}
+					}
+					if !depInstalled {
+						_, _ = a.InstallMod(InstallModRequest{ // errcheck:ok best effort dependency installation
+							InstanceID:  req.InstanceID,
+							ModID:       dep.ProjectID,
+							Source:      "modrinth",
+							GameVersion: gameVersion,
+							Loader:      loader,
+						})
+					}
+				}
+			}
 		}
 
 	case "curseforge":
@@ -618,12 +879,14 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		cf := a.curseforge
 		a.mu.RUnlock()
 		if cf == nil {
-			return nil, errors.New("curseforge client not initialized")
+			installErr = errors.New("curseforge client not initialized")
+			return nil, installErr
 		}
 
 		cfModID, err := strconv.ParseInt(req.ModID, 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("invalid curseforge mod id: %w", err)
+			installErr = fmt.Errorf("invalid curseforge mod id: %w", err)
+			return nil, installErr
 		}
 
 		ctx := context.Background()
@@ -635,33 +898,56 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 			}
 		}
 		if err != nil {
-			return nil, fmt.Errorf("fetch curseforge files: %w", err)
+			installErr = fmt.Errorf("fetch curseforge files: %w", err)
+			return nil, installErr
 		}
 		if len(files) == 0 {
-			return nil, errors.New("no compatible files found for mod")
+			installErr = errors.New("no compatible files found for mod")
+			return nil, installErr
 		}
 
-		fileToDownload = &files[0]
+		if req.VersionID != "" {
+			for i := range files {
+				if files[i].ID == req.VersionID {
+					fileToDownload = &files[i]
+					break
+				}
+			}
+		}
+
+		if fileToDownload == nil {
+			selRes, err := content.SelectBestModFile(files, gameVersion, loader)
+			if err != nil {
+				installErr = err
+				return nil, installErr
+			}
+			fileToDownload = selRes.File
+		}
 
 	default:
-		return nil, fmt.Errorf("unsupported mod source: %s", req.Source)
+		installErr = fmt.Errorf("unsupported mod source: %s", req.Source)
+		return nil, installErr
 	}
 
 	if fileToDownload == nil || fileToDownload.URL == "" {
-		return nil, errors.New("mod file download URL is missing")
+		installErr = errors.New("mod file download URL is missing")
+		return nil, installErr
 	}
 
 	parsedURL, err := url.Parse(fileToDownload.URL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid download URL: %w", err)
+		installErr = fmt.Errorf("invalid download URL: %w", err)
+		return nil, installErr
 	}
 	if !a.isAllowedDownloadHost(parsedURL.Host) {
-		return nil, fmt.Errorf("download host not allowed: %s", parsedURL.Host)
+		installErr = fmt.Errorf("download host not allowed: %s", parsedURL.Host)
+		return nil, installErr
 	}
 
 	modsDir := a.getModsDir(req.InstanceID)
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
-		return nil, fmt.Errorf("create mods directory: %w", err)
+		installErr = fmt.Errorf("create mods directory: %w", err)
+		return nil, installErr
 	}
 
 	fileName := filepath.Base(fileToDownload.FileName)
@@ -679,6 +965,14 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 
 	// Idempotency: if mod file already exists, return success
 	if _, err := os.Stat(destPath); err == nil {
+		a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+			TaskID:     fmt.Sprintf("install-%s", req.ModID),
+			InstanceID: req.InstanceID,
+			ModID:      req.ModID,
+			FileName:   fileName,
+			Status:     "completed",
+			Percentage: 100,
+		})
 		return &InstallModResponse{
 			Success:  true,
 			FileName: fileName,
@@ -686,9 +980,19 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		}, nil
 	}
 
+	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+		TaskID:     fmt.Sprintf("install-%s", req.ModID),
+		InstanceID: req.InstanceID,
+		ModID:      req.ModID,
+		FileName:   fileName,
+		Status:     "downloading",
+		Percentage: 50,
+	})
+
 	tempFile, err := os.CreateTemp(modsDir, ".tmp-*.jar")
 	if err != nil {
-		return nil, fmt.Errorf("create temporary download file: %w", err)
+		installErr = fmt.Errorf("create temporary download file: %w", err)
+		return nil, installErr
 	}
 	tempPath := tempFile.Name()
 	defer func() {
@@ -719,48 +1023,74 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 
 	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fileToDownload.URL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("create download request: %w", err)
+		installErr = fmt.Errorf("create download request: %w", err)
+		return nil, installErr
 	}
 
 	resp, err := downloadClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("download mod file: %w", err)
+		installErr = fmt.Errorf("download mod file: %w", err)
+		return nil, installErr
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+		installErr = fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+		return nil, installErr
 	}
+
+	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+		TaskID:     fmt.Sprintf("install-%s", req.ModID),
+		InstanceID: req.InstanceID,
+		ModID:      req.ModID,
+		FileName:   fileName,
+		Status:     "verifying",
+		Percentage: 90,
+	})
 
 	hSha1 := sha1.New()
 	hSha512 := sha512.New()
 	mw := io.MultiWriter(tempFile, hSha1, hSha512)
 
 	if _, err := io.Copy(mw, resp.Body); err != nil {
-		return nil, fmt.Errorf("write mod file: %w", err)
+		installErr = fmt.Errorf("write mod file: %w", err)
+		return nil, installErr
 	}
 
 	if err := tempFile.Close(); err != nil {
-		return nil, fmt.Errorf("close temp file: %w", err)
+		installErr = fmt.Errorf("close temp file: %w", err)
+		return nil, installErr
 	}
 
 	// Verify checksums
 	if fileToDownload.SHA512 != "" {
 		actualSha512 := hex.EncodeToString(hSha512.Sum(nil))
 		if !strings.EqualFold(actualSha512, fileToDownload.SHA512) {
-			return nil, fmt.Errorf("sha512 mismatch: expected %s, got %s", fileToDownload.SHA512, actualSha512)
+			installErr = fmt.Errorf("sha512 mismatch: expected %s, got %s", fileToDownload.SHA512, actualSha512)
+			return nil, installErr
 		}
 	} else if fileToDownload.SHA1 != "" {
 		actualSha1 := hex.EncodeToString(hSha1.Sum(nil))
 		if !strings.EqualFold(actualSha1, fileToDownload.SHA1) {
-			return nil, fmt.Errorf("sha1 mismatch: expected %s, got %s", fileToDownload.SHA1, actualSha1)
+			installErr = fmt.Errorf("sha1 mismatch: expected %s, got %s", fileToDownload.SHA1, actualSha1)
+			return nil, installErr
 		}
 	}
 
 	// Atomic rename
 	if err := os.Rename(tempPath, destPath); err != nil {
-		return nil, fmt.Errorf("finalize mod install: %w", err)
+		installErr = fmt.Errorf("finalize mod install: %w", err)
+		return nil, installErr
 	}
+
+	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+		TaskID:     fmt.Sprintf("install-%s", req.ModID),
+		InstanceID: req.InstanceID,
+		ModID:      req.ModID,
+		FileName:   fileName,
+		Status:     "completed",
+		Percentage: 100,
+	})
 
 	return &InstallModResponse{
 		Success:  true,

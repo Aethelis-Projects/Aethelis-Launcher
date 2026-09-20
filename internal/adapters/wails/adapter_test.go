@@ -1340,3 +1340,239 @@ func TestWailsAdapter_SearchMods(t *testing.T) {
 		t.Errorf("unexpected CurseForge items: %+v", cfRes.Items)
 	}
 }
+
+func TestWailsAdapter_ListModVersions(t *testing.T) {
+	mrHits := 0
+	mrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mrHits++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"id":           "mr-ver-1",
+				"project_id":   "sodium",
+				"name":         "Sodium 1.0.0",
+				"version_type": "release",
+				"files": []map[string]any{
+					{
+						"id":       "file-1",
+						"url":      "https://cdn.modrinth.com/sodium-1.0.0.jar",
+						"filename": "sodium-1.0.0.jar",
+						"primary":  true,
+						"size":     1048576,
+					},
+				},
+				"game_versions":  []string{"1.21.1"},
+				"loaders":        []string{"fabric"},
+				"date_published": time.Now().Format(time.RFC3339),
+			},
+		})
+	}))
+	defer mrServer.Close()
+
+	cfHits := 0
+	cfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfHits++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":          555123,
+					"modId":       123,
+					"fileName":    "jei-1.21.1.jar",
+					"downloadUrl": "https://edge.forgecdn.net/jei.jar",
+					"fileLength":  2097152,
+					"releaseType": 1,
+					"fileDate":    time.Now().Format(time.RFC3339),
+					"gameVersions": []string{"1.21.1", "Fabric"},
+				},
+			},
+		})
+	}))
+	defer cfServer.Close()
+
+	adapter := wails.NewWailsAdapter(nil)
+	mrClient := modrinth.NewClient(mrServer.URL, mrServer.Client())
+	cfClient := curseforge.NewClient(cfServer.URL, "cf-key", cfServer.Client())
+	adapter.SetContent(mrClient, cfClient)
+
+	// Test Modrinth ListModVersions + 10-minute cache
+	mrReq := wails.ListModVersionsRequest{
+		ModID:       "sodium",
+		Source:      "modrinth",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+	}
+	mrFiles1, err := adapter.ListModVersions(mrReq)
+	if err != nil {
+		t.Fatalf("Modrinth ListModVersions failed: %v", err)
+	}
+	if len(mrFiles1) != 1 || mrFiles1[0].ReleaseType != "release" {
+		t.Fatalf("unexpected Modrinth files: %+v", mrFiles1)
+	}
+	if mrHits != 1 {
+		t.Fatalf("expected 1 MR hit, got %d", mrHits)
+	}
+
+	// Second call should hit 10m TTL cache
+	mrFiles2, err := adapter.ListModVersions(mrReq)
+	if err != nil {
+		t.Fatalf("Modrinth ListModVersions cache hit failed: %v", err)
+	}
+	if len(mrFiles2) != 1 || mrHits != 1 {
+		t.Fatalf("expected cache hit (mrHits=1), got mrHits=%d", mrHits)
+	}
+
+	// Test CurseForge ListModVersions + 10-minute cache
+	cfReq := wails.ListModVersionsRequest{
+		ModID:       "123",
+		Source:      "curseforge",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+	}
+	cfFiles1, err := adapter.ListModVersions(cfReq)
+	if err != nil {
+		t.Fatalf("CurseForge ListModVersions failed: %v", err)
+	}
+	if len(cfFiles1) != 1 || cfFiles1[0].ReleaseType != "release" {
+		t.Fatalf("unexpected CurseForge files: %+v", cfFiles1)
+	}
+	if cfHits != 1 {
+		t.Fatalf("expected 1 CF hit, got %d", cfHits)
+	}
+
+	// Second call should hit 10m TTL cache
+	cfFiles2, err := adapter.ListModVersions(cfReq)
+	if err != nil {
+		t.Fatalf("CurseForge ListModVersions cache hit failed: %v", err)
+	}
+	if len(cfFiles2) != 1 || cfHits != 1 {
+		t.Fatalf("expected cache hit (cfHits=1), got cfHits=%d", cfHits)
+	}
+}
+
+func TestWailsAdapter_InstallMod_DeterministicAndProgress(t *testing.T) {
+	tempDir := t.TempDir()
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		t.Fatalf("create mods dir: %v", err)
+	}
+
+	dummyJar := []byte("dummy-jar-content-for-testing")
+	h := sha1.New()
+	h.Write(dummyJar)
+	dummySha1 := hex.EncodeToString(h.Sum(nil))
+
+	mrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".jar") {
+			w.Header().Set("Content-Type", "application/java-archive")
+			_, _ = w.Write(dummyJar)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		// Return two versions: beta and release. Deterministic selector must choose release!
+		_ = json.NewEncoder(w).Encode([]map[string]any{
+			{
+				"id":           "beta-ver",
+				"project_id":   "test-mod",
+				"name":         "Test Mod Beta",
+				"version_type": "beta",
+				"files": []map[string]any{
+					{
+						"id":       "file-beta",
+						"url":      "http://" + r.Host + "/test-beta.jar",
+						"filename": "test-beta.jar",
+						"primary":  true,
+						"size":     len(dummyJar),
+						"hashes": map[string]string{
+							"sha1": dummySha1,
+						},
+					},
+				},
+				"game_versions":  []string{"1.21.1"},
+				"loaders":        []string{"fabric"},
+				"date_published": time.Now().Add(-1 * time.Hour).Format(time.RFC3339),
+			},
+			{
+				"id":           "rel-ver",
+				"project_id":   "test-mod",
+				"name":         "Test Mod Release",
+				"version_type": "release",
+				"files": []map[string]any{
+					{
+						"id":       "file-release",
+						"url":      "http://" + r.Host + "/test-release.jar",
+						"filename": "test-release.jar",
+						"primary":  true,
+						"size":     len(dummyJar),
+						"hashes": map[string]string{
+							"sha1": dummySha1,
+						},
+					},
+				},
+				"game_versions":  []string{"1.21.1"},
+				"loaders":        []string{"fabric"},
+				"date_published": time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+			},
+		})
+	}))
+	defer mrServer.Close()
+
+	u, _ := url.Parse(mrServer.URL)
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetAllowedHosts([]string{u.Hostname(), u.Host})
+	adapter.SetFileSystem(fs.NewOSFileSystem(), tempDir)
+
+	mrClient := modrinth.NewClient(mrServer.URL, mrServer.Client())
+	adapter.SetContent(mrClient, nil)
+
+	// Check initial install status is idle
+	initialStatus, err := adapter.GetModInstallStatus("inst-test")
+	if err != nil {
+		t.Fatalf("GetModInstallStatus failed: %v", err)
+	}
+	if initialStatus.Status != "idle" {
+		t.Errorf("expected initial status 'idle', got '%s'", initialStatus.Status)
+	}
+
+	// Install without VersionID: deterministic selector picks release over beta
+	resp, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID:  "inst-test",
+		ModID:       "test-mod",
+		Source:      "modrinth",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+	})
+	if err != nil {
+		t.Fatalf("InstallMod failed: %v", err)
+	}
+	if resp.FileName != "test-release.jar" {
+		t.Errorf("expected deterministic selection of release 'test-release.jar', got '%s'", resp.FileName)
+	}
+
+	// Status after install should be completed
+	statusAfter, err := adapter.GetModInstallStatus("inst-test")
+	if err != nil {
+		t.Fatalf("GetModInstallStatus failed: %v", err)
+	}
+	if statusAfter.Status != "completed" || statusAfter.Percentage != 100 {
+		t.Errorf("expected status 'completed' with 100%%, got %+v", statusAfter)
+	}
+
+	// Test installing with explicit VersionID (e.g. "beta-ver")
+	_ = os.Remove(filepath.Join(modsDir, "test-release.jar"))
+	respBeta, err := adapter.InstallMod(wails.InstallModRequest{
+		InstanceID:  "inst-test",
+		ModID:       "test-mod",
+		Source:      "modrinth",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+		VersionID:   "beta-ver",
+	})
+	if err != nil {
+		t.Fatalf("InstallMod with explicit VersionID failed: %v", err)
+	}
+	if respBeta.FileName != "test-beta.jar" {
+		t.Errorf("expected explicit version 'test-beta.jar', got '%s'", respBeta.FileName)
+	}
+}

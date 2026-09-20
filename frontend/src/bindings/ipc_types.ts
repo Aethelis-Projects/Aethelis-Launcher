@@ -143,6 +143,39 @@ export interface UpdateApplyResultDTO {
   restart_required?: boolean;
 }
 
+export interface ListModVersionsRequest {
+  instance_id?: string;
+  mod_id: string;
+  source: ModSource;
+  game_version?: string;
+  loader?: string;
+}
+
+export interface ModFileDTO {
+  id: string;
+  mod_id: string;
+  file_name: string;
+  display_name: string;
+  release_type: string;
+  file_size: number;
+  file_date: string;
+  game_versions: string[];
+  loaders: string[];
+  download_url: string;
+}
+
+export interface ModInstallProgressDTO {
+  task_id: string;
+  instance_id: string;
+  mod_id: string;
+  file_name: string;
+  status: "idle" | "resolving_dependencies" | "downloading" | "verifying" | "completed" | "failed";
+  bytes_read: number;
+  total_bytes: number;
+  percentage: number;
+  error?: string;
+}
+
 export interface InstallModRequest {
   instance_id: string;
   mod_id: string;
@@ -151,6 +184,7 @@ export interface InstallModRequest {
   source: ModSource;
   game_version: string;
   loader: string;
+  version_id?: string;
 }
 
 export interface InstallModResponse {

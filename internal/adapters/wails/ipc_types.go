@@ -141,6 +141,39 @@ type UpdateApplyResultDTO struct {
 	RestartRequired bool   `json:"restart_required,omitempty"`
 }
 
+type ListModVersionsRequest struct {
+	InstanceID  string `json:"instance_id,omitempty"`
+	ModID       string `json:"mod_id"`
+	Source      string `json:"source"`
+	GameVersion string `json:"game_version,omitempty"`
+	Loader      string `json:"loader,omitempty"`
+}
+
+type ModFileDTO struct {
+	ID           string   `json:"id"`
+	ModID        string   `json:"mod_id"`
+	FileName     string   `json:"file_name"`
+	DisplayName  string   `json:"display_name"`
+	ReleaseType  string   `json:"release_type"`
+	FileSize     int64    `json:"file_size"`
+	FileDate     string   `json:"file_date"`
+	GameVersions []string `json:"game_versions"`
+	Loaders      []string `json:"loaders"`
+	DownloadURL  string   `json:"download_url"`
+}
+
+type ModInstallProgressDTO struct {
+	TaskID     string `json:"task_id"`
+	InstanceID string `json:"instance_id"`
+	ModID      string `json:"mod_id"`
+	FileName   string `json:"file_name"`
+	Status     string `json:"status"`
+	BytesRead  int64  `json:"bytes_read"`
+	TotalBytes int64  `json:"total_bytes"`
+	Percentage int    `json:"percentage"`
+	Error      string `json:"error,omitempty"`
+}
+
 type InstallModRequest struct {
 	InstanceID  string `json:"instance_id"`
 	ModID       string `json:"mod_id"`
@@ -149,6 +182,7 @@ type InstallModRequest struct {
 	Source      string `json:"source"`
 	GameVersion string `json:"game_version"`
 	Loader      string `json:"loader"`
+	VersionID   string `json:"version_id,omitempty"`
 }
 
 type InstallModResponse struct {
