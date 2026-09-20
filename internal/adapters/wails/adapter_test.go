@@ -386,6 +386,12 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"GetJavaDownloadStatus",
 		"RemoveJavaRuntime",
 		"AddJavaRuntime",
+		"ListModVersions",
+		"GetModInstallStatus",
+	}
+
+	if len(expectedMethods) != 29 {
+		t.Fatalf("expected exactly 29 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1576,3 +1582,101 @@ func TestWailsAdapter_InstallMod_DeterministicAndProgress(t *testing.T) {
 		t.Errorf("expected explicit version 'test-beta.jar', got '%s'", respBeta.FileName)
 	}
 }
+
+func TestWailsAdapter_ManifestReconcileAndDualFileDelete(t *testing.T) {
+	tempDir := t.TempDir()
+	instDir := filepath.Join(tempDir, "instances")
+	instanceID := "inst-c4"
+	modsDir := filepath.Join(instDir, instanceID, "mods")
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		t.Fatalf("failed to create mods dir: %v", err)
+	}
+
+	dbPath := filepath.Join(tempDir, "test.db")
+	db, err := storage.OpenDatabase(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("failed to migrate db: %v", err)
+	}
+
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(nil, instDir)
+	adapter.SetDB(db.DB())
+
+	// 1. Drop two untracked files on disk
+	fileA := filepath.Join(modsDir, "mod-alpha.jar")
+	fileB := filepath.Join(modsDir, "mod-beta.jar.disabled")
+	_ = os.WriteFile(fileA, []byte("content-a"), 0644)
+	_ = os.WriteFile(fileB, []byte("content-b"), 0644)
+
+	// ListInstalledMods: should reconcile with disk, create nord-installs.json, and sync SQLite
+	list1, err := adapter.ListInstalledMods(instanceID)
+	if err != nil {
+		t.Fatalf("ListInstalledMods failed: %v", err)
+	}
+	if len(list1) != 2 {
+		t.Fatalf("expected 2 mods, got %d", len(list1))
+	}
+
+	// Verify manifest was created
+	mPath := filepath.Join(modsDir, "nord-installs.json")
+	if _, err := os.Stat(mPath); os.IsNotExist(err) {
+		t.Fatalf("expected nord-installs.json to be created")
+	}
+
+	// 2. Toggle mod-alpha to disabled
+	err = adapter.ToggleMod(wails.ToggleModRequest{
+		InstanceID: instanceID,
+		FileName:   "mod-alpha.jar",
+		Enable:     false,
+	})
+	if err != nil {
+		t.Fatalf("ToggleMod failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(modsDir, "mod-alpha.jar.disabled")); err != nil {
+		t.Fatalf("expected mod-alpha.jar.disabled to exist on disk")
+	}
+
+	// 3. Test Directive A2: Dual-file deletion
+	// Create both candidates on disk
+	dualJar := filepath.Join(modsDir, "dual-target.jar")
+	dualDis := filepath.Join(modsDir, "dual-target.jar.disabled")
+	_ = os.WriteFile(dualJar, []byte("dual-1"), 0644)
+	_ = os.WriteFile(dualDis, []byte("dual-2"), 0644)
+
+	// Trigger reconcile so it's tracked
+	_, _ = adapter.ListInstalledMods(instanceID)
+
+	// Call DeleteMod specifying only dual-target.jar
+	err = adapter.DeleteMod(wails.DeleteModRequest{
+		InstanceID: instanceID,
+		FileName:   "dual-target.jar",
+	})
+	if err != nil {
+		t.Fatalf("DeleteMod failed: %v", err)
+	}
+
+	// A2: BOTH .jar and .jar.disabled must be deleted from disk
+	if _, err := os.Stat(dualJar); !os.IsNotExist(err) {
+		t.Errorf("expected dual-target.jar to be deleted from disk")
+	}
+	if _, err := os.Stat(dualDis); !os.IsNotExist(err) {
+		t.Errorf("expected dual-target.jar.disabled to also be deleted from disk (Directive A2)")
+	}
+
+	// 4. External Delete Reconcile: delete mod-beta from disk manually
+	_ = os.Remove(fileB)
+	listAfterExtDelete, err := adapter.ListInstalledMods(instanceID)
+	if err != nil {
+		t.Fatalf("ListInstalledMods after external delete failed: %v", err)
+	}
+	for _, m := range listAfterExtDelete {
+		if m.Name == "mod-beta" {
+			t.Errorf("expected mod-beta to be pruned after external disk removal")
+		}
+	}
+}
+

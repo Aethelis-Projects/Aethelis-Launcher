@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"crypto/sha512"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
@@ -49,6 +51,9 @@ type WailsAdapter struct {
 	httpClient   *http.Client
 	allowedHosts []string
 	javaMgr      *java.JavaManager
+
+	installedModsRepo *storage.InstalledModsRepository
+	db                *sql.DB
 
 	lastCrashes        map[string]*CrashReportDTO
 	modVersionsCache   map[string]modVersionCacheEntry
@@ -74,6 +79,21 @@ func (a *WailsAdapter) SetJavaManager(jm *java.JavaManager) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.javaMgr = jm
+}
+
+func (a *WailsAdapter) SetInstalledModsRepo(repo *storage.InstalledModsRepository) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.installedModsRepo = repo
+}
+
+func (a *WailsAdapter) SetDB(db *sql.DB) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.db = db
+	if db != nil {
+		a.installedModsRepo = storage.NewInstalledModsRepositoryFromDB(db)
+	}
 }
 
 func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
@@ -543,7 +563,18 @@ func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, 
 		return nil, fmt.Errorf("read mods dir: %w", err)
 	}
 
+	// Reconcile manifest with disk: filesystem is source of truth
+	m, err := manifest.LoadManifest(modsDir)
+	if err != nil {
+		m = manifest.NewManifest()
+	}
+	changed, _ := m.ReconcileWithDisk(modsDir)
+	if changed {
+		_ = m.Save(modsDir) // errcheck:ok best effort manifest save on reconcile
+	}
+
 	var res []InstalledModDTO
+	var activeFiles []string
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -556,15 +587,51 @@ func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, 
 				size = info.Size()
 			}
 			enabled := strings.HasSuffix(name, ".jar")
-			cleanName := strings.TrimSuffix(strings.TrimSuffix(name, ".disabled"), ".jar")
+			cleanKey := manifest.CleanModKey(name)
+			cleanDisplayName := strings.TrimSuffix(strings.TrimSuffix(name, ".disabled"), ".jar")
 
-			res = append(res, InstalledModDTO{
+			item := InstalledModDTO{
 				FileName:  name,
-				Name:      cleanName,
+				Name:      cleanDisplayName,
 				Enabled:   enabled,
 				SizeBytes: size,
+				Source:    "local",
+			}
+
+			if rec := m.GetRecord(cleanKey); rec != nil {
+				if rec.ModName != "" {
+					item.Name = rec.ModName
+				}
+				item.ModID = rec.ModID
+				item.Version = rec.VersionID
+				if rec.Source != "" {
+					item.Source = rec.Source
+				}
+				item.ReleaseType = rec.ReleaseType
+			}
+
+			res = append(res, item)
+			activeFiles = append(activeFiles, name)
+		}
+	}
+
+	// Sync with SQLite cache if repo configured
+	a.mu.RLock()
+	repo := a.installedModsRepo
+	a.mu.RUnlock()
+	if repo != nil {
+		for _, item := range res {
+			_ = repo.Save(context.Background(), storage.InstalledModRecord{ // errcheck:ok best effort cache update
+				InstanceID:  instanceID,
+				ModID:       item.ModID,
+				FileName:    item.FileName,
+				Source:      item.Source,
+				VersionID:   item.Version,
+				ReleaseType: item.ReleaseType,
+				InstalledAt: time.Now(),
 			})
 		}
+		_ = repo.SyncInstance(context.Background(), instanceID, activeFiles) // errcheck:ok best effort cache sync
 	}
 
 	return res, nil
@@ -584,13 +651,62 @@ func (a *WailsAdapter) ToggleMod(req ToggleModRequest) error {
 	}
 
 	newPath := filepath.Join(modsDir, newName)
-	return os.Rename(oldPath, newPath)
+	if err := os.Rename(oldPath, newPath); err != nil {
+		return err
+	}
+
+	// Update manifest
+	m, err := manifest.LoadManifest(modsDir)
+	if err == nil {
+		cleanKey := manifest.CleanModKey(req.FileName)
+		if rec := m.GetRecord(cleanKey); rec != nil {
+			rec.FileName = newName
+			m.AddOrUpdate(rec)
+			_ = m.Save(modsDir) // errcheck:ok best effort manifest save on toggle
+		}
+	}
+
+	// Update SQLite
+	a.mu.RLock()
+	repo := a.installedModsRepo
+	a.mu.RUnlock()
+	if repo != nil {
+		_ = repo.UpdateFileName(context.Background(), req.InstanceID, req.FileName, newName) // errcheck:ok best effort cache update
+	}
+
+	return nil
 }
 
 func (a *WailsAdapter) DeleteMod(req DeleteModRequest) error {
 	modsDir := a.getModsDir(req.InstanceID)
-	target := filepath.Join(modsDir, req.FileName)
-	return os.Remove(target)
+	cleanKey := manifest.CleanModKey(req.FileName)
+	rawClean := strings.TrimSuffix(strings.TrimSuffix(req.FileName, ".disabled"), ".jar")
+
+	jarPath := filepath.Join(modsDir, rawClean+".jar")
+	disabledPath := filepath.Join(modsDir, rawClean+".jar.disabled")
+	targetPath := filepath.Join(modsDir, req.FileName)
+
+	// A2: Remove both candidate filenames (X.jar and X.jar.disabled) as well as explicit target
+	_ = os.Remove(jarPath)      // errcheck:ok best effort candidate removal
+	_ = os.Remove(disabledPath) // errcheck:ok best effort candidate removal
+	_ = os.Remove(targetPath)   // errcheck:ok best effort target removal
+
+	// Remove from manifest
+	m, err := manifest.LoadManifest(modsDir)
+	if err == nil {
+		m.Remove(cleanKey)
+		_ = m.Save(modsDir) // errcheck:ok best effort manifest save on delete
+	}
+
+	// Remove from SQLite
+	a.mu.RLock()
+	repo := a.installedModsRepo
+	a.mu.RUnlock()
+	if repo != nil {
+		_ = repo.DeleteByCleanName(context.Background(), req.InstanceID, rawClean) // errcheck:ok best effort cache delete
+	}
+
+	return nil
 }
 
 func (a *WailsAdapter) RecordCrash(instanceID string, report *launch.CrashReport) {
@@ -965,6 +1081,7 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 
 	// Idempotency: if mod file already exists, return success
 	if _, err := os.Stat(destPath); err == nil {
+		a.recordInstalledMod(req.InstanceID, req.ModID, fileName, source, fileToDownload, req.VersionID)
 		a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
 			TaskID:     fmt.Sprintf("install-%s", req.ModID),
 			InstanceID: req.InstanceID,
@@ -1083,6 +1200,8 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		return nil, installErr
 	}
 
+	a.recordInstalledMod(req.InstanceID, req.ModID, fileName, source, fileToDownload, req.VersionID)
+
 	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
 		TaskID:     fmt.Sprintf("install-%s", req.ModID),
 		InstanceID: req.InstanceID,
@@ -1097,6 +1216,51 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		FileName: fileName,
 		Message:  fmt.Sprintf("Mod %s installed successfully", fileName),
 	}, nil
+}
+
+func (a *WailsAdapter) recordInstalledMod(instanceID, modID, fileName, source string, fileToDownload *content.ModFile, reqVersionID string) {
+	modsDir := a.getModsDir(instanceID)
+	versionStr := reqVersionID
+	releaseTypeStr := ""
+	modTitle := modID
+	if fileToDownload != nil {
+		if versionStr == "" {
+			versionStr = fileToDownload.ID
+		}
+		releaseTypeStr = fileToDownload.ReleaseType
+		if fileToDownload.FileName != "" {
+			modTitle = fileToDownload.FileName
+		}
+	}
+
+	m, err := manifest.LoadManifest(modsDir)
+	if err == nil {
+		m.AddOrUpdate(&manifest.ModRecord{
+			ModID:       modID,
+			ModName:     modTitle,
+			FileName:    fileName,
+			Source:      source,
+			VersionID:   versionStr,
+			ReleaseType: releaseTypeStr,
+			InstalledAt: time.Now(),
+		})
+		_ = m.Save(modsDir) // errcheck:ok best effort manifest save on install
+	}
+
+	a.mu.RLock()
+	repo := a.installedModsRepo
+	a.mu.RUnlock()
+	if repo != nil {
+		_ = repo.Save(context.Background(), storage.InstalledModRecord{ // errcheck:ok best effort sqlite sync on install
+			InstanceID:  instanceID,
+			ModID:       modID,
+			FileName:    fileName,
+			Source:      source,
+			VersionID:   versionStr,
+			ReleaseType: releaseTypeStr,
+			InstalledAt: time.Now(),
+		})
+	}
 }
 
 func (a *WailsAdapter) GetSettings() (*GetSettingsResponse, error) {

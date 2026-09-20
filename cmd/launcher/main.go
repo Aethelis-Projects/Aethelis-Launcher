@@ -155,6 +155,9 @@ func main() {
 	adapter.SetJavaDetector(javaDetector)
 	adapter.SetJavaManager(javaMgr)
 	adapter.SetSettings(settingsRepo)
+	if db != nil {
+		adapter.SetDB(db.DB())
+	}
 	adapter.SetVersion(version)
 
 	coreInitDuration := time.Since(startInit)

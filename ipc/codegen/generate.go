@@ -72,12 +72,14 @@ type ModItemDTO struct {
 }
 
 type InstalledModDTO struct {
-	FileName  string ` + "`" + `json:"file_name"` + "`" + `
-	ModID     string ` + "`" + `json:"mod_id,omitempty"` + "`" + `
-	Name      string ` + "`" + `json:"name"` + "`" + `
-	Version   string ` + "`" + `json:"version,omitempty"` + "`" + `
-	Enabled   bool   ` + "`" + `json:"enabled"` + "`" + `
-	SizeBytes int64  ` + "`" + `json:"size_bytes"` + "`" + `
+	FileName    string ` + "`" + `json:"file_name"` + "`" + `
+	ModID       string ` + "`" + `json:"mod_id,omitempty"` + "`" + `
+	Name        string ` + "`" + `json:"name"` + "`" + `
+	Version     string ` + "`" + `json:"version,omitempty"` + "`" + `
+	Source      string ` + "`" + `json:"source,omitempty"` + "`" + `
+	ReleaseType string ` + "`" + `json:"release_type,omitempty"` + "`" + `
+	Enabled     bool   ` + "`" + `json:"enabled"` + "`" + `
+	SizeBytes   int64  ` + "`" + `json:"size_bytes"` + "`" + `
 }
 
 type CrashReportDTO struct {
@@ -301,6 +303,8 @@ export interface InstalledModDTO {
   mod_id?: string;
   name: string;
   version?: string;
+  source?: string;
+  release_type?: string;
   enabled: boolean;
   size_bytes: number;
 }

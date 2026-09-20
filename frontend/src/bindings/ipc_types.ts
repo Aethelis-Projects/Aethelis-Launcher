@@ -70,6 +70,8 @@ export interface InstalledModDTO {
   mod_id?: string;
   name: string;
   version?: string;
+  source?: string;
+  release_type?: string;
   enabled: boolean;
   size_bytes: number;
 }
