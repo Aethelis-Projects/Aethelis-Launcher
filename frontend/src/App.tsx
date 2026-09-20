@@ -8,9 +8,19 @@ import { JavaManager } from "./components/java/JavaManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
+import { StartupUpdateModal } from "./components/updater/StartupUpdateModal";
 import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
+
+export type UpdateBadgeState =
+  | "available"
+  | "downloading"
+  | "ready-to-restart"
+  | "error"
+  | "up-to-date"
+  | "snoozed-visible"
+  | "unknown";
 
 type NavTab = "instances" | "accounts" | "settings" | "java_manager";
 
@@ -26,6 +36,9 @@ export const App: Component = () => {
   const [searchQuery, setSearchQuery] = createSignal("");
   const [crashReport, setCrashReport] = createSignal<CrashReportDTO | null>(null);
   const [availableUpdate, setAvailableUpdate] = createSignal<UpdateInfoDTO | null>(null);
+  const [badgeState, setBadgeState] = createSignal<UpdateBadgeState>("unknown");
+  const [isStartupModalOpen, setIsStartupModalOpen] = createSignal(false);
+  const [isApplyingUpdate, setIsApplyingUpdate] = createSignal(false);
   const [systemError, setSystemError] = createSignal<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
@@ -38,7 +51,67 @@ export const App: Component = () => {
   const [logTail, setLogTail] = createSignal<string[]>([]);
 
   let pollInterval: ReturnType<typeof setInterval> | null = null;
-  let updateTimer: ReturnType<typeof setTimeout>;
+  let updateTimer: ReturnType<typeof setTimeout> | null = null;
+  let periodicUpdateTimer: ReturnType<typeof setInterval> | null = null;
+
+  const performUpdateCheck = async (isStartup = false) => {
+    try {
+      const info = await launcherAPI.checkForUpdates();
+      if (info.has_update) {
+        setAvailableUpdate(info);
+        const snoozeStr = localStorage.getItem("nord_update_snooze");
+        const snoozedUntil = snoozeStr ? parseInt(snoozeStr, 10) : 0;
+        const isSnoozed = Date.now() < snoozedUntil;
+
+        if (isSnoozed) {
+          setBadgeState("snoozed-visible");
+          setIsStartupModalOpen(false);
+        } else {
+          setBadgeState("available");
+          if (isStartup) {
+            setIsStartupModalOpen(true);
+          }
+        }
+      } else {
+        setBadgeState("up-to-date");
+      }
+    } catch (_err: unknown) {
+      if (isStartup) {
+        // Offline / error on startup: unknown state, NO badge! (B6)
+        setBadgeState("unknown");
+      } else {
+        setBadgeState("error");
+      }
+    }
+  };
+
+  const handleInstallAndRestart = async () => {
+    setBadgeState("downloading");
+    setIsApplyingUpdate(true);
+    try {
+      const res = await launcherAPI.applyUpdate();
+      if (res.success) {
+        setBadgeState("ready-to-restart");
+        await launcherAPI.restartApplication();
+      } else {
+        setBadgeState("error");
+        setIsApplyingUpdate(false);
+      }
+    } catch (_err: unknown) {
+      setBadgeState("error");
+      setIsApplyingUpdate(false);
+    }
+  };
+
+  const handleSnooze = () => {
+    localStorage.setItem("nord_update_snooze", String(Date.now() + 24 * 60 * 60 * 1000));
+    setIsStartupModalOpen(false);
+    setBadgeState("snoozed-visible");
+  };
+
+  const handleCloseStartupModal = () => {
+    handleSnooze();
+  };
 
   const stopStatePolling = () => {
     if (pollInterval) {
@@ -119,22 +192,23 @@ export const App: Component = () => {
     };
     loadInstances();
 
-    // Quiet background update check 3 seconds after mounting (Decision D1)
-    updateTimer = setTimeout(async () => {
-      try {
-        const info = await launcherAPI.checkForUpdates();
-        if (info.has_update) {
-          setAvailableUpdate(info);
-        }
-      } catch (_ignored: unknown) {
-        // Quiet failure for background check (Decision D1)
-      }
-    }, 3000);
+    // Startup update check with 3s delay (or 50ms in test mode)
+    const delay = import.meta.env.MODE === "test" ? 50 : 3000;
+    updateTimer = setTimeout(() => {
+      performUpdateCheck(true);
+    }, delay);
+
+    // Periodic check every 10 minutes (600s)
+    const periodicDelay = import.meta.env.MODE === "test" ? 10000 : 10 * 60 * 1000;
+    periodicUpdateTimer = setInterval(() => {
+      performUpdateCheck(false);
+    }, periodicDelay);
   });
 
   onCleanup(() => {
     stopStatePolling();
-    clearTimeout(updateTimer);
+    if (updateTimer) clearTimeout(updateTimer);
+    if (periodicUpdateTimer) clearInterval(periodicUpdateTimer);
   });
 
   const activeInstance = () => {
@@ -263,6 +337,16 @@ export const App: Component = () => {
       {/* Crash Modal */}
       <CrashModal report={crashReport()} onClose={() => setCrashReport(null)} />
 
+      {/* Startup Update Modal (F3, B6) */}
+      <StartupUpdateModal
+        isOpen={isStartupModalOpen()}
+        updateInfo={availableUpdate()}
+        isApplying={isApplyingUpdate()}
+        onInstallAndRestart={handleInstallAndRestart}
+        onSnooze={handleSnooze}
+        onClose={handleCloseStartupModal}
+      />
+
       {/* Side-Rail Navigation (Hallmark N3) */}
       <aside class="w-16 flex flex-col items-center justify-between py-4 bg-nord-surface border-r border-white/5 select-none z-20">
         <div class="flex flex-col items-center gap-6">
@@ -325,11 +409,31 @@ export const App: Component = () => {
               data-testid="nav-settings"
             >
               <Settings class="w-5 h-5" />
-              <Show when={availableUpdate()?.has_update}>
+              <Show when={badgeState() === "available" || badgeState() === "snoozed-visible"}>
                 <span
                   class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-nord-cyan ring-2 ring-nord-surface"
                   data-testid="nav-settings-update-dot"
                 />
+              </Show>
+              <Show when={badgeState() === "downloading"}>
+                <span
+                  class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-nord-cyan animate-ping ring-2 ring-nord-surface"
+                  data-testid="nav-settings-update-downloading-dot"
+                />
+              </Show>
+              <Show when={badgeState() === "ready-to-restart"}>
+                <span
+                  class="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-nord-surface"
+                  data-testid="nav-settings-update-ready-dot"
+                />
+              </Show>
+              <Show when={badgeState() === "error"}>
+                <span
+                  class="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-amber-500 text-zinc-950 font-bold text-[9px] flex items-center justify-center ring-1 ring-nord-surface leading-none"
+                  data-testid="nav-settings-update-error-dot"
+                >
+                  !
+                </span>
               </Show>
             </button>
           </nav>
