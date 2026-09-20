@@ -20,11 +20,18 @@ const CATEGORIES = [
   { id: "decoration", label: "Декорации" },
 ];
 
-const SORTS = [
+const MODRINTH_SORTS = [
   { id: "relevance", label: "По релевантности" },
   { id: "downloads", label: "По загрузкам" },
   { id: "updated", label: "По обновлению" },
   { id: "newest", label: "Новые" },
+];
+
+const CURSEFORGE_SORTS = [
+  { id: "relevance", label: "По релевантности" },
+  { id: "popularity", label: "По популярности" },
+  { id: "updated", label: "По обновлению" },
+  { id: "downloads", label: "По загрузкам" },
 ];
 
 export const ModCatalog: Component<ModCatalogProps> = (props) => {
@@ -36,6 +43,8 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const [installProgress, setInstallProgress] = createSignal<ModInstallProgressDTO | null>(null);
   const [installedIds, setInstalledIds] = createSignal<Set<string>>(new Set());
   const [searchError, setSearchError] = createSignal<string>("");
+  const [searchReason, setSearchReason] = createSignal<string>("");
+  const [rateLimitCountdown, setRateLimitCountdown] = createSignal<number>(0);
   const [installError, setInstallError] = createSignal<string>("");
   const [hasBuiltinKey, setHasBuiltinKey] = createSignal(false);
   const [totalCount, setTotalCount] = createSignal(0);
@@ -46,11 +55,35 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const [modVersions, setModVersions] = createSignal<Record<string, ModFileDTO[]>>({});
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let countdownTimer: ReturnType<typeof setInterval> | null = null;
+
+  const sortOptions = () => (source() === "curseforge" ? CURSEFORGE_SORTS : MODRINTH_SORTS);
+
+  const switchSource = (newSource: ModSource) => {
+    if (source() === newSource) return;
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
+    }
+    setRateLimitCountdown(0);
+    setSearchReason("");
+    setSearchError("");
+
+    const validSorts = newSource === "curseforge" ? CURSEFORGE_SORTS : MODRINTH_SORTS;
+    if (!validSorts.some((s) => s.id === selectedSort())) {
+      setSelectedSort("relevance");
+    }
+    setSource(newSource);
+  };
 
   onCleanup(() => {
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
+    }
+    if (countdownTimer) {
+      clearInterval(countdownTimer);
+      countdownTimer = null;
     }
   });
 
@@ -63,7 +96,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
     }
   });
 
-  const [mods] = createResource(
+  const [mods, { refetch }] = createResource(
     () => ({
       q: query(),
       s: source(),
@@ -74,6 +107,13 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
     }),
     async ({ q, s, gv, l, sort, category }) => {
       setSearchError("");
+      setSearchReason("");
+      if (countdownTimer) {
+        clearInterval(countdownTimer);
+        countdownTimer = null;
+      }
+      setRateLimitCountdown(0);
+
       try {
         const res = await launcherAPI.searchMods({
           query: q,
@@ -85,6 +125,30 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           limit: 20,
           offset: 0,
         });
+
+        if (res.reason) {
+          setSearchReason(res.reason);
+          setTotalCount(0);
+          if (res.reason === "rate_limited") {
+            const wait = res.retry_after_seconds && res.retry_after_seconds > 0 ? res.retry_after_seconds : 5;
+            setRateLimitCountdown(wait);
+            countdownTimer = setInterval(() => {
+              setRateLimitCountdown((prev) => {
+                if (prev <= 1) {
+                  if (countdownTimer) {
+                    clearInterval(countdownTimer);
+                    countdownTimer = null;
+                  }
+                  refetch();
+                  return 0;
+                }
+                return prev - 1;
+              });
+            }, 1000);
+          }
+          return [];
+        }
+
         setTotalCount(res.total_count);
         return res.items;
       } catch (err: unknown) {
@@ -196,7 +260,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
         <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5 text-xs font-mono">
           <button
             type="button"
-            onClick={() => setSource("modrinth")}
+            onClick={() => switchSource("modrinth")}
             class={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 ${
               source() === "modrinth"
                 ? "bg-[#00D4B2] text-zinc-950 font-medium"
@@ -208,7 +272,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           </button>
           <button
             type="button"
-            onClick={() => setSource("curseforge")}
+            onClick={() => switchSource("curseforge")}
             class={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 ${
               source() === "curseforge"
                 ? "bg-[#00D4B2] text-zinc-950 font-medium"
@@ -260,7 +324,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           class="bg-zinc-900 border border-zinc-800 focus:border-[#00D4B2] rounded px-3 py-2 text-xs text-zinc-300 outline-none cursor-pointer"
           data-testid="mods-sort-select"
         >
-          <For each={SORTS}>
+          <For each={sortOptions()}>
             {(s) => <option value={s.id}>{s.label}</option>}
           </For>
         </select>
@@ -297,28 +361,112 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           </div>
         </Show>
 
-        <Show when={!mods.loading && searchError()}>
+        <Show when={!mods.loading && searchReason() === "rate_limited"}>
           <div
-            class="p-4 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-400 flex items-center gap-2 font-mono"
-            data-testid="mods-search-error-banner"
+            class="p-4 rounded bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 font-mono"
+            data-testid="mods-rate-limit-banner"
           >
-            <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
-            <Show
-              when={searchError().includes("CF_RATE_LIMITED:") || searchError().includes("401") || searchError().includes("403")}
-              fallback={<span>{`Ошибка поиска модов: ${searchError()}`}</span>}
-            >
+            <div class="flex items-center gap-2">
+              <AlertTriangle class="w-4 h-4 text-amber-400 shrink-0" />
               <span>
-                {hasBuiltinKey()
-                  ? "CurseForge временно ограничил запросы — попробуйте позже"
-                  : import.meta.env.DEV
-                  ? "Встроенный ключ каталога временно недоступен. [DEV] Проверьте cf.key или настройте в Dev Settings."
-                  : "Встроенный ключ каталога временно недоступен"}
+                CurseForge ограничил частоту запросов — повторим через {rateLimitCountdown()} с
               </span>
+            </div>
+            <Show when={source() === "curseforge"}>
+              <button
+                type="button"
+                onClick={() => switchSource("modrinth")}
+                class="px-3 py-1 bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 border border-amber-400/30 rounded text-xs transition-colors cursor-pointer whitespace-nowrap"
+                data-testid="fallback-to-modrinth-btn"
+              >
+                Искать это же на Modrinth
+              </button>
             </Show>
           </div>
         </Show>
 
-        <Show when={!mods.loading && !searchError() && (!mods() || mods()!.length === 0)}>
+        <Show when={!mods.loading && searchReason() === "key_invalid"}>
+          <div
+            class="p-4 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 font-mono"
+            data-testid="mods-key-invalid-banner"
+          >
+            <div class="flex items-center gap-2">
+              <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
+              <span>
+                Ключ каталога отклонён сервером — это внутренняя проблема, обновите лаунчер
+              </span>
+            </div>
+            <Show when={source() === "curseforge"}>
+              <button
+                type="button"
+                onClick={() => switchSource("modrinth")}
+                class="px-3 py-1 bg-red-400/20 hover:bg-red-400/30 text-red-200 border border-red-400/30 rounded text-xs transition-colors cursor-pointer whitespace-nowrap"
+                data-testid="fallback-to-modrinth-btn"
+              >
+                Искать это же на Modrinth
+              </button>
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={!mods.loading && searchReason() === "unreachable"}>
+          <div
+            class="p-4 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 font-mono"
+            data-testid="mods-unreachable-banner"
+          >
+            <div class="flex items-center gap-2">
+              <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
+              <span>
+                Сервер каталога недоступен — проверьте подключение к сети
+              </span>
+            </div>
+            <Show when={source() === "curseforge"}>
+              <button
+                type="button"
+                onClick={() => switchSource("modrinth")}
+                class="px-3 py-1 bg-red-400/20 hover:bg-red-400/30 text-red-200 border border-red-400/30 rounded text-xs transition-colors cursor-pointer whitespace-nowrap"
+                data-testid="fallback-to-modrinth-btn"
+              >
+                Искать это же на Modrinth
+              </button>
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={!mods.loading && !searchReason() && searchError()}>
+          <div
+            class="p-4 rounded bg-red-500/10 border border-red-500/20 text-xs text-red-400 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 font-mono"
+            data-testid="mods-search-error-banner"
+          >
+            <div class="flex items-center gap-2">
+              <AlertCircle class="w-4 h-4 text-red-400 shrink-0" />
+              <Show
+                when={searchError().includes("CF_RATE_LIMITED:") || searchError().includes("401") || searchError().includes("403")}
+                fallback={<span>{`Ошибка поиска модов: ${searchError()}`}</span>}
+              >
+                <span>
+                  {hasBuiltinKey()
+                    ? "CurseForge временно ограничил запросы — попробуйте позже"
+                    : import.meta.env.DEV
+                    ? "Встроенный ключ каталога временно недоступен. [DEV] Проверьте cf.key или настройте в Dev Settings."
+                    : "Встроенный ключ каталога временно недоступен"}
+                </span>
+              </Show>
+            </div>
+            <Show when={source() === "curseforge"}>
+              <button
+                type="button"
+                onClick={() => switchSource("modrinth")}
+                class="px-3 py-1 bg-red-400/20 hover:bg-red-400/30 text-red-200 border border-red-400/30 rounded text-xs transition-colors cursor-pointer whitespace-nowrap"
+                data-testid="fallback-to-modrinth-btn"
+              >
+                Искать это же на Modrinth
+              </button>
+            </Show>
+          </div>
+        </Show>
+
+        <Show when={!mods.loading && !searchReason() && !searchError() && (!mods() || mods()!.length === 0)}>
           <div
             class="text-center py-12 border border-dashed border-zinc-800 rounded text-xs text-zinc-500"
             data-testid="mods-empty-state"

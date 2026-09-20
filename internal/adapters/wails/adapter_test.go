@@ -1347,6 +1347,72 @@ func TestWailsAdapter_SearchMods(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_SearchMods_ErrorClassification(t *testing.T) {
+	// 1. Test Rate Limit Error classification
+	rlServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "12")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"rate limit exceeded"}`)) // errcheck:ok test mock
+	}))
+	defer rlServer.Close()
+
+	cfClientRL := curseforge.NewClient(rlServer.URL, "test-key", rlServer.Client())
+	adapterRL := wails.NewWailsAdapter(nil)
+	adapterRL.SetContent(nil, cfClientRL)
+
+	resRL, err := adapterRL.SearchMods(wails.SearchModsRequest{
+		Query:  "test",
+		Source: "curseforge",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for classified rate_limited, got: %v", err)
+	}
+	if resRL.Reason != "rate_limited" {
+		t.Errorf("expected Reason 'rate_limited', got %q", resRL.Reason)
+	}
+	if resRL.RetryAfterSeconds != 12 {
+		t.Errorf("expected RetryAfterSeconds 12, got %d", resRL.RetryAfterSeconds)
+	}
+
+	// 2. Test Invalid Key (401) classification
+	keyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"invalid key"}`)) // errcheck:ok test mock
+	}))
+	defer keyServer.Close()
+
+	cfClientKey := curseforge.NewClient(keyServer.URL, "bad-key", keyServer.Client())
+	adapterKey := wails.NewWailsAdapter(nil)
+	adapterKey.SetContent(nil, cfClientKey)
+
+	resKey, err := adapterKey.SearchMods(wails.SearchModsRequest{
+		Query:  "test",
+		Source: "curseforge",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for classified key_invalid, got: %v", err)
+	}
+	if resKey.Reason != "key_invalid" {
+		t.Errorf("expected Reason 'key_invalid', got %q", resKey.Reason)
+	}
+
+	// 3. Test Unreachable Server classification
+	cfClientUnreachable := curseforge.NewClient("http://127.0.0.1:59999", "test-key", &http.Client{Timeout: 50 * time.Millisecond})
+	adapterUnreachable := wails.NewWailsAdapter(nil)
+	adapterUnreachable.SetContent(nil, cfClientUnreachable)
+
+	resUnreachable, err := adapterUnreachable.SearchMods(wails.SearchModsRequest{
+		Query:  "test",
+		Source: "curseforge",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error for unreachable, got: %v", err)
+	}
+	if resUnreachable.Reason != "unreachable" {
+		t.Errorf("expected Reason 'unreachable', got %q", resUnreachable.Reason)
+	}
+}
+
 func TestWailsAdapter_ListModVersions(t *testing.T) {
 	mrHits := 0
 	mrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
