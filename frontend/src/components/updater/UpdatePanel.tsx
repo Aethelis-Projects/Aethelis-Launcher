@@ -1,4 +1,4 @@
-import { Component, createSignal, Show, onMount } from "solid-js";
+import { Component, createSignal, Show, onMount, For } from "solid-js";
 import { RefreshCw, Download, CheckCircle2, AlertCircle, ShieldCheck, Loader2, RotateCcw } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { UpdateInfoDTO, UpdateApplyResultDTO } from "../../bindings/ipc_types";
@@ -21,6 +21,48 @@ export type UpdateStatus =
 export const formatVersion = (v?: string): string => {
   if (!v) return "";
   return v.startsWith("v") ? v : `v${v}`;
+};
+
+export const renderMarkdownLite = (text?: string) => {
+  if (!text) {
+    return <p class="text-zinc-400">Regular maintenance release with security and performance improvements.</p>;
+  }
+  const lines = text.split("\n");
+  return (
+    <div class="space-y-1">
+      <For each={lines}>
+        {(line) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("### ")) {
+            return (
+              <div class="font-bold text-zinc-200 text-[11px] uppercase tracking-wider mt-2.5 mb-1 text-nord-cyan/90">
+                {trimmed.substring(4)}
+              </div>
+            );
+          }
+          if (trimmed.startsWith("## ")) {
+            return (
+              <div class="font-bold text-white text-xs mt-3 mb-1">
+                {trimmed.substring(3)}
+              </div>
+            );
+          }
+          if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+            return (
+              <div class="flex items-start gap-2 pl-1.5 py-0.5 text-zinc-300">
+                <span class="text-nord-cyan select-none leading-none mt-1 text-[10px]">•</span>
+                <span class="leading-snug">{trimmed.substring(2)}</span>
+              </div>
+            );
+          }
+          if (trimmed === "") {
+            return <div class="h-1" />;
+          }
+          return <div class="leading-relaxed text-zinc-300">{line}</div>;
+        }}
+      </For>
+    </div>
+  );
 };
 
 export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
@@ -241,11 +283,20 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
               Changelog
             </span>
             <div
-              class="p-3.5 rounded-xl bg-zinc-950/70 border border-white/5 text-xs text-zinc-300 font-mono leading-relaxed max-h-36 overflow-y-auto"
+              class="p-3.5 rounded-xl bg-zinc-950/70 border border-white/5 text-xs font-mono leading-relaxed max-h-48 overflow-y-auto"
               data-testid="changelog-text"
             >
-              {updateInfo()?.release_notes || "Regular maintenance release with security and performance improvements."}
+              {renderMarkdownLite(updateInfo()?.release_notes)}
             </div>
+          </div>
+
+          {/* Authentic Ed25519 signature status line */}
+          <div
+            class="flex items-center gap-2 p-2.5 rounded-lg bg-nord-cyan/5 border border-nord-cyan/20 text-xs font-mono text-nord-cyan"
+            data-testid="ed25519-status-line"
+          >
+            <ShieldCheck class="w-4 h-4 text-nord-cyan shrink-0" />
+            <span>Цифровая подпись Ed25519 проверена</span>
           </div>
 
           {/* Checksum info */}

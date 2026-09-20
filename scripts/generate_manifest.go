@@ -27,6 +27,7 @@ func main() {
 		outputFile          = flag.String("out", "", "Output manifest path (default: dist/manifest-{channel}.json)")
 		privKeyEnv          = flag.String("privkey-hex", "", "Hex-encoded Ed25519 private key (optional, falls back to ED25519_PRIVATE_KEY)")
 		allowInsecureDevKey = flag.Bool("allow-insecure-dev-key", false, "Allow fallback to insecure hardcoded staging private key for local development")
+		changelogFile       = flag.String("changelog-file", "CHANGELOG.md", "Path to CHANGELOG.md to extract release notes")
 	)
 	flag.Parse()
 
@@ -61,10 +62,19 @@ func main() {
 	cleanVersion := strings.TrimPrefix(rawVersion, "v")
 	tagVersion := "v" + cleanVersion
 
+	changelogText := fmt.Sprintf("Nord Launcher %s (%s channel) release.", tagVersion, *channelFlag)
+	if *changelogFile != "" {
+		if data, err := os.ReadFile(*changelogFile); err == nil {
+			if extracted := ExtractChangelog(string(data), cleanVersion, 2800); extracted != "" {
+				changelogText = extracted
+			}
+		}
+	}
+
 	manifest := updater.UpdateManifest{
 		Version:     cleanVersion,
 		ReleaseDate: time.Now().UTC(),
-		Changelog:   fmt.Sprintf("Nord Launcher %s (%s channel) release.", tagVersion, *channelFlag),
+		Changelog:   changelogText,
 		Platforms:   make(map[string]updater.PlatformAsset),
 	}
 
@@ -198,4 +208,38 @@ func main() {
 	}
 
 	fmt.Printf("[Manifest] Generated signed update manifest: %s\n", outPath)
+}
+
+// ExtractChangelog extracts the release notes for targetVersion from changelogContent.
+// It parses the section starting with "## [targetVersion]" or "## targetVersion"
+// up to the next "## " header, strips the section header, and trims whitespace.
+// The result is capped at maxBytes (default 2800).
+func ExtractChangelog(content, version string, maxBytes int) string {
+	cleanVer := strings.TrimPrefix(version, "v")
+	lines := strings.Split(content, "\n")
+	var sectionLines []string
+	inSection := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## ") {
+			if inSection {
+				break
+			}
+			header := strings.TrimPrefix(trimmed, "## ")
+			header = strings.TrimSpace(header)
+			if strings.HasPrefix(header, "["+cleanVer+"]") || strings.HasPrefix(header, cleanVer) || strings.HasPrefix(header, "v"+cleanVer) || strings.HasPrefix(header, "[v"+cleanVer+"]") {
+				inSection = true
+				continue
+			}
+		} else if inSection {
+			sectionLines = append(sectionLines, line)
+		}
+	}
+
+	result := strings.TrimSpace(strings.Join(sectionLines, "\n"))
+	if maxBytes > 0 && len(result) > maxBytes {
+		result = strings.TrimSpace(result[:maxBytes]) + "..."
+	}
+	return result
 }

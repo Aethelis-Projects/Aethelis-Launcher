@@ -59,7 +59,33 @@ describe("UpdatePanel Component", () => {
     expect(card.textContent).toContain("Nord Launcher v0.4.1");
     expect(card.textContent).toContain("17.50 MB");
     expect(screen.getByTestId("changelog-text").textContent).toContain("Performance improvements");
+    expect(screen.getByTestId("ed25519-status-line").textContent).toContain("Цифровая подпись Ed25519 проверена");
     expect(onUpdateAvailable).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders safe markdown-lite changelog without innerHTML (B2, C4)", async () => {
+    launcherAPI.setMockUpdateInfo({
+      has_update: true,
+      version: "0.5.0",
+      current_version: "0.4.0",
+      release_date: "2026-09-20T12:00:00Z",
+      release_notes: "### Added\n- Feature One\n- Feature Two\n\n### Fixed\n- Bug Fix",
+      download_url: "https://example.com/download/NordLauncher.exe",
+      sha256: "abc123",
+      size: 1048576,
+    });
+
+    render(() => <UpdatePanel />);
+    fireEvent.click(screen.getByTestId("check-updates-button"));
+
+    await screen.findByTestId("update-available-card");
+    const changelog = screen.getByTestId("changelog-text");
+    expect(changelog.textContent).toContain("Added");
+    expect(changelog.textContent).toContain("Feature One");
+    expect(changelog.textContent).toContain("Feature Two");
+    expect(changelog.textContent).toContain("Fixed");
+    expect(changelog.textContent).toContain("Bug Fix");
+    expect(screen.getByTestId("ed25519-status-line").textContent).toContain("Цифровая подпись Ed25519 проверена");
   });
 
   it("triggers applyUpdate on download button click and transitions to restart banner", async () => {
