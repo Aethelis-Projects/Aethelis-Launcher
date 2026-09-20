@@ -1,5 +1,5 @@
 import { Component, createSignal, onMount, Show } from "solid-js";
-import { Key, Eye, EyeOff, Save, CheckCircle2, AlertCircle, ShieldCheck, ChevronDown } from "lucide-solid";
+import { Key, Eye, EyeOff, Save, CheckCircle2, AlertCircle, ShieldCheck, ChevronDown, Copy, Loader2 } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 
 export const CurseForgeKeyCard: Component = () => {
@@ -10,6 +10,8 @@ export const CurseForgeKeyCard: Component = () => {
   const [statusType, setStatusType] = createSignal<"success" | "error" | "">("");
   const [hasBuiltinKey, setHasBuiltinKey] = createSignal(false);
   const [isSpoilerOpen, setIsSpoilerOpen] = createSignal(false);
+  const [collectingReport, setCollectingReport] = createSignal(false);
+  const [diagStatusMessage, setDiagStatusMessage] = createSignal<string>("");
 
   onMount(async () => {
     try {
@@ -51,6 +53,22 @@ export const CurseForgeKeyCard: Component = () => {
       setStatusMessage("Не удалось сохранить API-ключ.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCopyDiagnosticReport = async () => {
+    setCollectingReport(true);
+    setDiagStatusMessage("");
+    try {
+      const report = await launcherAPI.getDiagnosticReport("");
+      if (typeof navigator !== "undefined" && navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(report);
+      }
+      setDiagStatusMessage("Диагностический отчёт скопирован в буфер обмена");
+    } catch (_err: unknown) {
+      setDiagStatusMessage("Не удалось собрать диагностический отчёт");
+    } finally {
+      setCollectingReport(false);
     }
   };
 
@@ -153,6 +171,36 @@ export const CurseForgeKeyCard: Component = () => {
           </div>
         </form>
       </Show>
+
+      <div class="pt-4 border-t border-white/5 space-y-2" data-testid="cf-diag-section">
+        <div class="flex items-center justify-between">
+          <div>
+            <h4 class="text-xs font-semibold text-zinc-200">Диагностический отчёт</h4>
+            <p class="text-[11px] text-zinc-500">
+              Сформировать анонимизированный диагностический пакет для разработчиков.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyDiagnosticReport}
+            disabled={collectingReport()}
+            data-testid="diag-pack-btn"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-800 hover:bg-zinc-700/80 text-zinc-200 font-medium text-xs transition-colors disabled:opacity-50 shrink-0"
+          >
+            <Show when={collectingReport()} fallback={<Copy class="w-3.5 h-3.5 text-nord-cyan" />}>
+              <Loader2 class="w-3.5 h-3.5 animate-spin text-nord-cyan" />
+            </Show>
+            <span>{collectingReport() ? "Сборка..." : "Собрать диаг-пак"}</span>
+          </button>
+        </div>
+
+        <Show when={diagStatusMessage()}>
+          <div class="flex items-center gap-1.5 text-xs text-nord-emerald font-medium pt-1" data-testid="diag-pack-status">
+            <CheckCircle2 class="w-3.5 h-3.5 text-nord-emerald" />
+            <span>{diagStatusMessage()}</span>
+          </div>
+        </Show>
+      </div>
     </div>
   </Show>
 );

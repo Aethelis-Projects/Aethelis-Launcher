@@ -159,6 +159,7 @@ Every push and pull request must pass the CI Quality Gate:
 - **v0.2.0** — Fabric, Quilt, and NeoForge provisioning and launch.
 - **v0.3.0** — CurseForge & Modrinth integration, sidecar key resolution.
 - **v0.4.0** — Contextual mod management, deterministic version selection, sidecar manifest & reconcile.
+- **v0.5.0** — CurseForge resilience, SQLite content cache, startup update modal & honest 7-state badge.
 - **Later** — beta update channel, opt-in telemetry, macOS.
 
 ---

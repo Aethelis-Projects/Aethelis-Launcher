@@ -168,6 +168,16 @@ export interface ModFileDTO {
   download_url: string;
 }
 
+export interface ModUpdateItemDTO {
+  file_name: string;
+  mod_id: string;
+  source: ModSource;
+  current_version: string;
+  latest_version: string;
+  latest_version_id: string;
+  release_type: string;
+}
+
 export interface ModInstallProgressDTO {
   task_id: string;
   instance_id: string;

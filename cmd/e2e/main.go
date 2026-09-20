@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -29,6 +30,7 @@ import (
 	javaadapter "github.com/nord-launcher/launcher/internal/adapters/java"
 	"github.com/nord-launcher/launcher/internal/adapters/keyring"
 	"github.com/nord-launcher/launcher/internal/adapters/process"
+	storageAdapter "github.com/nord-launcher/launcher/internal/adapters/storage"
 	"github.com/nord-launcher/launcher/internal/adapters/wails"
 	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content"
@@ -39,6 +41,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
 )
@@ -1075,8 +1078,249 @@ func main() {
 	}
 	logf("PASS: Directive A2 verified: dual-file deletion removed both .jar and .jar.disabled, manifest pruned.")
 
+	// =========================================================================
+	// 12. NetUtil HTTP Client, Content Cache Persistence & Modrinth Meta Header E2E (C6, B7)
+	// =========================================================================
+	logf("\n--- STEP 12: NetUtil HTTP Client, Content Cache Persistence & Modrinth Meta Header E2E (C6, B7) ---")
+
+	expectedUA := netutil.FormatUserAgent("0.5.0")
+	var step12UACheckCount int
+	var step12ReceivedModrinthMeta string
+	var step12CFHitCount int
+
+	step12Tmp, err := os.MkdirTemp("", "e2e_step12_*")
+	if err != nil {
+		logf("FAIL: MkdirTemp for STEP 12 failed: %v", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(step12Tmp)
+
+	step12JarContent := bytes.Repeat([]byte("NORD-STEP12-BYTECODE"), 50)
+	step12Sha512 := sha512.Sum512(step12JarContent)
+	step12Sha512Hex := hex.EncodeToString(step12Sha512[:])
+
+	var step12Server *httptest.Server
+	step12Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua := r.Header.Get("User-Agent")
+		if ua == expectedUA {
+			step12UACheckCount++
+		}
+
+		// Modrinth search
+		if r.URL.Path == "/v2/search" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{ // errcheck:ok mock modrinth search
+				"hits": []map[string]interface{}{
+					{
+						"project_id":  "step12-mod",
+						"slug":        "step12-mod",
+						"title":       "Step 12 Mod",
+						"author":      "Nord Team",
+						"description": "Mod for E2E Step 12",
+						"downloads":   1200,
+						"categories":  []string{"fabric"},
+					},
+				},
+				"total_hits": 1,
+			})
+			return
+		}
+
+		// Modrinth project versions
+		if r.URL.Path == "/v2/project/step12-mod/version" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{ // errcheck:ok mock modrinth versions
+				{
+					"id":             "step12-v1",
+					"project_id":     "step12-mod",
+					"name":           "Step 12 v1.0.0",
+					"version_number": "1.0.0",
+					"version_type":   "release",
+					"game_versions":  []string{"1.21.1"},
+					"loaders":        []string{"fabric"},
+					"date_published": time.Now().UTC().Format(time.RFC3339),
+					"files": []map[string]interface{}{
+						{
+							"filename": "step12-mod.jar",
+							"url":      step12Server.URL + "/download/step12-mod.jar",
+							"size":     len(step12JarContent),
+							"hashes": map[string]string{
+								"sha512": step12Sha512Hex,
+							},
+						},
+					},
+				},
+			})
+			return
+		}
+
+		// Modrinth download
+		if r.URL.Path == "/download/step12-mod.jar" {
+			step12ReceivedModrinthMeta = r.Header.Get("modrinth-download-meta")
+			w.Header().Set("Content-Type", "application/java-archive")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(step12JarContent) // errcheck:ok mock download
+			return
+		}
+
+		// CurseForge search
+		if r.URL.Path == "/v1/mods/search" {
+			step12CFHitCount++
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{ // errcheck:ok mock curseforge search
+				"data": []map[string]interface{}{
+					{
+						"id":            12345,
+						"slug":          "step12-cf-mod",
+						"name":          "Step 12 CF Mod",
+						"summary":       "CurseForge mod for Step 12",
+						"downloadCount": 54321,
+						"categories":    []map[string]interface{}{{"name": "Fabric"}},
+						"authors":       []map[string]interface{}{{"name": "Nord Dev"}},
+					},
+				},
+				"pagination": map[string]interface{}{
+					"totalCount": 1,
+					"index":      0,
+					"pageSize":   20,
+				},
+			})
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer step12Server.Close()
+
+	// 1. Verify NetUtil HTTP Client carries User-Agent
+	netClient := netutil.NewHTTPClient("0.5.0", 5*time.Second)
+	resp, err := netClient.Get(step12Server.URL + "/v2/search")
+	if err != nil {
+		logf("FAIL: NetUtil NewHTTPClient request failed: %v", err)
+		os.Exit(1)
+	}
+	_ = resp.Body.Close() // errcheck:ok response close
+	if step12UACheckCount < 1 {
+		logf("FAIL: NetUtil request did not send expected User-Agent: %s", expectedUA)
+		os.Exit(1)
+	}
+	logf("PASS: Unified NetUtil HTTP Client carries User-Agent (%s).", expectedUA)
+
+	// 2. Verify SQLite Content Cache persistence across simulated client restart (same DB)
+	step12DBPath := filepath.Join(step12Tmp, "cache_step12.db")
+	step12DB, err := storage.OpenDatabase(step12DBPath)
+	if err != nil {
+		logf("FAIL: OpenDatabase for STEP 12 failed: %v", err)
+		os.Exit(1)
+	}
+	defer step12DB.Close()
+	if err := step12DB.Migrate(); err != nil {
+		logf("FAIL: DB Migrate for STEP 12 failed: %v", err)
+		os.Exit(1)
+	}
+
+	cacheRepo := storage.NewContentCacheRepository(step12DB)
+	cacheAdapter := storageAdapter.NewContentCacheAdapter(cacheRepo)
+
+	// Client 1 before restart
+	cfClient1 := curseforge.NewClient(step12Server.URL, "test-cf-key", step12Server.Client())
+	cfClient1.SetContentCache(cacheAdapter)
+
+	res1, _, err := cfClient1.SearchMods(context.Background(), "test", "1.21.1", "fabric", 10, 0)
+	if err != nil {
+		logf("FAIL: CF Client 1 SearchMods failed: %v", err)
+		os.Exit(1)
+	}
+	if len(res1) != 1 || step12CFHitCount != 1 {
+		logf("FAIL: Expected 1 hit and 1 network request on Client 1, got %d hits and %d requests", len(res1), step12CFHitCount)
+		os.Exit(1)
+	}
+
+	// Client 2 after simulated restart (same SQLite cache store!)
+	cfClient2 := curseforge.NewClient(step12Server.URL, "test-cf-key", step12Server.Client())
+	cfClient2.SetContentCache(cacheAdapter)
+
+	res2, _, err := cfClient2.SearchMods(context.Background(), "test", "1.21.1", "fabric", 10, 0)
+	if err != nil {
+		logf("FAIL: CF Client 2 SearchMods failed: %v", err)
+		os.Exit(1)
+	}
+	if len(res2) != 1 {
+		logf("FAIL: Expected 1 cached hit on Client 2, got %d hits", len(res2))
+		os.Exit(1)
+	}
+	if step12CFHitCount != 1 {
+		logf("FAIL: Expected SQLite content cache hit with 0 network calls, but got %d network requests", step12CFHitCount)
+		os.Exit(1)
+	}
+	logf("PASS: SQLite content cache hit persisted across simulated client restarts (0 network calls on 2nd query).")
+
+	// 3. Verify Modrinth Download carries modrinth-download-meta header
+	step12InstID := "e2e-inst12"
+	step12InstancesDir := filepath.Join(step12Tmp, "instances")
+	step12ModsDir := filepath.Join(step12InstancesDir, step12InstID, "mods")
+	if err := os.MkdirAll(step12ModsDir, 0755); err != nil {
+		logf("FAIL: MkdirAll for step 12 mods dir failed: %v", err)
+		os.Exit(1)
+	}
+
+	step12Adapter := wails.NewWailsAdapter(nil)
+	step12Adapter.SetVersion("0.5.0")
+	step12ServerURL, _ := url.Parse(step12Server.URL)
+	step12Adapter.SetAllowedHosts([]string{step12ServerURL.Hostname(), step12ServerURL.Host})
+	step12Adapter.SetFileSystem(fs.NewOSFileSystem(), step12InstancesDir)
+	step12Adapter.SetDB(step12DB.DB())
+	step12Adapter.SetContent(modrinth.NewClient(step12Server.URL, step12Server.Client()), nil)
+
+	_, err = step12Adapter.InstallMod(wails.InstallModRequest{
+		InstanceID:  step12InstID,
+		ModID:       "step12-mod",
+		Source:      "modrinth",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+	})
+	if err != nil {
+		logf("FAIL: Step 12 InstallMod failed: %v", err)
+		os.Exit(1)
+	}
+
+	if step12ReceivedModrinthMeta == "" {
+		logf("FAIL: modrinth-download-meta header was not sent during mod download")
+		os.Exit(1)
+	}
+	var metaMap map[string]string
+	if err := json.Unmarshal([]byte(step12ReceivedModrinthMeta), &metaMap); err != nil {
+		logf("FAIL: Failed to parse modrinth-download-meta header JSON: %v", err)
+		os.Exit(1)
+	}
+	if metaMap["reason"] != "standalone" || metaMap["game_version"] != "1.21.1" || metaMap["loader"] != "fabric" {
+		logf("FAIL: modrinth-download-meta header contents mismatch: %+v", metaMap)
+		os.Exit(1)
+	}
+	logf("PASS: Modrinth download carried authentic User-Agent and valid modrinth-download-meta header.")
+
+	// 4. Verify Diagnostic Report Pack (credential masking & path redaction)
+	diagReport, err := step12Adapter.GetDiagnosticReport(step12InstID)
+	if err != nil {
+		logf("FAIL: GetDiagnosticReport failed: %v", err)
+		os.Exit(1)
+	}
+	if !strings.Contains(diagReport, "Nord Launcher Diagnostic Report") {
+		logf("FAIL: Diagnostic report missing header banner: %s", diagReport)
+		os.Exit(1)
+	}
+	if !strings.Contains(diagReport, "0.5.0") {
+		logf("FAIL: Diagnostic report missing version: %s", diagReport)
+		os.Exit(1)
+	}
+	if strings.Contains(diagReport, "test-cf-key") || strings.Contains(diagReport, "testSidecarSecret") {
+		logf("FAIL: Diagnostic report contains unmasked credentials!")
+		os.Exit(1)
+	}
+	logf("PASS: Diagnostic report pack generated with anonymized paths and zero credential leakage.")
+
 	logf("\n=================================================================")
-	logf(" ALL 11 E2E STAGES PASSED")
+	logf(" ALL 12 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt

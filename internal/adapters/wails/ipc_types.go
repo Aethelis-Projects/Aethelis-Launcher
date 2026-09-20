@@ -166,6 +166,16 @@ type ModFileDTO struct {
 	DownloadURL  string   `json:"download_url"`
 }
 
+type ModUpdateItemDTO struct {
+	FileName        string `json:"file_name"`
+	ModID           string `json:"mod_id"`
+	Source          string `json:"source"`
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version"`
+	LatestVersionID string `json:"latest_version_id"`
+	ReleaseType     string `json:"release_type"`
+}
+
 type ModInstallProgressDTO struct {
 	TaskID     string `json:"task_id"`
 	InstanceID string `json:"instance_id"`

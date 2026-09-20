@@ -1479,4 +1479,178 @@ func (a *WailsAdapter) AddJavaRuntime(path string) (*JavaInstallationDTO, error)
 	}
 	dto := toJavaInstallationDTO(*install)
 	return &dto, nil
+}
+
+func (a *WailsAdapter) CheckModUpdates(instanceID string) ([]ModUpdateItemDTO, error) {
+	if strings.TrimSpace(instanceID) == "" {
+		return nil, errors.New("instance_id is required")
+	}
+
+	installedMods, err := a.ListInstalledMods(instanceID)
+	if err != nil {
+		return nil, fmt.Errorf("list installed mods: %w", err)
+	}
+
+	var updates []ModUpdateItemDTO
+	var gameVersion, loader string
+	if a.svc != nil {
+		if inst, err := a.svc.GetInstance(instanceID); err == nil && inst != nil {
+			gameVersion = inst.GameVersion
+			loader = string(inst.Loader)
+		}
+	}
+
+	for _, mod := range installedMods {
+		if mod.ModID == "" {
+			continue
+		}
+		src := strings.ToLower(strings.TrimSpace(mod.Source))
+		if src != "modrinth" && src != "curseforge" {
+			continue
+		}
+
+		files, err := a.ListModVersions(ListModVersionsRequest{
+			InstanceID:  instanceID,
+			ModID:       mod.ModID,
+			Source:      src,
+			GameVersion: gameVersion,
+			Loader:      loader,
+		})
+		if err != nil || len(files) == 0 {
+			continue
+		}
+
+		latest := files[0]
+		isNewer := false
+		if mod.Version != "" && latest.ID != "" && latest.ID != mod.Version {
+			isNewer = true
+		} else if latest.FileName != "" && mod.FileName != "" && latest.FileName != mod.FileName {
+			isNewer = true
+		}
+
+		if isNewer {
+			updates = append(updates, ModUpdateItemDTO{
+				FileName:        mod.FileName,
+				ModID:           mod.ModID,
+				Source:          src,
+				CurrentVersion:  mod.Version,
+				LatestVersion:   latest.DisplayName,
+				LatestVersionID: latest.ID,
+				ReleaseType:     latest.ReleaseType,
+			})
+		}
+	}
+
+	if updates == nil {
+		updates = []ModUpdateItemDTO{}
+	}
+	return updates, nil
+}
+
+func (a *WailsAdapter) GetDiagnosticReport(instanceID string) (string, error) {
+	a.mu.RLock()
+	ver := a.version
+	a.mu.RUnlock()
+	if ver == "" {
+		ver = "0.5.0"
+	}
+
+	var b strings.Builder
+	b.WriteString("=== Nord Launcher Diagnostic Report ===\n")
+	b.WriteString(fmt.Sprintf("Generated At: %s\n", time.Now().UTC().Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("Launcher Version: %s\n", ver))
+	b.WriteString(fmt.Sprintf("OS: %s\n", runtime.GOOS))
+	b.WriteString(fmt.Sprintf("Architecture: %s\n", runtime.GOARCH))
+	b.WriteString(fmt.Sprintf("Go Version: %s\n", runtime.Version()))
+	b.WriteString(fmt.Sprintf("NumCPU: %d\n\n", runtime.NumCPU()))
+
+	b.WriteString("--- Java Runtimes ---\n")
+	runtimes, err := a.ListJavaRuntimes()
+	if err != nil || len(runtimes) == 0 {
+		b.WriteString("  (no java runtimes detected)\n")
+	} else {
+		for _, rt := range runtimes {
+			b.WriteString(fmt.Sprintf("- Java %d (%s, vendor: %s) at %s\n",
+				rt.MajorVersion, rt.Kind, rt.Vendor, anonymizeDiagnosticText(rt.Path)))
+		}
+	}
+	b.WriteString("\n")
+
+	if strings.TrimSpace(instanceID) != "" {
+		b.WriteString(fmt.Sprintf("--- Instance: %s ---\n", instanceID))
+		if a.svc != nil {
+			if inst, err := a.svc.GetInstance(instanceID); err == nil && inst != nil {
+				b.WriteString(fmt.Sprintf("Name: %s\n", inst.Name))
+				b.WriteString(fmt.Sprintf("Game Version: %s\n", inst.GameVersion))
+				b.WriteString(fmt.Sprintf("Loader: %s (version: %s)\n", inst.Loader, inst.LoaderVer))
+				b.WriteString(fmt.Sprintf("Memory: Min %d MB / Max %d MB\n", inst.MinRAMMB, inst.MaxRAMMB))
+			} else {
+				b.WriteString("  (instance not found in service)\n")
+			}
+		}
+
+		b.WriteString("\n--- Installed Mods ---\n")
+		mods, err := a.ListInstalledMods(instanceID)
+		if err != nil {
+			b.WriteString(fmt.Sprintf("  (error reading mods: %v)\n", err))
+		} else if len(mods) == 0 {
+			b.WriteString("  (no mods installed)\n")
+		} else {
+			enabledCount := 0
+			for _, m := range mods {
+				if m.Enabled {
+					enabledCount++
+				}
+			}
+			b.WriteString(fmt.Sprintf("Total: %d (Enabled: %d, Disabled: %d)\n", len(mods), enabledCount, len(mods)-enabledCount))
+			for _, m := range mods {
+				status := "disabled"
+				if m.Enabled {
+					status = "enabled"
+				}
+				b.WriteString(fmt.Sprintf("- %s [%s] (Name: %s, ID: %s, Version: %s, Source: %s)\n",
+					m.FileName, status, m.Name, m.ModID, m.Version, m.Source))
+			}
+		}
+		b.WriteString("\n")
+
+		b.WriteString("--- Recent Logs ---\n")
+		logTail, err := a.GetLogTail(instanceID, 30)
+		if err != nil || len(logTail) == 0 {
+			b.WriteString("  (no recent log entries)\n")
+		} else {
+			for _, line := range logTail {
+				b.WriteString(anonymizeDiagnosticText(line) + "\n")
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("--- Settings (Anonymized) ---\n")
+	settingsResp, err := a.GetSettings()
+	if err != nil || settingsResp == nil || len(settingsResp.Settings) == 0 {
+		b.WriteString("  (no custom settings configured)\n")
+	} else {
+		for k, v := range settingsResp.Settings {
+			if strings.Contains(strings.ToLower(k), "key") || strings.Contains(strings.ToLower(k), "token") || strings.Contains(strings.ToLower(k), "secret") {
+				if v != "" {
+					b.WriteString(fmt.Sprintf("%s: [SET]\n", k))
+				} else {
+					b.WriteString(fmt.Sprintf("%s: [NOT SET]\n", k))
+				}
+			} else {
+				b.WriteString(fmt.Sprintf("%s: %s\n", k, anonymizeDiagnosticText(v)))
+			}
+		}
+	}
+
+	return b.String(), nil
+}
+
+func anonymizeDiagnosticText(text string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		text = strings.ReplaceAll(text, home, "~")
+		text = strings.ReplaceAll(text, filepath.ToSlash(home), "~")
+	}
+	return text
 }
