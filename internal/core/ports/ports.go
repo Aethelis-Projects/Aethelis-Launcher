@@ -86,3 +86,12 @@ type GameProvisioner interface {
 	Provision(ctx context.Context, inst *domain.Instance, acc *domain.Account) (*domain.LaunchConfig, error)
 }
 
+// ContentCache defines persistent query caching operations (e.g. SQLite disk cache).
+type ContentCache interface {
+	Get(ctx context.Context, kind, key string) (payload string, expiresAt time.Time, ok bool, err error)
+	Set(ctx context.Context, kind, key, payload string, ttl time.Duration) error
+	PruneExpired(ctx context.Context) error
+	Clear(ctx context.Context) error
+}
+
+

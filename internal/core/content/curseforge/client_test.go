@@ -522,3 +522,166 @@ func TestCurseForgeClient_SortRelevance_OmitsSortField(t *testing.T) {
 		t.Errorf("expected error for invalid sort, got nil")
 	}
 }
+
+type mockContentCache struct {
+	mu   sync.Mutex
+	data map[string]mockCacheItem
+}
+
+type mockCacheItem struct {
+	payload   string
+	expiresAt time.Time
+}
+
+func newMockContentCache() *mockContentCache {
+	return &mockContentCache{
+		data: make(map[string]mockCacheItem),
+	}
+}
+
+func (m *mockContentCache) Get(ctx context.Context, kind, key string) (string, time.Time, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	composite := kind + ":" + key
+	item, ok := m.data[composite]
+	if !ok {
+		return "", time.Time{}, false, nil
+	}
+	return item.payload, item.expiresAt, true, nil
+}
+
+func (m *mockContentCache) Set(ctx context.Context, kind, key, payload string, ttl time.Duration) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	composite := kind + ":" + key
+	m.data[composite] = mockCacheItem{
+		payload:   payload,
+		expiresAt: time.Now().Add(ttl),
+	}
+	return nil
+}
+
+func (m *mockContentCache) PruneExpired(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for k, v := range m.data {
+		if v.expiresAt.Before(now) {
+			delete(m.data, k)
+		}
+	}
+	return nil
+}
+
+func (m *mockContentCache) Clear(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.data = make(map[string]mockCacheItem)
+	return nil
+}
+
+func TestCurseForgeClient_ContentCache_SearchPersistence(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":   555,
+					"slug": "cached-mod",
+					"name": "Cached Mod",
+				},
+			},
+			"pagination": map[string]any{
+				"totalCount": 1,
+			},
+		})
+	}))
+	defer server.Close()
+
+	sharedCache := newMockContentCache()
+
+	// Client 1: network request + cache populate
+	client1 := curseforge.NewClient(server.URL, "key", server.Client())
+	client1.SetContentCache(sharedCache)
+
+	mods1, total1, err := client1.SearchMods(context.Background(), "cached", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("client1.SearchMods failed: %v", err)
+	}
+	if total1 != 1 || len(mods1) != 1 || mods1[0].Slug != "cached-mod" {
+		t.Fatalf("unexpected client1 response: %+v", mods1)
+	}
+	if requests != 1 {
+		t.Fatalf("expected 1 request after client1, got %d", requests)
+	}
+
+	// Client 2: simulates app restart (new client, empty RAM cache, same disk cache)
+	client2 := curseforge.NewClient(server.URL, "key", server.Client())
+	client2.SetContentCache(sharedCache)
+
+	mods2, total2, err := client2.SearchMods(context.Background(), "cached", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("client2.SearchMods failed: %v", err)
+	}
+	if total2 != 1 || len(mods2) != 1 || mods2[0].Slug != "cached-mod" {
+		t.Fatalf("unexpected client2 response: %+v", mods2)
+	}
+	if requests != 1 {
+		t.Fatalf("expected requests to stay 1 (served from disk cache), got %d", requests)
+	}
+}
+
+func TestCurseForgeClient_ContentCache_FilesPersistence(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":          999,
+					"displayName": "Cached File v1",
+					"fileName":    "cached-file.jar",
+					"fileLength":  1024,
+					"releaseType": 1,
+					"downloadUrl": "https://cdn.curseforge.com/cached.jar",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	sharedCache := newMockContentCache()
+
+	// Client 1: network request + cache populate
+	client1 := curseforge.NewClient(server.URL, "key", server.Client())
+	client1.SetContentCache(sharedCache)
+
+	files1, err := client1.GetModFiles(context.Background(), 12345, "1.21.1", "fabric")
+	if err != nil {
+		t.Fatalf("client1.GetModFiles failed: %v", err)
+	}
+	if len(files1) != 1 || files1[0].FileName != "cached-file.jar" {
+		t.Fatalf("unexpected client1 files: %+v", files1)
+	}
+	if requests != 1 {
+		t.Fatalf("expected 1 request after client1, got %d", requests)
+	}
+
+	// Client 2: simulates app restart (new client, same disk cache)
+	client2 := curseforge.NewClient(server.URL, "key", server.Client())
+	client2.SetContentCache(sharedCache)
+
+	files2, err := client2.GetModFiles(context.Background(), 12345, "1.21.1", "fabric")
+	if err != nil {
+		t.Fatalf("client2.GetModFiles failed: %v", err)
+	}
+	if len(files2) != 1 || files2[0].FileName != "cached-file.jar" {
+		t.Fatalf("unexpected client2 files: %+v", files2)
+	}
+	if requests != 1 {
+		t.Fatalf("expected requests to stay 1 (served from disk cache), got %d", requests)
+	}
+}
