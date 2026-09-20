@@ -170,15 +170,16 @@ func parseRetryAfter(val string, now time.Time) (time.Duration, bool) {
 }
 
 type Client struct {
-	baseURL     string
-	apiKey      string
-	version     string
-	httpClient  *http.Client
-	clock       ports.Clock
-	limiter     *tokenBucket
-	searchCache map[string]searchCacheEntry
-	cacheKeys   []string
-	mu          sync.RWMutex
+	baseURL      string
+	apiKey       string
+	version      string
+	httpClient   *http.Client
+	clock        ports.Clock
+	limiter      *tokenBucket
+	contentCache ports.ContentCache
+	searchCache  map[string]searchCacheEntry
+	cacheKeys    []string
+	mu           sync.RWMutex
 }
 
 func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
@@ -207,6 +208,12 @@ func (c *Client) SetVersion(v string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.version = v
+}
+
+func (c *Client) SetContentCache(cache ports.ContentCache) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.contentCache = cache
 }
 
 func (c *Client) SetClock(clk ports.Clock) {
@@ -426,7 +433,25 @@ func (c *Client) SearchMods(
 			return decodeSearchItems(entry.rawJSON)
 		}
 	}
+	diskCache := c.contentCache
 	c.mu.RUnlock()
+
+	// Check persistent L2 disk cache
+	if diskCache != nil {
+		if payload, expiresAt, ok, err := diskCache.Get(ctx, "search", cacheKey); err == nil && ok && now.Before(expiresAt) {
+			items, total, err := decodeSearchItems([]byte(payload))
+			if err == nil {
+				c.mu.Lock()
+				c.searchCache[cacheKey] = searchCacheEntry{
+					rawJSON:    []byte(payload),
+					totalCount: total,
+					expiresAt:  now.Add(10 * time.Minute),
+				}
+				c.mu.Unlock()
+				return items, total, nil
+			}
+		}
+	}
 
 	u, err := url.Parse(c.baseURL + "/v1/mods/search")
 	if err != nil {
@@ -526,7 +551,13 @@ func (c *Client) SearchMods(
 		expiresAt:  now.Add(10 * time.Minute),
 	}
 	c.cacheKeys = append(c.cacheKeys, cacheKey)
+	diskCache = c.contentCache
 	c.mu.Unlock()
+
+	// Persist in L2 disk cache (6 hour TTL for searches)
+	if diskCache != nil {
+		_ = diskCache.Set(ctx, "search", cacheKey, string(rawBytes), 6*time.Hour) // errcheck:ok best effort L2 cache write
+	}
 
 	return items, total, nil
 }
@@ -559,50 +590,9 @@ type cfFileDep struct {
 	RelationType int   `json:"relationType"` // 1=Embedded, 2=Optional, 3=Required, 4=Tool, 5=Incompatible, 6=Include
 }
 
-// GetModFiles retrieves release files for a specific CurseForge mod.
-func (c *Client) GetModFiles(
-	ctx context.Context,
-	modID int64,
-	gameVersion string,
-	loader string,
-) ([]content.ModFile, error) {
-	apiKey := c.APIKey()
-	if apiKey == "" {
-		return nil, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
-	}
-
-	u, err := url.Parse(fmt.Sprintf("%s/v1/mods/%d/files", c.baseURL, modID))
-	if err != nil {
-		return nil, err
-	}
-
-	q := u.Query()
-	if gameVersion != "" {
-		q.Set("gameVersion", gameVersion)
-	}
-	if lType := LoaderToType(loader); lType > 0 {
-		q.Set("modLoaderType", strconv.Itoa(lType))
-	}
-	u.RawQuery = q.Encode()
-
-	resp, err := c.doRequest(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body) // errcheck:ok read error response body
-		return nil, fmt.Errorf("curseforge files HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var filesRes cfFilesResponse
-	if err := json.NewDecoder(resp.Body).Decode(&filesRes); err != nil {
-		return nil, err
-	}
-
-	files := make([]content.ModFile, 0, len(filesRes.Data))
-	for _, f := range filesRes.Data {
+func parseModFiles(data []cfFile) []content.ModFile {
+	files := make([]content.ModFile, 0, len(data))
+	for _, f := range data {
 		sha1Val := ""
 		for _, h := range f.Hashes {
 			if h.Algo == 1 { // SHA-1
@@ -654,6 +644,77 @@ func (c *Client) GetModFiles(
 			GameVersions: f.GameVersions,
 		})
 	}
+	return files
+}
 
-	return files, nil
+// GetModFiles retrieves release files for a specific CurseForge mod.
+func (c *Client) GetModFiles(
+	ctx context.Context,
+	modID int64,
+	gameVersion string,
+	loader string,
+) ([]content.ModFile, error) {
+	apiKey := c.APIKey()
+	if apiKey == "" {
+		return nil, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
+	}
+
+	filesCacheKey := fmt.Sprintf("%d|%s|%s", modID, gameVersion, loader)
+	now := c.now()
+
+	c.mu.RLock()
+	diskCache := c.contentCache
+	c.mu.RUnlock()
+
+	// Check persistent L2 disk cache (24 hour TTL)
+	if diskCache != nil {
+		if payload, expiresAt, ok, err := diskCache.Get(ctx, "files", filesCacheKey); err == nil && ok && now.Before(expiresAt) {
+			var filesRes cfFilesResponse
+			if err := json.Unmarshal([]byte(payload), &filesRes); err == nil {
+				return parseModFiles(filesRes.Data), nil
+			}
+		}
+	}
+
+	u, err := url.Parse(fmt.Sprintf("%s/v1/mods/%d/files", c.baseURL, modID))
+	if err != nil {
+		return nil, err
+	}
+
+	q := u.Query()
+	if gameVersion != "" {
+		q.Set("gameVersion", gameVersion)
+	}
+	if lType := LoaderToType(loader); lType > 0 {
+		q.Set("modLoaderType", strconv.Itoa(lType))
+	}
+	u.RawQuery = q.Encode()
+
+	resp, err := c.doRequest(ctx, u)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body) // errcheck:ok read error response body
+		return nil, fmt.Errorf("curseforge files HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	rawBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read curseforge response: %w", err)
+	}
+
+	var filesRes cfFilesResponse
+	if err := json.Unmarshal(rawBytes, &filesRes); err != nil {
+		return nil, err
+	}
+
+	// Persist in L2 disk cache (24 hour TTL for mod files)
+	if diskCache != nil {
+		_ = diskCache.Set(ctx, "files", filesCacheKey, string(rawBytes), 24*time.Hour) // errcheck:ok best effort L2 cache write
+	}
+
+	return parseModFiles(filesRes.Data), nil
 }

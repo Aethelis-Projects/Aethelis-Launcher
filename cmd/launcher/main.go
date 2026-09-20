@@ -19,6 +19,7 @@ import (
 	javaadapter "github.com/nord-launcher/launcher/internal/adapters/java"
 	"github.com/nord-launcher/launcher/internal/adapters/keyring"
 	"github.com/nord-launcher/launcher/internal/adapters/process"
+	storageadapter "github.com/nord-launcher/launcher/internal/adapters/storage"
 	"github.com/nord-launcher/launcher/internal/adapters/wails"
 	"github.com/nord-launcher/launcher/internal/core/auth"
 	"github.com/nord-launcher/launcher/internal/core/clock"
@@ -89,10 +90,12 @@ func main() {
 	var instRepo *storage.InstanceRepository
 	var accRepo *storage.AccountRepository
 	var settingsRepo *storage.SettingsRepository
+	var contentCacheRepo *storage.ContentCacheRepository
 	if db != nil {
 		instRepo = storage.NewInstanceRepository(db)
 		accRepo = storage.NewAccountRepository(db)
 		settingsRepo = storage.NewSettingsRepository(db)
+		contentCacheRepo = storage.NewContentCacheRepository(db)
 	}
 
 	// 4. Initialize Core Domain Services with Injected Configuration
@@ -121,6 +124,9 @@ func main() {
 	mrClient.SetUserAgent(netutil.FormatUserAgent(version))
 	cfClient := curseforge.NewClient(curseforge.DefaultBaseURL, cfKey, sharedHTTPClient)
 	cfClient.SetVersion(version)
+	if contentCacheRepo != nil {
+		cfClient.SetContentCache(storageadapter.NewContentCacheAdapter(contentCacheRepo))
+	}
 
 	// Java detector and manager with local instance and runtime directory scanning
 	runtimesDir := filepath.Join(dbDir, "runtimes")
