@@ -51,7 +51,9 @@ func NewAdoptiumClient(baseURL string, client *http.Client) *AdoptiumClient {
 		baseURL = DefaultAdoptiumBaseURL
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = netutil.NewHTTPClient("0.5.0", 30*time.Second)
+	} else {
+		client.Transport = netutil.NewTransport("0.5.0", client.Transport)
 	}
 	return &AdoptiumClient{
 		baseURL:    baseURL,
@@ -95,7 +97,10 @@ func (c *AdoptiumClient) GetLatestRelease(ctx context.Context, major int) (*Adop
 		return nil, fmt.Errorf("failed to create adoptium request: %w", err)
 	}
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", netutil.FormatUserAgent(""))
+		req.Header.Set("User-Agent", netutil.FormatUserAgent("0.5.0"))
+	}
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
 	}
 
 	resp, err := c.httpClient.Do(req)

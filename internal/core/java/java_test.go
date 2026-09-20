@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/nord-launcher/launcher/internal/core/java"
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 )
 
 func TestResolveJavaMajor(t *testing.T) {
@@ -151,3 +152,43 @@ func TestAdoptiumClient_ErrorCases(t *testing.T) {
 		t.Errorf("expected error on empty response array, got nil")
 	}
 }
+
+func TestAdoptiumClient_Headers_UserAgentAndAccept(t *testing.T) {
+	var receivedUA string
+	var receivedAccept string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedUA = r.Header.Get("User-Agent")
+		receivedAccept = r.Header.Get("Accept")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer srv.Close()
+
+	expectedUA := netutil.FormatUserAgent("0.5.0")
+
+	// 1. Client with custom http.Client (wraps Transport)
+	client := java.NewAdoptiumClient(srv.URL, srv.Client())
+	_, _ = client.GetLatestRelease(context.Background(), 21) // errcheck:ok testing headers on mock response
+
+	if receivedUA != expectedUA {
+		t.Fatalf("expected User-Agent %q, got %q", expectedUA, receivedUA)
+	}
+	if receivedAccept != "application/json" {
+		t.Fatalf("expected Accept application/json, got %q", receivedAccept)
+	}
+
+	// 2. Client with default http.Client (nil passed, uses netutil.NewHTTPClient)
+	receivedUA = ""
+	receivedAccept = ""
+	defaultClient := java.NewAdoptiumClient(srv.URL, nil)
+	_, _ = defaultClient.GetLatestRelease(context.Background(), 21) // errcheck:ok testing headers on mock response
+
+	if receivedUA != expectedUA {
+		t.Fatalf("expected default User-Agent %q, got %q", expectedUA, receivedUA)
+	}
+	if receivedAccept != "application/json" {
+		t.Fatalf("expected default Accept application/json, got %q", receivedAccept)
+	}
+}
+

@@ -39,11 +39,13 @@ type AdoptiumRuntimeService struct {
 }
 
 func NewAdoptiumRuntimeService(managedDir string, client *AdoptiumClient, httpClient *http.Client) *AdoptiumRuntimeService {
+	if httpClient == nil {
+		httpClient = netutil.NewHTTPClient("0.5.0", 15*time.Minute)
+	} else {
+		httpClient.Transport = netutil.NewTransport("0.5.0", httpClient.Transport)
+	}
 	if client == nil {
 		client = NewAdoptiumClient(DefaultAdoptiumBaseURL, httpClient)
-	}
-	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 15 * time.Minute}
 	}
 	return &AdoptiumRuntimeService{
 		client:     client,
