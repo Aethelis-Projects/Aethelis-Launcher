@@ -284,5 +284,144 @@ describe("App Component (B1, B2, D2, M1)", () => {
     const modal = await screen.findByTestId("instance-settings-modal");
     expect(modal).toBeTruthy();
   });
+
+  describe("7-State Update Badge & Startup Modal (B6, C5)", () => {
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    it("hides update badge on offline startup / unknown state (B6)", async () => {
+      vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
+      vi.spyOn(launcherAPI, "checkForUpdates").mockRejectedValue(new Error("Network offline"));
+
+      render(() => <App />);
+
+      await vi.waitFor(() => {
+        expect(screen.queryByTestId("nav-settings-update-dot")).toBeNull();
+        expect(screen.queryByTestId("startup-update-modal")).toBeNull();
+      });
+    });
+
+    it("hides update badge when up-to-date (B6)", async () => {
+      vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
+      vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
+        has_update: false,
+        version: "0.5.0",
+        current_version: "0.5.0",
+        release_date: "2026-09-20T12:00:00Z",
+        release_notes: "",
+        download_url: "",
+        sha256: "",
+        size: 0,
+      });
+
+      render(() => <App />);
+
+      await vi.waitFor(() => {
+        expect(screen.queryByTestId("nav-settings-update-dot")).toBeNull();
+        expect(screen.queryByTestId("startup-update-modal")).toBeNull();
+      });
+    });
+
+    it("displays available badge and opens StartupUpdateModal on startup update (B6, C5)", async () => {
+      vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
+      vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
+        has_update: true,
+        version: "0.5.1",
+        current_version: "0.5.0",
+        release_date: "2026-09-25T12:00:00Z",
+        release_notes: "### Added\n- Awesome feature",
+        download_url: "https://example.com/update.exe",
+        sha256: "abc",
+        size: 20000000,
+      });
+
+      render(() => <App />);
+
+      const modal = await screen.findByTestId("startup-update-modal");
+      expect(modal).toBeTruthy();
+      expect(screen.getByText("Доступно обновление Nord Launcher v0.5.1")).toBeTruthy();
+      expect(screen.getByTestId("nav-settings-update-dot")).toBeTruthy();
+    });
+
+    it("snoozing update closes StartupUpdateModal but keeps badge visible as snoozed-visible (B6, C5)", async () => {
+      vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
+      vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
+        has_update: true,
+        version: "0.5.1",
+        current_version: "0.5.0",
+        release_date: "2026-09-25T12:00:00Z",
+        release_notes: "### Added\n- Awesome feature",
+        download_url: "https://example.com/update.exe",
+        sha256: "abc",
+        size: 20000000,
+      });
+
+      render(() => <App />);
+
+      const snoozeBtn = await screen.findByTestId("startup-modal-snooze-btn");
+      fireEvent.click(snoozeBtn);
+
+      await vi.waitFor(() => {
+        expect(screen.queryByTestId("startup-update-modal")).toBeNull();
+      });
+
+      // Badge must stay visible! (B6)
+      expect(screen.getByTestId("nav-settings-update-dot")).toBeTruthy();
+      expect(localStorage.getItem("nord_update_snooze")).toBeTruthy();
+    });
+
+    it("shows snoozed-visible badge without opening modal if snooze is active in localStorage (B6, C5)", async () => {
+      localStorage.setItem("nord_update_snooze", String(Date.now() + 12 * 60 * 60 * 1000));
+      vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
+      vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
+        has_update: true,
+        version: "0.5.1",
+        current_version: "0.5.0",
+        release_date: "2026-09-25T12:00:00Z",
+        release_notes: "Changelog",
+        download_url: "https://example.com/update.exe",
+        sha256: "abc",
+        size: 20000000,
+      });
+
+      render(() => <App />);
+
+      await vi.waitFor(() => {
+        expect(screen.getByTestId("nav-settings-update-dot")).toBeTruthy();
+      });
+      expect(screen.queryByTestId("startup-update-modal")).toBeNull();
+    });
+
+    it("handles install and restart from StartupUpdateModal (C5)", async () => {
+      vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
+      vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
+        has_update: true,
+        version: "0.5.1",
+        current_version: "0.5.0",
+        release_date: "2026-09-25T12:00:00Z",
+        release_notes: "Changelog",
+        download_url: "https://example.com/update.exe",
+        sha256: "abc",
+        size: 20000000,
+      });
+
+      const applySpy = vi.spyOn(launcherAPI, "applyUpdate").mockResolvedValue({
+        success: true,
+        restart_required: true,
+      });
+      const restartSpy = vi.spyOn(launcherAPI, "restartApplication").mockResolvedValue(undefined);
+
+      render(() => <App />);
+
+      const installBtn = await screen.findByTestId("startup-modal-install-btn");
+      fireEvent.click(installBtn);
+
+      await vi.waitFor(() => {
+        expect(applySpy).toHaveBeenCalled();
+        expect(restartSpy).toHaveBeenCalled();
+      });
+    });
+  });
 });
 
