@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 )
 
 const (
@@ -92,7 +94,9 @@ func (c *AdoptiumClient) GetLatestRelease(ctx context.Context, major int) (*Adop
 	if err != nil {
 		return nil, fmt.Errorf("failed to create adoptium request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Nord-Launcher/0.1.0")
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", netutil.FormatUserAgent(""))
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

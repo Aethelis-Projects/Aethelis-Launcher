@@ -15,6 +15,7 @@ import (
 
 	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content"
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 )
 
@@ -23,8 +24,25 @@ const (
 	MinecraftGameID = 432
 )
 
-// ErrCurseForgeRateLimited indicates CurseForge returned HTTP 401 or 403 (quota or auth issue).
+// ErrCurseForgeRateLimited indicates CurseForge returned HTTP 429 or 403 (quota or rate-limit issue).
 var ErrCurseForgeRateLimited = errors.New("curseforge rate limit or authentication error")
+
+// ErrCurseForgeKeyInvalid indicates the CurseForge API key was rejected by the server (HTTP 401).
+var ErrCurseForgeKeyInvalid = errors.New("curseforge API key is invalid or rejected")
+
+// RateLimitError provides structured details when CurseForge returns rate limits.
+type RateLimitError struct {
+	StatusCode        int
+	RetryAfterSeconds int
+}
+
+func (e *RateLimitError) Error() string {
+	return fmt.Sprintf("CF_RATE_LIMITED: %d seconds wait (HTTP %d)", e.RetryAfterSeconds, e.StatusCode)
+}
+
+func (e *RateLimitError) Unwrap() error {
+	return ErrCurseForgeRateLimited
+}
 
 // BuiltinAPIKey holds an optional CurseForge API key (resolved from sidecar cf.key or env).
 var (
@@ -59,11 +77,105 @@ type searchCacheEntry struct {
 	expiresAt  time.Time
 }
 
+// tokenBucket implements a pure-Go clock-aware rate limiter (1.0 rps, 5 burst).
+type tokenBucket struct {
+	rate       float64
+	capacity   float64
+	tokens     float64
+	lastRefill time.Time
+	mu         sync.Mutex
+	clock      ports.Clock
+}
+
+func newTokenBucket(rate, capacity float64, clk ports.Clock) *tokenBucket {
+	now := time.Now()
+	if clk != nil {
+		now = clk.Now()
+	}
+	return &tokenBucket{
+		rate:       rate,
+		capacity:   capacity,
+		tokens:     capacity,
+		lastRefill: now,
+		clock:      clk,
+	}
+}
+
+func (tb *tokenBucket) now() time.Time {
+	if tb.clock != nil {
+		return tb.clock.Now()
+	}
+	return time.Now()
+}
+
+func (tb *tokenBucket) Wait(ctx context.Context) error {
+	for {
+		tb.mu.Lock()
+		now := tb.now()
+		elapsed := now.Sub(tb.lastRefill).Seconds()
+		if elapsed > 0 {
+			tb.tokens += elapsed * tb.rate
+			if tb.tokens > tb.capacity {
+				tb.tokens = tb.capacity
+			}
+			tb.lastRefill = now
+		}
+
+		if tb.tokens >= 1.0 {
+			tb.tokens -= 1.0
+			tb.mu.Unlock()
+			return nil
+		}
+
+		needed := 1.0 - tb.tokens
+		waitSec := needed / tb.rate
+		tb.mu.Unlock()
+
+		waitDur := time.Duration(waitSec * float64(time.Second))
+		if waitDur < time.Millisecond {
+			waitDur = time.Millisecond
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(waitDur):
+		}
+	}
+}
+
+func parseRetryAfter(val string, now time.Time) (time.Duration, bool) {
+	val = strings.TrimSpace(val)
+	if val == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(val); err == nil && secs >= 0 {
+		return time.Duration(secs) * time.Second, true
+	}
+	formats := []string{
+		http.TimeFormat,
+		time.RFC850,
+		time.ANSIC,
+	}
+	for _, fmtStr := range formats {
+		if t, err := time.Parse(fmtStr, val); err == nil {
+			d := t.Sub(now)
+			if d < 0 {
+				d = 0
+			}
+			return d, true
+		}
+	}
+	return 0, false
+}
+
 type Client struct {
 	baseURL     string
 	apiKey      string
+	version     string
 	httpClient  *http.Client
 	clock       ports.Clock
+	limiter     *tokenBucket
 	searchCache map[string]searchCacheEntry
 	cacheKeys   []string
 	mu          sync.RWMutex
@@ -77,21 +189,35 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
 		apiKey = GetBuiltinAPIKey()
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = netutil.NewHTTPClient("0.5.0", 30*time.Second)
 	}
+	clk := clock.NewRealClock()
 	return &Client{
 		baseURL:     baseURL,
 		apiKey:      apiKey,
+		version:     "0.5.0",
 		httpClient:  httpClient,
-		clock:       clock.NewRealClock(),
+		clock:       clk,
+		limiter:     newTokenBucket(1.0, 5.0, clk),
 		searchCache: make(map[string]searchCacheEntry),
 	}
+}
+
+func (c *Client) SetVersion(v string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.version = v
 }
 
 func (c *Client) SetClock(clk ports.Clock) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.clock = clk
+	if c.limiter != nil {
+		c.limiter.mu.Lock()
+		c.limiter.clock = clk
+		c.limiter.mu.Unlock()
+	}
 }
 
 func (c *Client) now() time.Time {
@@ -196,6 +322,79 @@ func decodeSearchItems(rawJSON []byte) ([]content.ModItem, int64, error) {
 	return items, searchRes.Pagination.TotalCount, nil
 }
 
+func (c *Client) doRequest(ctx context.Context, u *url.URL) (*http.Response, error) {
+	apiKey := c.APIKey()
+	now := c.now()
+
+	var lastResp *http.Response
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return nil, err
+		}
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+		if err != nil {
+			return nil, err
+		}
+		if apiKey != "" {
+			req.Header.Set("x-api-key", apiKey)
+		}
+		if req.Header.Get("User-Agent") == "" {
+			req.Header.Set("User-Agent", netutil.FormatUserAgent(c.version))
+		}
+		if req.Header.Get("Accept") == "" {
+			req.Header.Set("Accept", "application/json")
+		}
+
+		resp, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+
+		// 401 Unauthorized: Fast failure without retrying
+		if resp.StatusCode == http.StatusUnauthorized {
+			_ = resp.Body.Close() // errcheck:ok discard body on fast 401 error
+			return nil, fmt.Errorf("CF_KEY_INVALID: %w (HTTP 401)", ErrCurseForgeKeyInvalid)
+		}
+
+		// 429 Too Many Requests or 403 Forbidden (Cloudflare rate limit)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden {
+			retryDelay, hasRetryAfter := parseRetryAfter(resp.Header.Get("Retry-After"), now)
+			if !hasRetryAfter {
+				retryDelay = time.Duration(10*(1<<attempt)) * time.Second
+			}
+			_ = resp.Body.Close() // errcheck:ok close body before retry or rate limit error
+
+			// B4: Inline retry ONLY if Retry-After <= 5s and attempt < 2
+			if retryDelay <= 5*time.Second && attempt < 2 {
+				select {
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				case <-time.After(retryDelay):
+					continue
+				}
+			}
+
+			waitSecs := int(retryDelay.Seconds())
+			if waitSecs <= 0 {
+				waitSecs = 1
+			}
+			return nil, &RateLimitError{
+				StatusCode:        resp.StatusCode,
+				RetryAfterSeconds: waitSecs,
+			}
+		}
+
+		lastResp = resp
+		break
+	}
+
+	if lastResp == nil {
+		return nil, errors.New("curseforge: request failed with no response")
+	}
+	return lastResp, nil
+}
+
 func (c *Client) SearchMods(
 	ctx context.Context,
 	query string,
@@ -254,7 +453,9 @@ func (c *Client) SearchMods(
 
 	// Map sort to CurseForge sortField (1=Featured, 2=Popularity, 3=LastUpdated, 4=Name, 5=TotalDownloads)
 	switch strings.ToLower(sort) {
-	case "relevance", "featured":
+	case "", "relevance":
+		// Server default is relevance / featured; do not set sortField (B5)
+	case "featured":
 		q.Set("sortField", "1")
 	case "popularity":
 		q.Set("sortField", "2")
@@ -265,35 +466,23 @@ func (c *Client) SearchMods(
 	case "downloads":
 		q.Set("sortField", "5")
 	default:
-		if sort != "" {
+		if n, err := strconv.Atoi(sort); err == nil && n >= 1 && n <= 5 {
 			q.Set("sortField", sort)
 		} else {
-			q.Set("sortField", "5") // default: TotalDownloads
+			return nil, 0, fmt.Errorf("curseforge: unsupported sort option %q", sort)
 		}
 	}
 
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	resp, err := c.doRequest(ctx, u)
 	if err != nil {
 		return nil, 0, err
 	}
-	if apiKey != "" {
-		req.Header.Set("x-api-key", apiKey)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, 0, fmt.Errorf("curseforge search request: %w", err)
-	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return nil, 0, fmt.Errorf("CF_RATE_LIMITED: %w (HTTP %d)", ErrCurseForgeRateLimited, resp.StatusCode)
-	}
-
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body) // errcheck:ok read error response body
 		return nil, 0, fmt.Errorf("curseforge search HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -396,22 +585,15 @@ func (c *Client) GetModFiles(
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	resp, err := c.doRequest(ctx, u)
 	if err != nil {
 		return nil, err
-	}
-	if apiKey != "" {
-		req.Header.Set("x-api-key", apiKey)
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("curseforge files request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("curseforge files HTTP %d", resp.StatusCode)
+		body, _ := io.ReadAll(resp.Body) // errcheck:ok read error response body
+		return nil, fmt.Errorf("curseforge files HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	var filesRes cfFilesResponse

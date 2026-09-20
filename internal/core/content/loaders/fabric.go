@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/content"
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 )
 
 const DefaultFabricMetaURL = "https://meta.fabricmc.net"
 
 type FabricClient struct {
 	baseURL    string
+	version    string
 	httpClient *http.Client
 }
 
@@ -22,12 +24,17 @@ func NewFabricClient(baseURL string, client *http.Client) *FabricClient {
 		baseURL = DefaultFabricMetaURL
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = netutil.NewHTTPClient("0.5.0", 15*time.Second)
 	}
 	return &FabricClient{
 		baseURL:    baseURL,
+		version:    "0.5.0",
 		httpClient: client,
 	}
+}
+
+func (c *FabricClient) SetVersion(v string) {
+	c.version = v
 }
 
 type fabricLoaderEntry struct {
@@ -44,6 +51,12 @@ func (c *FabricClient) GetLoadersForGameVersion(ctx context.Context, gameVersion
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", netutil.FormatUserAgent(c.version))
+	}
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
 	}
 
 	resp, err := c.httpClient.Do(req)
@@ -92,6 +105,12 @@ func (c *FabricClient) GetProfile(ctx context.Context, gameVersion, loaderVersio
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", netutil.FormatUserAgent(c.version))
+	}
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
 	}
 
 	resp, err := c.httpClient.Do(req)

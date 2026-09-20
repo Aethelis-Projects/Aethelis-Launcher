@@ -346,19 +346,19 @@ func TestCurseForgeClient_RateLimited_401_403(t *testing.T) {
 
 	client := curseforge.NewClient(server.URL, "test-key", server.Client())
 
-	// Test 401
+	// Test 401: Fast fail, key invalid
 	_, _, err := client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0)
 	if err == nil {
 		t.Fatalf("expected error on HTTP 401, got nil")
 	}
-	if !strings.HasPrefix(err.Error(), "CF_RATE_LIMITED:") {
-		t.Errorf("expected CF_RATE_LIMITED: prefix, got %v", err)
+	if !strings.HasPrefix(err.Error(), "CF_KEY_INVALID:") {
+		t.Errorf("expected CF_KEY_INVALID: prefix, got %v", err)
 	}
-	if !errors.Is(err, curseforge.ErrCurseForgeRateLimited) {
-		t.Errorf("expected errors.Is ErrCurseForgeRateLimited, got %v", err)
+	if !errors.Is(err, curseforge.ErrCurseForgeKeyInvalid) {
+		t.Errorf("expected errors.Is ErrCurseForgeKeyInvalid, got %v", err)
 	}
 
-	// Test 403
+	// Test 403: Rate limited with wait duration
 	statusCode = http.StatusForbidden
 	_, _, err = client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0)
 	if err == nil {
@@ -369,5 +369,156 @@ func TestCurseForgeClient_RateLimited_401_403(t *testing.T) {
 	}
 	if !errors.Is(err, curseforge.ErrCurseForgeRateLimited) {
 		t.Errorf("expected errors.Is ErrCurseForgeRateLimited, got %v", err)
+	}
+	var rle *curseforge.RateLimitError
+	if !errors.As(err, &rle) {
+		t.Fatalf("expected RateLimitError, got %T", err)
+	}
+	if rle.StatusCode != http.StatusForbidden {
+		t.Errorf("expected status code 403, got %d", rle.StatusCode)
+	}
+	if rle.RetryAfterSeconds <= 0 {
+		t.Errorf("expected positive retry after seconds, got %d", rle.RetryAfterSeconds)
+	}
+}
+
+func TestCurseForgeClient_Headers_UserAgentAndAccept(t *testing.T) {
+	var capturedUA, capturedAccept, capturedAPIKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedUA = r.Header.Get("User-Agent")
+		capturedAccept = r.Header.Get("Accept")
+		capturedAPIKey = r.Header.Get("x-api-key")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{},
+			"pagination": map[string]any{
+				"totalCount": 0,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := curseforge.NewClient(server.URL, "my-secret-key", server.Client())
+	client.SetVersion("0.5.0")
+
+	_, _, err := client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("SearchMods failed: %v", err)
+	}
+
+	expectedUA := "NordLauncher/0.5.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"
+	if capturedUA != expectedUA {
+		t.Errorf("captured User-Agent = %q; want %q", capturedUA, expectedUA)
+	}
+	if capturedAccept != "application/json" {
+		t.Errorf("captured Accept = %q; want %q", capturedAccept, "application/json")
+	}
+	if capturedAPIKey != "my-secret-key" {
+		t.Errorf("captured x-api-key = %q; want %q", capturedAPIKey, "my-secret-key")
+	}
+}
+
+func TestCurseForgeClient_RateLimit_InlineRetryUnder5s(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts == 1 {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{
+					"id":   1,
+					"slug": "mod1",
+					"name": "Mod 1",
+				},
+			},
+			"pagination": map[string]any{
+				"totalCount": 1,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := curseforge.NewClient(server.URL, "key", server.Client())
+	mods, total, err := client.SearchMods(context.Background(), "query", "1.21.1", "fabric", 20, 0)
+	if err != nil {
+		t.Fatalf("expected successful retry, got: %v", err)
+	}
+	if attempts != 2 {
+		t.Errorf("expected exactly 2 attempts, got %d", attempts)
+	}
+	if total != 1 || len(mods) != 1 {
+		t.Errorf("expected 1 item, got total=%d len=%d", total, len(mods))
+	}
+}
+
+func TestCurseForgeClient_RateLimit_FastFailOver5s(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.Header().Set("Retry-After", "10")
+		http.Error(w, "rate limited", http.StatusTooManyRequests)
+	}))
+	defer server.Close()
+
+	client := curseforge.NewClient(server.URL, "key", server.Client())
+	_, _, err := client.SearchMods(context.Background(), "query", "1.21.1", "fabric", 20, 0)
+	if err == nil {
+		t.Fatalf("expected rate limit error, got nil")
+	}
+	if attempts != 1 {
+		t.Errorf("expected exactly 1 attempt (no inline sleep on >5s), got %d", attempts)
+	}
+	var rle *curseforge.RateLimitError
+	if !errors.As(err, &rle) {
+		t.Fatalf("expected RateLimitError, got %T", err)
+	}
+	if rle.RetryAfterSeconds != 10 {
+		t.Errorf("expected RetryAfterSeconds=10, got %d", rle.RetryAfterSeconds)
+	}
+}
+
+func TestCurseForgeClient_SortRelevance_OmitsSortField(t *testing.T) {
+	var capturedQuery string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{},
+			"pagination": map[string]any{
+				"totalCount": 0,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := curseforge.NewClient(server.URL, "key", server.Client())
+
+	// sort = ""
+	_, _, err := client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0, "")
+	if err != nil {
+		t.Fatalf("SearchMods failed: %v", err)
+	}
+	if strings.Contains(capturedQuery, "sortField") {
+		t.Errorf("expected sortField to be omitted when sort='', got: %s", capturedQuery)
+	}
+
+	// sort = "relevance"
+	_, _, err = client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0, "relevance")
+	if err != nil {
+		t.Fatalf("SearchMods failed: %v", err)
+	}
+	if strings.Contains(capturedQuery, "sortField") {
+		t.Errorf("expected sortField to be omitted when sort='relevance', got: %s", capturedQuery)
+	}
+
+	// sort = "invalid_sort" -> should return error (B5)
+	_, _, err = client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0, "nonexistent_sort")
+	if err == nil {
+		t.Errorf("expected error for invalid sort, got nil")
 	}
 }

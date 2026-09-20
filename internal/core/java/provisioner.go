@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 )
 
 type JavaDownloadStatusDTO struct {
@@ -139,7 +141,9 @@ func (s *AdoptiumRuntimeService) Download(ctx context.Context, major int) (strin
 	if err != nil {
 		return "", fmt.Errorf("create download request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Nord-Launcher/0.4.0")
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", netutil.FormatUserAgent(""))
+	}
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
