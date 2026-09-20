@@ -341,6 +341,44 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 		}
 		items, total, err := a.curseforge.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category)
 		if err != nil {
+			var rateErr *curseforge.RateLimitError
+			if errors.As(err, &rateErr) {
+				wait := rateErr.RetryAfterSeconds
+				if wait <= 0 {
+					wait = 5
+				}
+				return &SearchModsResultDTO{
+					Items:             []ModItemDTO{},
+					TotalCount:        0,
+					Reason:            "rate_limited",
+					RetryAfterSeconds: wait,
+				}, nil
+			}
+			if errors.Is(err, curseforge.ErrCurseForgeKeyInvalid) {
+				return &SearchModsResultDTO{
+					Items:             []ModItemDTO{},
+					TotalCount:        0,
+					Reason:            "key_invalid",
+					RetryAfterSeconds: 0,
+				}, nil
+			}
+			if errors.Is(err, curseforge.ErrCurseForgeRateLimited) {
+				return &SearchModsResultDTO{
+					Items:             []ModItemDTO{},
+					TotalCount:        0,
+					Reason:            "rate_limited",
+					RetryAfterSeconds: 5,
+				}, nil
+			}
+			var netErr net.Error
+			if errors.As(err, &netErr) || strings.Contains(strings.ToLower(err.Error()), "dial") || strings.Contains(strings.ToLower(err.Error()), "connect") || strings.Contains(strings.ToLower(err.Error()), "no such host") {
+				return &SearchModsResultDTO{
+					Items:             []ModItemDTO{},
+					TotalCount:        0,
+					Reason:            "unreachable",
+					RetryAfterSeconds: 0,
+				}, nil
+			}
 			return nil, err
 		}
 		dtos := make([]ModItemDTO, 0, len(items))
@@ -369,6 +407,15 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 	}
 	items, total, err := a.modrinth.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category)
 	if err != nil {
+		var netErr net.Error
+		if errors.As(err, &netErr) || strings.Contains(strings.ToLower(err.Error()), "dial") || strings.Contains(strings.ToLower(err.Error()), "connect") || strings.Contains(strings.ToLower(err.Error()), "no such host") {
+			return &SearchModsResultDTO{
+				Items:             []ModItemDTO{},
+				TotalCount:        0,
+				Reason:            "unreachable",
+				RetryAfterSeconds: 0,
+			}, nil
+		}
 		return nil, err
 	}
 	dtos := make([]ModItemDTO, 0, len(items))

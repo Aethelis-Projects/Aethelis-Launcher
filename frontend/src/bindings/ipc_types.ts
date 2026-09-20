@@ -99,6 +99,8 @@ export interface SearchModsRequest {
 export interface SearchModsResultDTO {
   items: ModItemDTO[];
   total_count: number;
+  reason?: string;
+  retry_after_seconds?: number;
 }
 
 export interface ToggleModRequest {

@@ -237,4 +237,143 @@ describe("ModCatalog Component", () => {
     const errorBanner = await screen.findByTestId("mods-search-error-banner");
     expect(errorBanner.textContent).toContain("CurseForge временно ограничил запросы — попробуйте позже");
   });
+
+  it("renders reactive sort options for Modrinth vs CurseForge and resets sort on switch (B5)", async () => {
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [], total_count: 0 });
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    const sortSelect = (await screen.findByTestId("mods-sort-select")) as HTMLSelectElement;
+    // On Modrinth, should have "newest" option
+    const optionsModrinth = Array.from(sortSelect.options).map((o) => o.value);
+    expect(optionsModrinth).toContain("relevance");
+    expect(optionsModrinth).toContain("downloads");
+    expect(optionsModrinth).toContain("updated");
+    expect(optionsModrinth).toContain("newest");
+    expect(optionsModrinth).not.toContain("popularity");
+
+    // Select "newest"
+    fireEvent.change(sortSelect, { target: { value: "newest" } });
+    expect(sortSelect.value).toBe("newest");
+
+    // Switch to CurseForge
+    const cfBtn = screen.getByText("CurseForge");
+    fireEvent.click(cfBtn);
+
+    // On CurseForge, options should not have "newest", should have "popularity"
+    const optionsCF = Array.from(sortSelect.options).map((o) => o.value);
+    expect(optionsCF).toContain("relevance");
+    expect(optionsCF).toContain("popularity");
+    expect(optionsCF).toContain("updated");
+    expect(optionsCF).toContain("downloads");
+    expect(optionsCF).not.toContain("newest");
+
+    // Should have reset from "newest" to "relevance"
+    expect(sortSelect.value).toBe("relevance");
+  });
+
+  it("displays rate limit banner with active countdown and fallback button on rate_limited reason (B4, C3)", async () => {
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [],
+      total_count: 0,
+      reason: "rate_limited",
+      retry_after_seconds: 15,
+    });
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    // Switch to CurseForge
+    const cfBtn = screen.getByText("CurseForge");
+    fireEvent.click(cfBtn);
+
+    const banner = await screen.findByTestId("mods-rate-limit-banner");
+    expect(banner.textContent).toContain("CurseForge ограничил частоту запросов — повторим через 15 с");
+
+    const fallbackBtn = await screen.findByTestId("fallback-to-modrinth-btn");
+    expect(fallbackBtn.textContent).toContain("Искать это же на Modrinth");
+  });
+
+  it("displays key invalid banner with fallback button on key_invalid reason (C3)", async () => {
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [],
+      total_count: 0,
+      reason: "key_invalid",
+    });
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    // Switch to CurseForge
+    const cfBtn = screen.getByText("CurseForge");
+    fireEvent.click(cfBtn);
+
+    const banner = await screen.findByTestId("mods-key-invalid-banner");
+    expect(banner.textContent).toContain("Ключ каталога отклонён сервером — это внутренняя проблема, обновите лаунчер");
+
+    const fallbackBtn = await screen.findByTestId("fallback-to-modrinth-btn");
+    expect(fallbackBtn.textContent).toContain("Искать это же на Modrinth");
+  });
+
+  it("clicking fallback button switches to Modrinth and triggers search (C3)", async () => {
+    const searchSpy = vi.spyOn(launcherAPI, "searchMods")
+      .mockResolvedValueOnce({ items: [], total_count: 0 }) // initial Modrinth
+      .mockResolvedValueOnce({
+        items: [],
+        total_count: 0,
+        reason: "rate_limited",
+        retry_after_seconds: 10,
+      }) // CurseForge
+      .mockResolvedValueOnce({
+        items: [
+          {
+            id: "mod-mr",
+            slug: "sodium",
+            source: "modrinth",
+            name: "Sodium",
+            author: "jellysquid",
+            summary: "Optimization mod",
+            downloads: 100000,
+            categories: ["optimization"],
+          },
+        ],
+        total_count: 1,
+      }); // Back to Modrinth via fallback
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    // Switch to CurseForge
+    const cfBtn = screen.getByText("CurseForge");
+    fireEvent.click(cfBtn);
+
+    const fallbackBtn = await screen.findByTestId("fallback-to-modrinth-btn");
+    fireEvent.click(fallbackBtn);
+
+    const modCard = await screen.findByText("Sodium");
+    expect(modCard).toBeTruthy();
+    expect(screen.queryByTestId("mods-rate-limit-banner")).toBeNull();
+    expect(searchSpy).toHaveBeenCalledTimes(3);
+  });
 });

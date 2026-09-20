@@ -103,8 +103,10 @@ type SearchModsRequest struct {
 }
 
 type SearchModsResultDTO struct {
-	Items      []ModItemDTO ` + "`" + `json:"items"` + "`" + `
-	TotalCount int64        ` + "`" + `json:"total_count"` + "`" + `
+	Items             []ModItemDTO ` + "`" + `json:"items"` + "`" + `
+	TotalCount        int64        ` + "`" + `json:"total_count"` + "`" + `
+	Reason            string       ` + "`" + `json:"reason,omitempty"` + "`" + `
+	RetryAfterSeconds int          ` + "`" + `json:"retry_after_seconds,omitempty"` + "`" + `
 }
 
 type ToggleModRequest struct {
@@ -332,6 +334,8 @@ export interface SearchModsRequest {
 export interface SearchModsResultDTO {
   items: ModItemDTO[];
   total_count: number;
+  reason?: string;
+  retry_after_seconds?: number;
 }
 
 export interface ToggleModRequest {
