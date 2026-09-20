@@ -139,7 +139,7 @@ func (s *AdoptiumRuntimeService) Download(ctx context.Context, major int) (strin
 	if err != nil {
 		return "", fmt.Errorf("create download request: %w", err)
 	}
-	req.Header.Set("User-Agent", "Nord-Launcher/0.3.0")
+	req.Header.Set("User-Agent", "Nord-Launcher/0.4.0")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {

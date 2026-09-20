@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/md5"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,13 +29,17 @@ import (
 	javaadapter "github.com/nord-launcher/launcher/internal/adapters/java"
 	"github.com/nord-launcher/launcher/internal/adapters/keyring"
 	"github.com/nord-launcher/launcher/internal/adapters/process"
+	"github.com/nord-launcher/launcher/internal/adapters/wails"
 	"github.com/nord-launcher/launcher/internal/core/clock"
 	"github.com/nord-launcher/launcher/internal/core/content"
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
+	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/manifest"
+	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
 )
 
@@ -856,8 +862,221 @@ func main() {
 	}
 	logf("PASS: Missing sidecar safely resolved to empty string.")
 
+	// =========================================================================
+	// 11. Mod Manifest, Toggle & Dual-File Delete Contract E2E (A2, C4, C6)
+	// =========================================================================
+	logf("\n--- STEP 11: Mod Manifest & Reconcile Delivery Contract E2E ---")
+
+	step11JarContent := []byte("nord-launcher-e2e-step11-fixture-mod-jar")
+	h11 := sha1.Sum(step11JarContent)
+	step11Sha1Hex := hex.EncodeToString(h11[:])
+
+	step11Server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/project/") && strings.HasSuffix(r.URL.Path, "/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{ // errcheck:ok mock modrinth versions
+				{
+					"id":           "step11-ver-release",
+					"project_id":   "step11-mod",
+					"name":         "Step11 Mod Release",
+					"version_type": "release",
+					"files": []map[string]interface{}{
+						{
+							"id":       "file-step11-rel",
+							"url":      "http://" + r.Host + "/download/test-step11.jar",
+							"filename": "test-step11.jar",
+							"primary":  true,
+							"size":     len(step11JarContent),
+							"hashes": map[string]string{
+								"sha1": step11Sha1Hex,
+							},
+						},
+					},
+					"game_versions":  []string{"1.21.1"},
+					"loaders":        []string{"fabric"},
+					"date_published": time.Now().Format(time.RFC3339),
+				},
+			})
+			return
+		}
+
+		if r.URL.Path == "/download/test-step11.jar" {
+			w.Header().Set("Content-Type", "application/java-archive")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(step11JarContent) // errcheck:ok mock file download write
+			return
+		}
+
+		http.NotFound(w, r)
+	}))
+	defer step11Server.Close()
+
+	step11Tmp, err := os.MkdirTemp("", "e2e_step11_*")
+	if err != nil {
+		logf("FAIL: MkdirTemp for STEP 11 failed: %v", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(step11Tmp)
+
+	step11InstID := "e2e-inst11"
+	step11InstancesDir := filepath.Join(step11Tmp, "instances")
+	step11ModsDir := filepath.Join(step11InstancesDir, step11InstID, "mods")
+	if err := os.MkdirAll(step11ModsDir, 0755); err != nil {
+		logf("FAIL: MkdirAll mods dir failed: %v", err)
+		os.Exit(1)
+	}
+
+	step11DBPath := filepath.Join(step11Tmp, "test.db")
+	step11DB, err := storage.OpenDatabase(step11DBPath)
+	if err != nil {
+		logf("FAIL: OpenDatabase for STEP 11 failed: %v", err)
+		os.Exit(1)
+	}
+	defer step11DB.Close()
+
+	if err := step11DB.Migrate(); err != nil {
+		logf("FAIL: DB Migrate for STEP 11 failed: %v", err)
+		os.Exit(1)
+	}
+
+	step11Adapter := wails.NewWailsAdapter(nil)
+	mrServerURL, _ := url.Parse(step11Server.URL)
+	step11Adapter.SetAllowedHosts([]string{mrServerURL.Hostname(), mrServerURL.Host})
+	step11Adapter.SetFileSystem(fs.NewOSFileSystem(), step11InstancesDir)
+	step11Adapter.SetDB(step11DB.DB())
+
+	mrStep11Client := modrinth.NewClient(step11Server.URL, step11Server.Client())
+	step11Adapter.SetContent(mrStep11Client, nil)
+
+	// 1. Install Mod
+	installResp, err := step11Adapter.InstallMod(wails.InstallModRequest{
+		InstanceID:  step11InstID,
+		ModID:       "step11-mod",
+		Source:      "modrinth",
+		GameVersion: "1.21.1",
+		Loader:      "fabric",
+	})
+	if err != nil {
+		logf("FAIL: STEP 11 InstallMod failed: %v", err)
+		os.Exit(1)
+	}
+	if !installResp.Success || installResp.FileName != "test-step11.jar" {
+		logf("FAIL: Unexpected InstallMod response: %+v", installResp)
+		os.Exit(1)
+	}
+
+	installedJarPath := filepath.Join(step11ModsDir, "test-step11.jar")
+	if _, err := os.Stat(installedJarPath); err != nil {
+		logf("FAIL: Installed jar file not found on disk: %v", err)
+		os.Exit(1)
+	}
+
+	// 2. Verify nord-installs.json manifest
+	step11ManifestPath := filepath.Join(step11ModsDir, "nord-installs.json")
+	if _, err := os.Stat(step11ManifestPath); err != nil {
+		logf("FAIL: nord-installs.json manifest not found on disk: %v", err)
+		os.Exit(1)
+	}
+
+	step11M, err := manifest.LoadManifest(step11ModsDir)
+	if err != nil {
+		logf("FAIL: LoadManifest failed: %v", err)
+		os.Exit(1)
+	}
+	if step11M.SchemaVersion != manifest.CurrentSchemaVersion {
+		logf("FAIL: Expected schema_version %d, got %d", manifest.CurrentSchemaVersion, step11M.SchemaVersion)
+		os.Exit(1)
+	}
+	rec := step11M.GetRecord("test-step11")
+	if rec == nil || rec.ModID != "step11-mod" || rec.FileName != "test-step11.jar" || rec.Source != "modrinth" {
+		logf("FAIL: Manifest record mismatch: %+v", rec)
+		os.Exit(1)
+	}
+	logf("PASS: InstallMod created valid nord-installs.json with matching metadata.")
+
+	// 3. Toggle mod to disabled
+	err = step11Adapter.ToggleMod(wails.ToggleModRequest{
+		InstanceID: step11InstID,
+		FileName:   "test-step11.jar",
+		Enable:     false,
+	})
+	if err != nil {
+		logf("FAIL: ToggleMod failed: %v", err)
+		os.Exit(1)
+	}
+
+	if _, err := os.Stat(installedJarPath); !os.IsNotExist(err) {
+		logf("FAIL: Expected test-step11.jar to no longer exist after disable")
+		os.Exit(1)
+	}
+	disabledJarPath := filepath.Join(step11ModsDir, "test-step11.jar.disabled")
+	if _, err := os.Stat(disabledJarPath); err != nil {
+		logf("FAIL: Expected test-step11.jar.disabled on disk: %v", err)
+		os.Exit(1)
+	}
+
+	step11M, err = manifest.LoadManifest(step11ModsDir)
+	if err != nil {
+		logf("FAIL: LoadManifest reload after toggle failed: %v", err)
+		os.Exit(1)
+	}
+	recDisabled := step11M.GetRecord("test-step11")
+	if recDisabled == nil || recDisabled.FileName != "test-step11.jar.disabled" {
+		logf("FAIL: Manifest did not update filename to .disabled: %+v", recDisabled)
+		os.Exit(1)
+	}
+	logf("PASS: ToggleMod successfully renamed file to .disabled and updated manifest record.")
+
+	// 4. Directive A2: Dual-File Deletion
+	// Create stray active jar alongside .disabled jar to simulate dual presence
+	if err := os.WriteFile(installedJarPath, []byte("stray-active-jar"), 0644); err != nil {
+		logf("FAIL: Write stray active jar failed: %v", err)
+		os.Exit(1)
+	}
+
+	// Delete mod specifying target
+	err = step11Adapter.DeleteMod(wails.DeleteModRequest{
+		InstanceID: step11InstID,
+		FileName:   "test-step11.jar",
+	})
+	if err != nil {
+		logf("FAIL: DeleteMod failed: %v", err)
+		os.Exit(1)
+	}
+
+	// Directive A2: BOTH .jar and .jar.disabled must be deleted from disk
+	if _, err := os.Stat(installedJarPath); !os.IsNotExist(err) {
+		logf("FAIL: Expected test-step11.jar to be deleted (Directive A2)")
+		os.Exit(1)
+	}
+	if _, err := os.Stat(disabledJarPath); !os.IsNotExist(err) {
+		logf("FAIL: Expected test-step11.jar.disabled to be deleted (Directive A2)")
+		os.Exit(1)
+	}
+
+	step11M, err = manifest.LoadManifest(step11ModsDir)
+	if err != nil {
+		logf("FAIL: LoadManifest reload after delete failed: %v", err)
+		os.Exit(1)
+	}
+	if recDeleted := step11M.GetRecord("test-step11"); recDeleted != nil {
+		logf("FAIL: Expected record to be pruned from manifest, got %+v", recDeleted)
+		os.Exit(1)
+	}
+
+	modsList, err := step11Adapter.ListInstalledMods(step11InstID)
+	if err != nil {
+		logf("FAIL: ListInstalledMods failed: %v", err)
+		os.Exit(1)
+	}
+	if len(modsList) != 0 {
+		logf("FAIL: Expected empty mods list after deletion and reconcile, got %d mods", len(modsList))
+		os.Exit(1)
+	}
+	logf("PASS: Directive A2 verified: dual-file deletion removed both .jar and .jar.disabled, manifest pruned.")
+
 	logf("\n=================================================================")
-	logf(" ALL 10 E2E STAGES PASSED")
+	logf(" ALL 11 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt

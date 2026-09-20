@@ -75,6 +75,8 @@ sha256sum -c SHA256SUMS.txt
 - **Secure sessions** — Microsoft OAuth2 with PKCE; refresh tokens stored in the Windows Credential Manager or Secret Service, never in plain files.
 - **Process supervision** — Windows Job Objects (`KILL_ON_JOB_CLOSE`) eliminate orphaned Java processes; Log4j crash classification for diagnostics.
 - **Signed auto-updater** — Ed25519 manifest verification before any payload is executed, with a clean restart flow.
+- **Contextual mod management** — integrated CurseForge & Modrinth catalog within instance settings, deterministic 3-level fallback version selection, manual version picker drawer, and automatic dependency resolution.
+- **Manifest & reconcile** — sidecar `mods/nord-installs.json` tracking installation provenance, filesystem source-of-truth reconcile, and dual-file deletion.
 
 ---
 
@@ -155,6 +157,8 @@ Every push and pull request must pass the CI Quality Gate:
 
 - **v0.1.3** — in-app update panel (check / apply / restart from the UI; IPC is already in place).
 - **v0.2.0** — Fabric, Quilt, and NeoForge provisioning and launch.
+- **v0.3.0** — CurseForge & Modrinth integration, sidecar key resolution.
+- **v0.4.0** — Contextual mod management, deterministic version selection, sidecar manifest & reconcile.
 - **Later** — beta update channel, opt-in telemetry, macOS.
 
 ---
