@@ -115,6 +115,24 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
                         v{mod.version}
                       </span>
                     </Show>
+                    <Show when={mod.source}>
+                      <span class="text-[10px] font-mono px-1.5 py-0.5 rounded border bg-zinc-800/80 border-zinc-700 text-zinc-400 capitalize">
+                        {mod.source}
+                      </span>
+                    </Show>
+                    <Show when={mod.release_type}>
+                      <span
+                        class={`text-[10px] font-mono px-1.5 py-0.5 rounded border uppercase ${
+                          mod.release_type === "release"
+                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                            : mod.release_type === "beta"
+                            ? "bg-blue-500/10 border-blue-500/30 text-blue-400"
+                            : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                        }`}
+                      >
+                        {mod.release_type}
+                      </span>
+                    </Show>
                   </div>
                   <div class="text-[10px] font-mono text-zinc-500 truncate mt-0.5">
                     {mod.file_name} • {formatBytes(mod.size_bytes)}

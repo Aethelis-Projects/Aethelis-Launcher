@@ -1,9 +1,11 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
+import { InstalledModsManager } from "../mods/InstalledModsManager";
+import { ModCatalog } from "../mods/ModCatalog";
 
-type SettingsTab = "general" | "java" | "memory" | "args";
+export type SettingsTab = "general" | "java" | "memory" | "args" | "mods";
 
 interface InstanceSettingsModalProps {
   instance: InstanceDTO;
@@ -11,10 +13,12 @@ interface InstanceSettingsModalProps {
   onClose: () => void;
   onSaved: (updated: InstanceDTO) => void;
   onOpenJavaManager?: () => void;
+  initialTab?: SettingsTab;
 }
 
 export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (props) => {
-  const [activeTab, setActiveTab] = createSignal<SettingsTab>("general");
+  const [activeTab, setActiveTab] = createSignal<SettingsTab>(props.initialTab || "general");
+  const [modSubTab, setModSubTab] = createSignal<"installed" | "catalog">("installed");
   const [name, setName] = createSignal("");
   const [javaPath, setJavaPath] = createSignal("");
   const [skipJavaCheck, setSkipJavaCheck] = createSignal(false);
@@ -28,6 +32,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   // Sync state whenever modal opens or instance changes
   createEffect(() => {
     if (props.isOpen && props.instance) {
+      setActiveTab(props.initialTab || "general");
       setName(props.instance.name || "");
       setJavaPath(props.instance.java_path || "");
       setSkipJavaCheck(props.instance.skip_java_check || false);
@@ -101,7 +106,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
         data-testid="instance-settings-modal"
       >
-        <div class="w-full max-w-2xl bg-nord-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div class={`w-full ${activeTab() === "mods" ? "max-w-4xl" : "max-w-2xl"} bg-nord-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-all`}>
           {/* Header */}
           <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-nord-dark/40">
             <div class="flex items-center gap-3">
@@ -181,6 +186,19 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             >
               <AlertTriangle class="w-4 h-4" />
               <span>Аргументы JVM</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("mods")}
+              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                activeTab() === "mods"
+                  ? "border-nord-cyan text-nord-cyan font-semibold"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+              data-testid="tab-mods"
+            >
+              <Package class="w-4 h-4" />
+              <span>Моды</span>
             </button>
           </div>
 
@@ -469,29 +487,86 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                 </div>
               </div>
             </Show>
+
+            {/* TAB 5: Mods (Installed vs Catalog) */}
+            <Show when={activeTab() === "mods"}>
+              <div class="space-y-4">
+                {/* Segmented Control */}
+                <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 w-fit">
+                  <button
+                    type="button"
+                    onClick={() => setModSubTab("installed")}
+                    class={`px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                      modSubTab() === "installed"
+                        ? "bg-[#00D4B2] text-zinc-950 font-semibold shadow"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    }`}
+                    data-testid="mods-subtab-installed"
+                  >
+                    Установленные
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModSubTab("catalog")}
+                    class={`px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                      modSubTab() === "catalog"
+                        ? "bg-[#00D4B2] text-zinc-950 font-semibold shadow"
+                        : "text-zinc-400 hover:text-zinc-100"
+                    }`}
+                    data-testid="mods-subtab-catalog"
+                  >
+                    Каталог
+                  </button>
+                </div>
+
+                <Show when={modSubTab() === "installed"}>
+                  <InstalledModsManager instanceId={props.instance.id} />
+                </Show>
+
+                <Show when={modSubTab() === "catalog"}>
+                  <ModCatalog
+                    activeInstanceId={props.instance.id}
+                    gameVersion={props.instance.game_version}
+                    loader={props.instance.loader}
+                  />
+                </Show>
+              </div>
+            </Show>
           </div>
 
           {/* Footer Actions */}
           <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/5 bg-nord-dark/40">
-            <button
-              type="button"
-              onClick={props.onClose}
-              disabled={saving()}
-              class="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium text-zinc-300 transition-colors cursor-pointer"
-              data-testid="settings-cancel-button"
-            >
-              Отмена
-            </button>
-            <button
-              type="button"
-              onClick={handleSave}
-              disabled={saving()}
-              class="px-5 py-2 rounded-lg bg-nord-cyan hover:bg-nord-cyan/90 text-nord-dark font-bold text-xs flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-              data-testid="settings-save-button"
-            >
-              <Check class="w-4 h-4" />
-              <span>{saving() ? "Сохранение..." : "Сохранить настройки"}</span>
-            </button>
+            <Show when={activeTab() !== "mods"}>
+              <button
+                type="button"
+                onClick={props.onClose}
+                disabled={saving()}
+                class="px-4 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-medium text-zinc-300 transition-colors cursor-pointer"
+                data-testid="settings-cancel-button"
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving()}
+                class="px-5 py-2 rounded-lg bg-nord-cyan hover:bg-nord-cyan/90 text-nord-dark font-bold text-xs flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                data-testid="settings-save-button"
+              >
+                <Check class="w-4 h-4" />
+                <span>{saving() ? "Сохранение..." : "Сохранить настройки"}</span>
+              </button>
+            </Show>
+            <Show when={activeTab() === "mods"}>
+              <button
+                type="button"
+                onClick={props.onClose}
+                class="px-5 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-xs font-semibold text-white transition-colors cursor-pointer"
+                data-testid="settings-close-mods-button"
+              >
+                Закрыть
+              </button>
+            </Show>
           </div>
         </div>
       </div>

@@ -1,12 +1,10 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Layers, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity } from "lucide-solid";
+import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
-import { InstanceSettingsModal } from "./components/instance/InstanceSettingsModal";
+import { InstanceSettingsModal, SettingsTab } from "./components/instance/InstanceSettingsModal";
 import { JavaManager } from "./components/java/JavaManager";
-import { ModCatalog } from "./components/mods/ModCatalog";
-import { InstalledModsManager } from "./components/mods/InstalledModsManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
@@ -14,7 +12,7 @@ import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
-type NavTab = "instances" | "mods_catalog" | "mods_manager" | "accounts" | "settings" | "java_manager";
+type NavTab = "instances" | "accounts" | "settings" | "java_manager";
 
 export const App: Component = () => {
   // Navigation
@@ -30,6 +28,12 @@ export const App: Component = () => {
   const [availableUpdate, setAvailableUpdate] = createSignal<UpdateInfoDTO | null>(null);
   const [systemError, setSystemError] = createSignal<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
+  const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
+
+  const openSettingsWithTab = (tab: SettingsTab) => {
+    setSettingsInitialTab(tab);
+    setIsSettingsOpen(true);
+  };
   const [installedModsCount, setInstalledModsCount] = createSignal(0);
   const [logTail, setLogTail] = createSignal<string[]>([]);
 
@@ -283,34 +287,6 @@ export const App: Component = () => {
 
             <button
               type="button"
-              onClick={() => setCurrentNav("mods_catalog")}
-              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
-                currentNav() === "mods_catalog"
-                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
-                  : "text-zinc-400 hover:text-white hover:bg-white/5"
-              }`}
-              title="Каталог модов (Modrinth & CurseForge)"
-              data-testid="nav-mods-catalog"
-            >
-              <Layers class="w-5 h-5" />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setCurrentNav("mods_manager")}
-              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
-                currentNav() === "mods_manager"
-                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
-                  : "text-zinc-400 hover:text-white hover:bg-white/5"
-              }`}
-              title="Управление модами инстанса"
-              data-testid="nav-mods-manager"
-            >
-              <Package class="w-5 h-5" />
-            </button>
-
-            <button
-              type="button"
               onClick={() => setCurrentNav("java_manager")}
               class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
                 currentNav() === "java_manager"
@@ -451,7 +427,7 @@ export const App: Component = () => {
                     {/* Instance Settings Button */}
                     <button
                       type="button"
-                      onClick={() => setIsSettingsOpen(true)}
+                      onClick={() => openSettingsWithTab("general")}
                       class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
                       title="Настройки сборки"
                       data-testid="open-instance-settings-button"
@@ -508,8 +484,10 @@ export const App: Component = () => {
 
                     {/* Installed Mods Badge */}
                     <div
-                      class="p-3 rounded-xl bg-black/20 border border-white/5 space-y-1"
+                      class="p-3 rounded-xl bg-black/20 hover:bg-white/5 border border-white/5 space-y-1 cursor-pointer transition-colors"
                       data-testid="cockpit-mods-count-badge"
+                      onClick={() => openSettingsWithTab("mods")}
+                      title="Нажмите для управления модами"
                     >
                       <div class="flex items-center gap-1.5 text-zinc-500 text-[11px] font-mono">
                         <Package class="w-3.5 h-3.5 text-nord-amber" />
@@ -660,32 +638,14 @@ export const App: Component = () => {
             </div>
           </Show>
 
-          {/* VIEW 2: Mod Catalog (Modrinth / CurseForge) */}
-          <Show when={currentNav() === "mods_catalog"}>
-            <div class="max-w-4xl mx-auto">
-              <ModCatalog
-                activeInstanceId={activeInstance().id}
-                gameVersion={activeInstance().game_version}
-                loader={activeInstance().loader}
-              />
-            </div>
-          </Show>
-
-          {/* VIEW 3: Installed Mods Manager */}
-          <Show when={currentNav() === "mods_manager"}>
-            <div class="max-w-4xl mx-auto">
-              <InstalledModsManager instanceId={activeInstance().id} />
-            </div>
-          </Show>
-
-          {/* VIEW 4: Accounts Management */}
+          {/* VIEW 2: Accounts Management */}
           <Show when={currentNav() === "accounts"}>
             <div class="max-w-3xl mx-auto">
               <AccountManager />
             </div>
           </Show>
 
-          {/* VIEW 5: Settings & Updates */}
+          {/* VIEW 3: Settings & Updates */}
           <Show when={currentNav() === "settings"}>
             <div class="max-w-3xl mx-auto space-y-6">
               <CurseForgeKeyCard />
@@ -696,7 +656,7 @@ export const App: Component = () => {
             </div>
           </Show>
 
-          {/* VIEW 6: Java Runtime Manager (J1) */}
+          {/* VIEW 4: Java Runtime Manager (J1) */}
           <Show when={currentNav() === "java_manager"}>
             <div class="max-w-4xl mx-auto">
               <JavaManager onClose={() => setCurrentNav("instances")} />
@@ -705,11 +665,18 @@ export const App: Component = () => {
         </div>
       </main>
 
-      {/* Instance Settings Modal (J2) */}
+      {/* Instance Settings Modal (J2, C5) */}
       <InstanceSettingsModal
         instance={activeInstance()}
         isOpen={isSettingsOpen()}
-        onClose={() => setIsSettingsOpen(false)}
+        initialTab={settingsInitialTab()}
+        onClose={() => {
+          setIsSettingsOpen(false);
+          const currentId = activeInstance().id;
+          if (currentId) {
+            loadModsCount(currentId);
+          }
+        }}
         onSaved={(updated) => {
           setInstances((prev) =>
             prev.map((i) => (i.id === updated.id ? updated : i))

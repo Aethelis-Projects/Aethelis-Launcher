@@ -40,15 +40,28 @@ describe("InstanceSettingsModal (J2)", () => {
     expect(screen.getAllByText(/Minecraft 1.21.1/).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("switches across all 4 tabs (General, Java, Memory, Arguments)", async () => {
+  it("switches across all 5 tabs (General, Java, Memory, Arguments, Mods) and respects initialTab (C5)", async () => {
+    vi.spyOn(launcherAPI, "listInstalledMods").mockResolvedValue([]);
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [], total_count: 0 });
+
     render(() => (
       <InstanceSettingsModal
         instance={mockInstance}
         isOpen={true}
+        initialTab="mods"
         onClose={vi.fn()}
         onSaved={vi.fn()}
       />
     ));
+
+    // Initial tab is mods
+    expect(screen.getByTestId("tab-mods")).toBeTruthy();
+    expect(screen.getByTestId("mods-subtab-installed")).toBeTruthy();
+    expect(screen.getByTestId("mods-subtab-catalog")).toBeTruthy();
+
+    // Switch subtabs
+    fireEvent.click(screen.getByTestId("mods-subtab-catalog"));
+    expect(await screen.findByText(/Каталог модификаций/)).toBeTruthy();
 
     // Java tab
     fireEvent.click(screen.getByTestId("tab-java"));

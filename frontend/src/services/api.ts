@@ -563,7 +563,7 @@ export const launcherAPI = {
     );
   },
 
-  async installMod(instanceId: string, mod: ModItemDTO): Promise<InstallModResponse> {
+  async installMod(instanceId: string, mod: ModItemDTO, versionId?: string): Promise<InstallModResponse> {
     const res = await invokeWails<InstallModResponse>(
       "InstallMod",
       () => {
@@ -575,7 +575,7 @@ export const launcherAPI = {
           file_name: fileName,
           mod_id: mod.slug,
           name: mod.name,
-          version: "1.0.0",
+          version: versionId || "1.0.0",
           enabled: true,
           size_bytes: 1572864,
         });
@@ -589,6 +589,7 @@ export const launcherAPI = {
         instance_id: instanceId,
         mod_id: mod.id,
         source: mod.source,
+        version_id: versionId,
       } as InstallModRequest
     );
     if (!res.success) {
