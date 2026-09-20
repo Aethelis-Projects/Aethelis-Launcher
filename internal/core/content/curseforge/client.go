@@ -305,6 +305,7 @@ type cfFile struct {
 	FileName     string        `json:"fileName"`
 	FileDate     time.Time     `json:"fileDate"`
 	FileLength   int64         `json:"fileLength"`
+	ReleaseType  int           `json:"releaseType"` // 1 = Release, 2 = Beta, 3 = Alpha
 	DownloadURL  string        `json:"downloadUrl"`
 	GameVersions []string      `json:"gameVersions"`
 	Hashes       []cfHash      `json:"hashes"`
@@ -401,6 +402,14 @@ func (c *Client) GetModFiles(
 			})
 		}
 
+		relType := content.ReleaseTypeRelease
+		switch f.ReleaseType {
+		case 2:
+			relType = content.ReleaseTypeBeta
+		case 3:
+			relType = content.ReleaseTypeAlpha
+		}
+
 		files = append(files, content.ModFile{
 			ID:           strconv.FormatInt(f.ID, 10),
 			VersionID:    strconv.FormatInt(f.ID, 10),
@@ -410,6 +419,9 @@ func (c *Client) GetModFiles(
 			SHA1:         sha1Val,
 			Dependencies: deps,
 			Primary:      true,
+			ReleaseType:  relType,
+			FileDate:     f.FileDate,
+			GameVersions: f.GameVersions,
 		})
 	}
 

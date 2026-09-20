@@ -93,6 +93,7 @@ func TestCurseForgeClient_GetModFiles(t *testing.T) {
 					"fileName":    "jei-1.21.1-fabric-19.1.0.jar",
 					"downloadUrl": "https://edge.forgecdn.net/files/5550/0/jei.jar",
 					"fileLength":  2500000,
+					"releaseType": 1,
 					"hashes": []map[string]any{
 						{"value": "11223344556677889900aabbccddeeff11223344", "algo": 1},
 					},
@@ -118,6 +119,9 @@ func TestCurseForgeClient_GetModFiles(t *testing.T) {
 	f := files[0]
 	if f.FileName != "jei-1.21.1-fabric-19.1.0.jar" || f.SHA1 != "11223344556677889900aabbccddeeff11223344" {
 		t.Fatalf("unexpected file details: %+v", f)
+	}
+	if f.ReleaseType != content.ReleaseTypeRelease {
+		t.Errorf("expected ReleaseType %s, got %s", content.ReleaseTypeRelease, f.ReleaseType)
 	}
 	if len(f.Dependencies) != 1 || f.Dependencies[0].ProjectID != "306612" || f.Dependencies[0].Type != content.DepRequired {
 		t.Fatalf("unexpected dependency details: %+v", f.Dependencies)

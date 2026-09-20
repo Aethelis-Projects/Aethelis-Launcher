@@ -82,6 +82,7 @@ func TestModrinthClient_GetProjectVersions(t *testing.T) {
 				"id":             "ver-123",
 				"project_id":     "AANobbMI",
 				"version_number": "0.5.8",
+				"version_type":   "release",
 				"name":           "Sodium 0.5.8",
 				"game_versions":  []string{"1.21.1"},
 				"loaders":        []string{"fabric"},
@@ -122,6 +123,12 @@ func TestModrinthClient_GetProjectVersions(t *testing.T) {
 	v := versions[0]
 	if v.VersionNum != "0.5.8" {
 		t.Fatalf("unexpected version number: %s", v.VersionNum)
+	}
+	if v.VersionType != "release" {
+		t.Errorf("expected VersionType release, got %s", v.VersionType)
+	}
+	if len(v.Files) != 1 || v.Files[0].ReleaseType != "release" {
+		t.Errorf("expected file ReleaseType release, got %+v", v.Files)
 	}
 	if len(v.Files) != 1 || v.Files[0].FileName != "sodium-fabric-0.5.8.jar" {
 		t.Fatalf("unexpected files: %+v", v.Files)

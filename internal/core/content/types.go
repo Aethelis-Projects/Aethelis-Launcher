@@ -36,6 +36,27 @@ type ModItem struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+// Standard release type identifiers.
+const (
+	ReleaseTypeRelease = "release"
+	ReleaseTypeBeta    = "beta"
+	ReleaseTypeAlpha   = "alpha"
+)
+
+// ReleaseTypeRank maps release types to deterministic priority ranks (Release=0 > Beta=1 > Alpha=2).
+func ReleaseTypeRank(rt string) int {
+	switch rt {
+	case ReleaseTypeRelease:
+		return 0
+	case ReleaseTypeBeta:
+		return 1
+	case ReleaseTypeAlpha:
+		return 2
+	default:
+		return 3
+	}
+}
+
 // ModDependency represents a dependency relationship to another mod.
 type ModDependency struct {
 	ProjectID string         `json:"project_id"`
@@ -55,6 +76,10 @@ type ModFile struct {
 	SHA512       string          `json:"sha512,omitempty"`
 	Dependencies []ModDependency `json:"dependencies"`
 	Primary      bool            `json:"primary"`
+	ReleaseType  string          `json:"release_type,omitempty"` // "release", "beta", "alpha"
+	FileDate     time.Time       `json:"file_date,omitempty"`
+	GameVersions []string        `json:"game_versions,omitempty"`
+	Loaders      []string        `json:"loaders,omitempty"`
 }
 
 // ModVersion represents a specific release of a mod.
@@ -63,6 +88,7 @@ type ModVersion struct {
 	ProjectID    string          `json:"project_id"`
 	VersionNum   string          `json:"version_number"`
 	Name         string          `json:"name"`
+	VersionType  string          `json:"version_type,omitempty"` // "release", "beta", "alpha"
 	GameVersions []string        `json:"game_versions"`
 	Loaders      []string        `json:"loaders"`
 	Files        []ModFile       `json:"files"`

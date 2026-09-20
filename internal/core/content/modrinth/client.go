@@ -199,15 +199,16 @@ func (c *Client) GetProject(ctx context.Context, idOrSlug string) (*content.ModI
 }
 
 type versionResponse struct {
-	ID           string           `json:"id"`
-	ProjectID    string           `json:"project_id"`
-	VersionNum   string           `json:"version_number"`
-	Name         string           `json:"name"`
-	GameVersions []string         `json:"game_versions"`
-	Loaders      []string         `json:"loaders"`
-	DatePublished time.Time       `json:"date_published"`
-	Files        []fileResponse   `json:"files"`
-	Dependencies []depResponse    `json:"dependencies"`
+	ID            string         `json:"id"`
+	ProjectID     string         `json:"project_id"`
+	VersionNum    string         `json:"version_number"`
+	Name          string         `json:"name"`
+	VersionType   string         `json:"version_type"` // "release", "beta", "alpha"
+	GameVersions  []string       `json:"game_versions"`
+	Loaders       []string       `json:"loaders"`
+	DatePublished time.Time     `json:"date_published"`
+	Files         []fileResponse `json:"files"`
+	Dependencies  []depResponse  `json:"dependencies"`
 }
 
 type fileResponse struct {
@@ -276,14 +277,18 @@ func (c *Client) GetProjectVersions(
 		files := make([]content.ModFile, 0, len(rv.Files))
 		for _, rf := range rv.Files {
 			files = append(files, content.ModFile{
-				ID:        rf.FileName,
-				VersionID: rv.ID,
-				FileName:  rf.FileName,
-				URL:       rf.URL,
-				Size:      rf.Size,
-				SHA1:      rf.Hashes.SHA1,
-				SHA512:    rf.Hashes.SHA512,
-				Primary:   rf.Primary,
+				ID:           rf.FileName,
+				VersionID:    rv.ID,
+				FileName:     rf.FileName,
+				URL:          rf.URL,
+				Size:         rf.Size,
+				SHA1:         rf.Hashes.SHA1,
+				SHA512:       rf.Hashes.SHA512,
+				Primary:      rf.Primary,
+				ReleaseType:  rv.VersionType,
+				FileDate:     rv.DatePublished,
+				GameVersions: rv.GameVersions,
+				Loaders:      rv.Loaders,
 			})
 		}
 
@@ -312,6 +317,7 @@ func (c *Client) GetProjectVersions(
 			ProjectID:    rv.ProjectID,
 			VersionNum:   rv.VersionNum,
 			Name:         rv.Name,
+			VersionType:  rv.VersionType,
 			GameVersions: rv.GameVersions,
 			Loaders:      rv.Loaders,
 			Files:        files,
