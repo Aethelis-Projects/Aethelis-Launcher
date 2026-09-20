@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/content"
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 )
 
 const (
 	DefaultBaseURL = "https://api.modrinth.com"
-	DefaultUserAgent = "Nord-Launcher/0.1.0 (contact@nordlauncher.io)"
 )
+
+var DefaultUserAgent = netutil.FormatUserAgent("0.5.0")
 
 type Client struct {
 	baseURL    string
@@ -30,12 +32,18 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 		baseURL = DefaultBaseURL
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = netutil.NewHTTPClient("0.5.0", 30*time.Second)
 	}
 	return &Client{
 		baseURL:    baseURL,
 		httpClient: httpClient,
 		userAgent:  DefaultUserAgent,
+	}
+}
+
+func (c *Client) SetUserAgent(ua string) {
+	if ua != "" {
+		c.userAgent = ua
 	}
 }
 

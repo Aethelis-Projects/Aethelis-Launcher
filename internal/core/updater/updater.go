@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 )
 
 var (
@@ -82,7 +84,7 @@ type AutoUpdater struct {
 
 func NewAutoUpdater(currentVersion, manifestURL string, publicKey ed25519.PublicKey, client *http.Client) *AutoUpdater {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = netutil.NewHTTPClient(currentVersion, 30*time.Second)
 	}
 	return &AutoUpdater{
 		currentVersion: currentVersion,
@@ -110,6 +112,12 @@ func (u *AutoUpdater) CheckForUpdates(ctx context.Context) (*UpdateInfo, error) 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.manifestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create update check request: %w", err)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", netutil.FormatUserAgent(u.currentVersion))
+	}
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/json")
 	}
 
 	resp, err := u.httpClient.Do(req)
@@ -171,6 +179,12 @@ func (u *AutoUpdater) DownloadAndApply(ctx context.Context, asset PlatformAsset,
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.URL, nil)
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
+	}
+	if req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", netutil.FormatUserAgent(u.currentVersion))
+	}
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/octet-stream")
 	}
 
 	resp, err := u.httpClient.Do(req)

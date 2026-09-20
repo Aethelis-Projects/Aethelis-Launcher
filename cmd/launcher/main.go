@@ -28,6 +28,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
 )
@@ -54,13 +55,13 @@ func main() {
 	keyRing := keyring.NewSystemKeyring()
 	sysClock := clock.NewRealClock()
 
-	// 2. Tuned Shared HTTP Client with Connection Pooling
+	// 2. Tuned Shared HTTP Client with Connection Pooling and Authentic User-Agent
 	sharedHTTPClient := &http.Client{
-		Transport: &http.Transport{
+		Transport: netutil.NewTransport(version, &http.Transport{
 			MaxIdleConns:        50,
 			MaxIdleConnsPerHost: 10,
 			IdleConnTimeout:     90 * time.Second,
-		},
+		}),
 		Timeout: 30 * time.Second,
 	}
 
@@ -117,7 +118,9 @@ func main() {
 	authAPIClient := auth.NewAPIClient(sharedHTTPClient, auth.DefaultEndpoints())
 	authSvc := auth.NewAuthService(msClientID, authAPIClient, accRepo, keyRing)
 	mrClient := modrinth.NewClient(modrinth.DefaultBaseURL, sharedHTTPClient)
+	mrClient.SetUserAgent(netutil.FormatUserAgent(version))
 	cfClient := curseforge.NewClient(curseforge.DefaultBaseURL, cfKey, sharedHTTPClient)
+	cfClient.SetVersion(version)
 
 	// Java detector and manager with local instance and runtime directory scanning
 	runtimesDir := filepath.Join(dbDir, "runtimes")
@@ -130,6 +133,7 @@ func main() {
 
 	// Game provisioner
 	fabricClient := loaders.NewFabricClient(loaders.DefaultFabricMetaURL, sharedHTTPClient)
+	fabricClient.SetVersion(version)
 	httpAdapter := httpadapter.NewHTTPClient(30 * time.Second)
 	gameProvisioner := game.NewGameService(httpAdapter, fileSys, dbDir)
 	gameProvisioner.SetFabricClient(fabricClient)

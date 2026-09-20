@@ -6,6 +6,7 @@ import (
 	"crypto/sha512"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -29,6 +30,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
+	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
@@ -1142,6 +1144,22 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 	if err != nil {
 		installErr = fmt.Errorf("create download request: %w", err)
 		return nil, installErr
+	}
+	if httpReq.Header.Get("User-Agent") == "" {
+		httpReq.Header.Set("User-Agent", netutil.FormatUserAgent(a.GetCurrentVersion()))
+	}
+	if httpReq.Header.Get("Accept") == "" {
+		httpReq.Header.Set("Accept", "*/*")
+	}
+	if req.Source == "modrinth" {
+		metaObj := map[string]string{
+			"reason":       "standalone",
+			"game_version": gameVersion,
+			"loader":       loader,
+		}
+		if metaBytes, err := json.Marshal(metaObj); err == nil {
+			httpReq.Header.Set("modrinth-download-meta", string(metaBytes))
+		}
 	}
 
 	resp, err := downloadClient.Do(httpReq)
