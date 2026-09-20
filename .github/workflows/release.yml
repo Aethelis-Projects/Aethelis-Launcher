@@ -277,7 +277,7 @@ jobs:
           fi
         shell: bash
 
-      - name: Generate Signed Ed25519 Update Manifest
+      - name: Generate Signed Ed25519 Update Manifest & Release Body
         env:
           ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
         run: |
@@ -285,7 +285,23 @@ jobs:
             -version "${{ github.ref_name }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
             -dist release-assets \
-            -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json"
+            -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json" \
+            -out-body "release-body.md"
+
+      - name: Verify Release Body Length & Content
+        run: |
+          if [ ! -f "release-body.md" ]; then
+            echo "ERROR: release-body.md was not generated!"
+            exit 1
+          fi
+          BODY_LEN=$(wc -c < release-body.md)
+          echo "Release body length: $BODY_LEN bytes"
+          if [ "$BODY_LEN" -lt 300 ]; then
+            echo "ERROR: Release body too short ($BODY_LEN bytes < 300 bytes threshold). Check CHANGELOG.md extraction!"
+            exit 1
+          fi
+          echo "PASS: Release body verified ($BODY_LEN bytes)."
+        shell: bash
 
       - name: Generate Checksums
         working-directory: release-assets
@@ -299,10 +315,7 @@ jobs:
           draft: false
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           name: ${{ github.ref_name }}
-          body: |
-            Nord Launcher ${{ github.ref_name }} (${{ steps.meta.outputs.channel }} channel release).
-
-            **Full Changelog**: https://github.com/Aethelis-Projects/Aethelis-Launcher/compare/v0.1.0...${{ github.ref_name }}
+          body_path: release-body.md
 
       - name: Verify Published Release Assets (N2 Assert 4)
         env:

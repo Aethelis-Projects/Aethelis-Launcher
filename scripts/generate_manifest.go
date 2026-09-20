@@ -28,6 +28,7 @@ func main() {
 		privKeyEnv          = flag.String("privkey-hex", "", "Hex-encoded Ed25519 private key (optional, falls back to ED25519_PRIVATE_KEY)")
 		allowInsecureDevKey = flag.Bool("allow-insecure-dev-key", false, "Allow fallback to insecure hardcoded staging private key for local development")
 		changelogFile       = flag.String("changelog-file", "CHANGELOG.md", "Path to CHANGELOG.md to extract release notes")
+		bodyFile            = flag.String("out-body", "", "Output release notes markdown path for GitHub Release body (optional)")
 	)
 	flag.Parse()
 
@@ -208,6 +209,16 @@ func main() {
 	}
 
 	fmt.Printf("[Manifest] Generated signed update manifest: %s\n", outPath)
+
+	if *bodyFile != "" {
+		bodyContent := BuildReleaseBody(cleanVersion, *channelFlag, changelogText)
+		_ = os.MkdirAll(filepath.Dir(*bodyFile), 0755)
+		if err := os.WriteFile(*bodyFile, []byte(bodyContent), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write release body to %s: %v\n", *bodyFile, err)
+			os.Exit(1)
+		}
+		fmt.Printf("[Manifest] Generated release body: %s (%d bytes)\n", *bodyFile, len(bodyContent))
+	}
 }
 
 // ExtractChangelog extracts the release notes for targetVersion from changelogContent.
@@ -243,3 +254,11 @@ func ExtractChangelog(content, version string, maxBytes int) string {
 	}
 	return result
 }
+
+// BuildReleaseBody constructs the markdown release notes body for GitHub Releases.
+func BuildReleaseBody(version, channel, changelog string) string {
+	cleanVer := strings.TrimPrefix(version, "v")
+	tagVersion := "v" + cleanVer
+	return fmt.Sprintf("## Nord Launcher %s (%s channel release)\n\n### Changelog\n\n%s\n\n---\n**Full Changelog**: https://github.com/Aethelis-Projects/Aethelis-Launcher/compare/v0.1.0...%s\n", tagVersion, channel, changelog, tagVersion)
+}
+

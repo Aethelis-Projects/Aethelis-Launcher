@@ -69,3 +69,17 @@ old
 		t.Fatalf("expected capped changelog to end with '...', got: %s", extractedCapped)
 	}
 }
+
+func TestBuildReleaseBody(t *testing.T) {
+	body := BuildReleaseBody("0.5.0", "stable", "### Added\n- Real feature")
+	if !strings.Contains(body, "## Nord Launcher v0.5.0 (stable channel release)") {
+		t.Errorf("expected body to contain title header, got: %s", body)
+	}
+	if !strings.Contains(body, "### Added\n- Real feature") {
+		t.Errorf("expected body to contain changelog, got: %s", body)
+	}
+	if !strings.Contains(body, "compare/v0.1.0...v0.5.0") {
+		t.Errorf("expected body to contain full changelog link, got: %s", body)
+	}
+}
+
