@@ -1,7 +1,7 @@
 {
   "$schema": "https://wails.io/schemas/config.v3.json",
   "name": "NordLauncher",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "High-performance, resource-efficient Minecraft launcher",
   "author": {
     "name": "Nord Launcher Team",
@@ -10,7 +10,7 @@
   "info": {
     "companyName": "Nord Project",
     "productName": "Nord Launcher",
-    "productVersion": "0.4.0",
+    "productVersion": "0.5.0",
     "copyright": "Copyright 2026 Nord Project. GPLv3 licensed."
   },
   "frontend:dir": "frontend",

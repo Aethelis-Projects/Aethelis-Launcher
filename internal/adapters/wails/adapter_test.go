@@ -388,10 +388,12 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"AddJavaRuntime",
 		"ListModVersions",
 		"GetModInstallStatus",
+		"CheckModUpdates",
+		"GetDiagnosticReport",
 	}
 
-	if len(expectedMethods) != 29 {
-		t.Fatalf("expected exactly 29 Wails methods, got %d", len(expectedMethods))
+	if len(expectedMethods) != 31 {
+		t.Fatalf("expected exactly 31 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1743,6 +1745,153 @@ func TestWailsAdapter_ManifestReconcileAndDualFileDelete(t *testing.T) {
 		if m.Name == "mod-beta" {
 			t.Errorf("expected mod-beta to be pruned after external disk removal")
 		}
+	}
+}
+
+func TestWailsAdapter_CheckModUpdates(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+
+	// Empty instance ID should fail
+	_, err := adapter.CheckModUpdates("")
+	if err == nil {
+		t.Fatalf("expected error on empty instance ID")
+	}
+
+	tmpDir := t.TempDir()
+	instDir := filepath.Join(tmpDir, "instances")
+	instID := "test-updates-inst"
+	modsDir := filepath.Join(instDir, instID, "mods")
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		t.Fatalf("failed to create mods dir: %v", err)
+	}
+
+	adapter.SetFileSystem(fs.NewOSFileSystem(), instDir)
+
+	// Mock server for Modrinth versions
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/project/mod-alpha/version") {
+			versions := []map[string]interface{}{
+				{
+					"id":             "ver-2.0.0",
+					"project_id":     "mod-alpha",
+					"name":           "Alpha 2.0.0",
+					"version_number": "2.0.0",
+					"game_versions":  []string{"1.21.1"},
+					"loaders":        []string{"fabric"},
+					"files": []map[string]interface{}{
+						{
+							"url":      "http://example.com/alpha-2.0.0.jar",
+							"filename": "alpha-2.0.0.jar",
+							"primary":  true,
+							"size":     1024,
+							"hashes":   map[string]string{"sha1": "abcd"},
+						},
+					},
+				},
+			}
+			_ = json.NewEncoder(w).Encode(versions)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	mrClient := modrinth.NewClient(server.URL, server.Client())
+	adapter.SetContent(mrClient, nil)
+
+	// Case 1: Empty mods directory -> 0 updates
+	updates, err := adapter.CheckModUpdates(instID)
+	if err != nil {
+		t.Fatalf("CheckModUpdates failed on empty mods: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("expected 0 updates, got %d", len(updates))
+	}
+
+	// Case 2: Mod installed with older version ver-1.0.0
+	jarPath := filepath.Join(modsDir, "alpha-1.0.0.jar")
+	if err := os.WriteFile(jarPath, []byte("alpha-content"), 0644); err != nil {
+		t.Fatalf("write jar failed: %v", err)
+	}
+	manifestContent := []byte(`{
+		"schema_version": 1,
+		"mods": {
+			"alpha-1.0.0": {
+				"mod_id": "mod-alpha",
+				"mod_name": "Alpha Mod",
+				"file_name": "alpha-1.0.0.jar",
+				"source": "modrinth",
+				"version_id": "ver-1.0.0",
+				"installed_at": "2026-09-20T12:00:00Z"
+			}
+		}
+	}`)
+	if err := os.WriteFile(filepath.Join(modsDir, "nord-installs.json"), manifestContent, 0644); err != nil {
+		t.Fatalf("save manifest failed: %v", err)
+	}
+
+	updates, err = adapter.CheckModUpdates(instID)
+	if err != nil {
+		t.Fatalf("CheckModUpdates failed: %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	if updates[0].ModID != "mod-alpha" || updates[0].FileName != "alpha-1.0.0.jar" || updates[0].LatestVersionID != "alpha-2.0.0.jar" {
+		t.Fatalf("unexpected update DTO: %+v", updates[0])
+	}
+}
+
+func TestWailsAdapter_GetDiagnosticReport(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetVersion("0.5.0")
+
+	tmpDir := t.TempDir()
+	instDir := filepath.Join(tmpDir, "instances")
+	instID := "test-diag-inst"
+	modsDir := filepath.Join(instDir, instID, "mods")
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		t.Fatalf("failed to create mods dir: %v", err)
+	}
+	adapter.SetFileSystem(fs.NewOSFileSystem(), instDir)
+
+	dbPath := filepath.Join(tmpDir, "test_settings.db")
+	db, err := storage.OpenDatabase(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("db migrate: %v", err)
+	}
+
+	settingsRepo := storage.NewSettingsRepository(db)
+	_ = settingsRepo.Set(context.Background(), "curseforge_api_key", "secret-cf-api-key-12345")
+	_ = settingsRepo.Set(context.Background(), "theme", "nord-dark")
+	adapter.SetSettings(settingsRepo)
+
+	report, err := adapter.GetDiagnosticReport(instID)
+	if err != nil {
+		t.Fatalf("GetDiagnosticReport failed: %v", err)
+	}
+
+	if !strings.Contains(report, "=== Nord Launcher Diagnostic Report ===") {
+		t.Errorf("expected diagnostic header in report")
+	}
+	if !strings.Contains(report, "Launcher Version: 0.5.0") {
+		t.Errorf("expected launcher version in report")
+	}
+	if !strings.Contains(report, "OS:") || !strings.Contains(report, "Architecture:") {
+		t.Errorf("expected OS and architecture in report")
+	}
+	if !strings.Contains(report, "theme: nord-dark") {
+		t.Errorf("expected theme in report")
+	}
+	if strings.Contains(report, "secret-cf-api-key-12345") {
+		t.Errorf("SECURITY LEAK: raw CurseForge API key was present in diagnostic report")
+	}
+	if !strings.Contains(report, "curseforge_api_key: [SET]") {
+		t.Errorf("expected masked curseforge_api_key: [SET] in report")
 	}
 }
 

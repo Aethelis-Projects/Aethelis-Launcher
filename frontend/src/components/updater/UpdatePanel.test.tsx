@@ -13,15 +13,15 @@ describe("UpdatePanel Component", () => {
     render(() => <UpdatePanel channel="stable" />);
     expect(screen.getByText("Software Updates")).toBeTruthy();
     expect(screen.getByText("Channel: stable")).toBeTruthy();
-    expect(await screen.findByText("v0.4.0")).toBeTruthy();
+    expect(await screen.findByText("v0.5.0")).toBeTruthy();
     expect(screen.getByTestId("check-updates-button").textContent).toContain("Check for updates");
   });
 
   it("shows up to date banner when no new version exists", async () => {
     launcherAPI.setMockUpdateInfo({
       has_update: false,
-      version: "0.4.0",
-      current_version: "0.4.0",
+      version: "0.5.0",
+      current_version: "0.5.0",
       release_date: "2026-09-20T12:00:00Z",
       release_notes: "Latest stable version",
       download_url: "",
@@ -40,10 +40,10 @@ describe("UpdatePanel Component", () => {
   it("displays update available card with changelog and download size", async () => {
     launcherAPI.setMockUpdateInfo({
       has_update: true,
-      version: "0.4.1",
-      current_version: "0.4.0",
+      version: "0.5.1",
+      current_version: "0.5.0",
       release_date: "2026-09-25T10:00:00Z",
-      release_notes: "Nord Launcher v0.4.1: Performance improvements.",
+      release_notes: "Nord Launcher v0.5.1: Performance improvements.",
       download_url: "https://example.com/download/NordLauncher.exe",
       sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       size: 18350080, // ~17.5 MB
@@ -56,7 +56,7 @@ describe("UpdatePanel Component", () => {
     fireEvent.click(checkBtn);
 
     const card = await screen.findByTestId("update-available-card");
-    expect(card.textContent).toContain("Nord Launcher v0.4.1");
+    expect(card.textContent).toContain("Nord Launcher v0.5.1");
     expect(card.textContent).toContain("17.50 MB");
     expect(screen.getByTestId("changelog-text").textContent).toContain("Performance improvements");
     expect(screen.getByTestId("ed25519-status-line").textContent).toContain("Цифровая подпись Ed25519 проверена");
@@ -66,8 +66,8 @@ describe("UpdatePanel Component", () => {
   it("renders safe markdown-lite changelog without innerHTML (B2, C4)", async () => {
     launcherAPI.setMockUpdateInfo({
       has_update: true,
-      version: "0.5.0",
-      current_version: "0.4.0",
+      version: "0.5.1",
+      current_version: "0.5.0",
       release_date: "2026-09-20T12:00:00Z",
       release_notes: "### Added\n- Feature One\n- Feature Two\n\n### Fixed\n- Bug Fix",
       download_url: "https://example.com/download/NordLauncher.exe",
@@ -91,8 +91,8 @@ describe("UpdatePanel Component", () => {
   it("triggers applyUpdate on download button click and transitions to restart banner", async () => {
     launcherAPI.setMockUpdateInfo({
       has_update: true,
-      version: "0.4.1",
-      current_version: "0.4.0",
+      version: "0.5.1",
+      current_version: "0.5.0",
       release_date: "2026-09-25T10:00:00Z",
       release_notes: "Feature release",
       download_url: "https://example.com/download",
@@ -113,8 +113,8 @@ describe("UpdatePanel Component", () => {
   it("invokes restartApplication when restart button is clicked", async () => {
     launcherAPI.setMockUpdateInfo({
       has_update: true,
-      version: "0.4.1",
-      current_version: "0.4.0",
+      version: "0.5.1",
+      current_version: "0.5.0",
       release_date: "2026-09-25T10:00:00Z",
       release_notes: "Feature release",
       download_url: "https://example.com/download",

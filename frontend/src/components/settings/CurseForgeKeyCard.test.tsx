@@ -102,4 +102,24 @@ describe("CurseForgeKeyCard Component (B5, N6, R2)", () => {
       expect(input.value).toBe("custom-overridden-key");
     });
   });
+
+  it("collects diagnostic report and copies to clipboard", async () => {
+    const getReportSpy = vi.spyOn(launcherAPI, "getDiagnosticReport").mockResolvedValue("=== Mock Diag Report ===");
+    Object.assign(navigator, {
+      clipboard: {
+        writeText: vi.fn().mockResolvedValue(undefined),
+      },
+    });
+
+    render(() => <CurseForgeKeyCard />);
+
+    const diagBtn = await screen.findByTestId("diag-pack-btn");
+    expect(diagBtn.textContent).toContain("Собрать диаг-пак");
+    fireEvent.click(diagBtn);
+
+    const status = await screen.findByTestId("diag-pack-status");
+    expect(status.textContent).toContain("Диагностический отчёт скопирован в буфер обмена");
+    expect(getReportSpy).toHaveBeenCalledWith("");
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("=== Mock Diag Report ===");
+  });
 });

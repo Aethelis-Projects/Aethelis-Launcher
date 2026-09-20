@@ -4,6 +4,7 @@ import type {
   UpdateInstanceRequest,
   LaunchResponse,
   AccountDTO,
+  ModSource,
   ModItemDTO,
   InstalledModDTO,
   CrashReportDTO,
@@ -22,6 +23,7 @@ import type {
   InstallModResponse,
   JavaInstallationDTO,
   JavaDownloadStatusDTO,
+  ModUpdateItemDTO,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -54,6 +56,8 @@ interface WailsAdapterBindings {
   GetJavaDownloadStatus?: () => Promise<JavaDownloadStatusDTO>;
   RemoveJavaRuntime?: (path: string) => Promise<void>;
   AddJavaRuntime?: (path: string) => Promise<JavaInstallationDTO>;
+  CheckModUpdates?: (instanceId: string) => Promise<ModUpdateItemDTO[]>;
+  GetDiagnosticReport?: (instanceId: string) => Promise<string>;
   [key: string]: unknown;
 }
 
@@ -268,10 +272,10 @@ const mockModCatalog: ModItemDTO[] = [
 
 let mockUpdateInfo: UpdateInfoDTO = {
   has_update: false,
-  version: "0.4.0",
-  current_version: "0.4.0",
+  version: "0.5.0",
+  current_version: "0.5.0",
   release_date: "2026-09-20T12:00:00Z",
-  release_notes: "Nord Launcher v0.4.0 (stable channel) release.",
+  release_notes: "Nord Launcher v0.5.0 (stable channel) release.",
   download_url: "",
   sha256: "",
   size: 0,
@@ -326,10 +330,10 @@ export const launcherAPI = {
   resetMockUpdater(): void {
     mockUpdateInfo = {
       has_update: false,
-      version: "0.4.0",
-      current_version: "0.4.0",
+      version: "0.5.0",
+      current_version: "0.5.0",
       release_date: "2026-09-20T12:00:00Z",
-      release_notes: "Nord Launcher v0.4.0 (stable channel) release.",
+      release_notes: "Nord Launcher v0.5.0 (stable channel) release.",
       download_url: "",
       sha256: "",
       size: 0,
@@ -342,7 +346,7 @@ export const launcherAPI = {
   },
 
   async getCurrentVersion(): Promise<string> {
-    return invokeWails("GetCurrentVersion", () => "0.4.0");
+    return invokeWails("GetCurrentVersion", () => "0.5.0");
   },
 
   async listInstances(): Promise<InstanceDTO[]> {
@@ -563,18 +567,24 @@ export const launcherAPI = {
     );
   },
 
-  async installMod(instanceId: string, mod: ModItemDTO, versionId?: string): Promise<InstallModResponse> {
+  async installMod(
+    instanceId: string,
+    mod: ModItemDTO | { id: string; source: ModSource; name?: string; slug?: string },
+    versionId?: string
+  ): Promise<InstallModResponse> {
+    const modSlug = ("slug" in mod && mod.slug) ? mod.slug : mod.id;
+    const modName = ("name" in mod && mod.name) ? mod.name : mod.id;
     const res = await invokeWails<InstallModResponse>(
       "InstallMod",
       () => {
         if (!mockInstalledMods[instanceId]) {
           mockInstalledMods[instanceId] = [];
         }
-        const fileName = `${mod.slug}-1.0.0.jar`;
+        const fileName = `${modSlug}-1.0.0.jar`;
         mockInstalledMods[instanceId].push({
           file_name: fileName,
-          mod_id: mod.slug,
-          name: mod.name,
+          mod_id: modSlug,
+          name: modName,
           version: versionId || "1.0.0",
           enabled: true,
           size_bytes: 1572864,
@@ -699,11 +709,31 @@ export const launcherAPI = {
     );
   },
 
+  async checkModUpdates(instanceId: string): Promise<ModUpdateItemDTO[]> {
+    return invokeWails<ModUpdateItemDTO[]>(
+      "CheckModUpdates",
+      () => [],
+      instanceId
+    );
+  },
+
+  async getDiagnosticReport(instanceId: string): Promise<string> {
+    return invokeWails<string>(
+      "GetDiagnosticReport",
+      () => "=== Nord Launcher Diagnostic Report (Mock) ===\nLauncher Version: 0.5.0",
+      instanceId
+    );
+  },
+
   setMockJavaRuntimes(runtimes: JavaInstallationDTO[]): void {
     mockJavaRuntimes = [...runtimes];
   },
 
   setMockJavaDownloadStatus(status: JavaDownloadStatusDTO): void {
     mockJavaDownloadStatus = { ...status };
+  },
+
+  setMockInstalledMods(instanceId: string, mods: InstalledModDTO[]): void {
+    mockInstalledMods[instanceId] = [...mods];
   },
 };
