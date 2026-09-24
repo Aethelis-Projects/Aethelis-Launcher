@@ -376,4 +376,70 @@ describe("ModCatalog Component", () => {
     expect(screen.queryByTestId("mods-rate-limit-banner")).toBeNull();
     expect(searchSpy).toHaveBeenCalledTimes(3);
   });
+
+  it("toggles version changelog viewer when changelog is present (M2)", async () => {
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [
+        {
+          id: "mod-sodium",
+          slug: "sodium",
+          source: "modrinth",
+          name: "Sodium",
+          author: "jellysquid",
+          summary: "Optimization mod",
+          downloads: 100000,
+          categories: ["optimization"],
+        },
+      ],
+      total_count: 1,
+    });
+
+    vi.spyOn(launcherAPI, "listModVersions").mockResolvedValue([
+      {
+        id: "file-sodium-1",
+        mod_id: "mod-sodium",
+        display_name: "Sodium 0.5.8",
+        file_name: "sodium-fabric-0.5.8.jar",
+        file_size: 1024000,
+        file_date: "2024-08-01T00:00:00Z",
+        download_url: "https://cdn.modrinth.com/sodium.jar",
+        release_type: "release",
+        game_versions: ["1.21.1"],
+        loaders: ["fabric"],
+        changelog: "Fix memory leak in chunk meshing\nImproved rendering pipeline",
+      },
+    ]);
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    const modCard = await screen.findByText("Sodium");
+    expect(modCard).toBeTruthy();
+
+    const expandVersionsBtn = await screen.findByTestId("mod-versions-toggle-mod-sodium");
+    fireEvent.click(expandVersionsBtn);
+
+    const toggleChangelogBtn = await screen.findByTestId("toggle-changelog-file-sodium-1");
+    expect(toggleChangelogBtn).toBeTruthy();
+
+    // Changelog viewer is initially hidden
+    expect(screen.queryByTestId("changelog-viewer-file-sodium-1")).toBeNull();
+
+    // Click toggle to show changelog
+    fireEvent.click(toggleChangelogBtn);
+
+    // Changelog viewer should now be visible
+    const viewer = await screen.findByTestId("changelog-viewer-file-sodium-1");
+    expect(viewer.textContent).toContain("Fix memory leak in chunk meshing");
+    expect(viewer.textContent).toContain("Improved rendering pipeline");
+
+    // Click toggle again to collapse
+    fireEvent.click(toggleChangelogBtn);
+    expect(screen.queryByTestId("changelog-viewer-file-sodium-1")).toBeNull();
+  });
 });

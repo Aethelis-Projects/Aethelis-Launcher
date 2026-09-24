@@ -134,4 +134,53 @@ describe("JavaManager Component (J1)", () => {
       expect(removeSpy).toHaveBeenCalledWith("C:\\Nord\\runtimes\\adoptium-17-17.0.10\\bin\\java.exe");
     });
   });
+
+  it("displays update available badge and executes upgrade when upgrade button is clicked (M3)", async () => {
+    vi.spyOn(launcherAPI, "checkJavaRuntimeUpdates").mockResolvedValue([
+      {
+        major_version: 21,
+        current_version: "21.0.2",
+        latest_version: "21.0.3",
+        update_available: true,
+      },
+    ]);
+    const upgradeSpy = vi.spyOn(launcherAPI, "upgradeJavaRuntime").mockResolvedValue({
+      path: "C:\\Nord\\runtimes\\adoptium-21-21.0.3\\bin\\java.exe",
+      home_dir: "C:\\Nord\\runtimes\\adoptium-21-21.0.3",
+      major_version: 21,
+      full_version: "21.0.3",
+      vendor: "Eclipse Adoptium",
+      kind: "managed",
+      used_by: ["Nordic 1.21"],
+    });
+
+    render(() => <JavaManager />);
+
+    const badge = await screen.findByTestId("java-update-badge-21");
+    expect(badge.textContent).toContain("Доступна 21.0.3");
+
+    const upgradeBtn = screen.getByTestId("java-upgrade-button-21");
+    fireEvent.click(upgradeBtn);
+
+    await vi.waitFor(() => {
+      expect(upgradeSpy).toHaveBeenCalledWith(21);
+    });
+  });
+
+  it("displays unused badge and cleans all unused managed runtimes with bulk button (M3)", async () => {
+    const removeSpy = vi.spyOn(launcherAPI, "removeJavaRuntime").mockResolvedValue();
+
+    render(() => <JavaManager />);
+
+    const unusedBadge = await screen.findByTestId("java-unused-badge-17");
+    expect(unusedBadge.textContent).toContain("Не используется");
+
+    const cleanBtn = await screen.findByTestId("clean-unused-runtimes-button");
+    expect(cleanBtn.textContent).toContain("Очистить неиспользуемые");
+    fireEvent.click(cleanBtn);
+
+    await vi.waitFor(() => {
+      expect(removeSpy).toHaveBeenCalledWith("C:\\Nord\\runtimes\\adoptium-17-17.0.10\\bin\\java.exe");
+    });
+  });
 });

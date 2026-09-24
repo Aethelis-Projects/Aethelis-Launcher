@@ -1,5 +1,5 @@
 import { Component, createSignal, createResource, For, Show, onMount, onCleanup } from "solid-js";
-import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle, ChevronDown, AlertTriangle } from "lucide-solid";
+import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle, ChevronDown, AlertTriangle, FileText } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { ModItemDTO, ModSource, ModFileDTO, ModInstallProgressDTO } from "../../bindings/ipc_types";
 
@@ -53,6 +53,19 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const [expandedModId, setExpandedModId] = createSignal<string | null>(null);
   const [loadingVersions, setLoadingVersions] = createSignal(false);
   const [modVersions, setModVersions] = createSignal<Record<string, ModFileDTO[]>>({});
+  const [expandedChangelogIds, setExpandedChangelogIds] = createSignal<Set<string>>(new Set());
+
+  const toggleChangelog = (fileId: string) => {
+    setExpandedChangelogIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) {
+        next.delete(fileId);
+      } else {
+        next.add(fileId);
+      }
+      return next;
+    });
+  };
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let countdownTimer: ReturnType<typeof setInterval> | null = null;
@@ -607,50 +620,79 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
                             file.loaders.some((l) => l.toLowerCase() === props.loader.toLowerCase());
 
                           return (
-                            <div class="flex items-center justify-between pt-1.5 text-xs">
-                              <div class="flex items-center gap-2 min-w-0">
-                                {/* Release type badge */}
-                                <span
-                                  class={`text-[10px] font-mono px-1.5 py-0.5 rounded border uppercase ${
-                                    file.release_type === "release"
-                                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                                      : file.release_type === "beta"
-                                      ? "bg-blue-500/10 border-blue-500/30 text-blue-400"
-                                      : "bg-amber-500/10 border-amber-500/30 text-amber-400"
-                                  }`}
-                                >
-                                  {file.release_type}
-                                </span>
-
-                                <span class="font-mono text-zinc-200 truncate">
-                                  {file.display_name || file.file_name}
-                                </span>
-
-                                <span class="text-[10px] font-mono text-zinc-500 shrink-0">
-                                  {formatFileSize(file.file_size)}
-                                </span>
-
-                                {/* Fallback warning badge */}
-                                <Show when={!isMatch}>
+                            <div class="py-2 border-b border-zinc-800/40 last:border-b-0 space-y-1.5 text-xs">
+                              <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-2 min-w-0">
+                                  {/* Release type badge */}
                                   <span
-                                    class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center gap-1 shrink-0"
-                                    data-testid="fallback-warning-badge"
+                                    class={`text-[10px] font-mono px-1.5 py-0.5 rounded border uppercase ${
+                                      file.release_type === "release"
+                                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                                        : file.release_type === "beta"
+                                        ? "bg-blue-500/10 border-blue-500/30 text-blue-400"
+                                        : "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                                    }`}
                                   >
-                                    <AlertTriangle class="w-3 h-3 text-amber-400" />
-                                    не проверено под {props.gameVersion}
+                                    {file.release_type}
                                   </span>
-                                </Show>
+
+                                  <span class="font-mono text-zinc-200 truncate">
+                                    {file.display_name || file.file_name}
+                                  </span>
+
+                                  <span class="text-[10px] font-mono text-zinc-500 shrink-0">
+                                    {formatFileSize(file.file_size)}
+                                  </span>
+
+                                  {/* Fallback warning badge */}
+                                  <Show when={!isMatch}>
+                                    <span
+                                      class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 flex items-center gap-1 shrink-0"
+                                      data-testid="fallback-warning-badge"
+                                    >
+                                      <AlertTriangle class="w-3 h-3 text-amber-400" />
+                                      не проверено под {props.gameVersion}
+                                    </span>
+                                  </Show>
+                                </div>
+
+                                <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                                  {/* Changelog Toggle (M2) */}
+                                  <Show when={file.changelog}>
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleChangelog(file.id)}
+                                      class="px-2 py-1 rounded text-[11px] font-mono text-zinc-400 hover:text-zinc-200 bg-white/5 hover:bg-white/10 flex items-center gap-1 transition-colors cursor-pointer"
+                                      title="История изменений"
+                                      data-testid={`toggle-changelog-${file.id}`}
+                                    >
+                                      <FileText class="w-3 h-3 text-[#00D4B2]" />
+                                      <span>Изменения</span>
+                                      <ChevronDown class={`w-2.5 h-2.5 transition-transform ${expandedChangelogIds().has(file.id) ? "rotate-180" : ""}`} />
+                                    </button>
+                                  </Show>
+
+                                  <button
+                                    type="button"
+                                    disabled={isInstalling()}
+                                    onClick={() => handleInstall(mod, file.id)}
+                                    class="px-2 py-1 rounded text-[11px] font-medium bg-zinc-800 hover:bg-[#00D4B2] hover:text-zinc-950 text-zinc-300 transition-colors cursor-pointer"
+                                    data-testid={`install-version-${file.id}`}
+                                  >
+                                    Установить
+                                  </button>
+                                </div>
                               </div>
 
-                              <button
-                                type="button"
-                                disabled={isInstalling()}
-                                onClick={() => handleInstall(mod, file.id)}
-                                class="px-2 py-1 rounded text-[11px] font-medium bg-zinc-800 hover:bg-[#00D4B2] hover:text-zinc-950 text-zinc-300 transition-colors cursor-pointer shrink-0 ml-2"
-                                data-testid={`install-version-${file.id}`}
-                              >
-                                Установить
-                              </button>
+                              {/* Expandable Changelog Viewer (M2) */}
+                              <Show when={expandedChangelogIds().has(file.id) && file.changelog}>
+                                <div
+                                  class="p-2.5 rounded-lg bg-black/40 border border-white/5 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto"
+                                  data-testid={`changelog-viewer-${file.id}`}
+                                >
+                                  {file.changelog}
+                                </div>
+                              </Show>
                             </div>
                           );
                         }}
