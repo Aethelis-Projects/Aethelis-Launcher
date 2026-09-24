@@ -20,6 +20,7 @@ type JavaManager struct {
 	detector    ports.JavaDetector
 	instRepo    ports.InstanceRepository
 	provisioner *AdoptiumRuntimeService
+	client      *AdoptiumClient
 	mu          sync.RWMutex
 }
 
@@ -29,12 +30,14 @@ func NewJavaManager(
 	instRepo ports.InstanceRepository,
 	httpClient *http.Client,
 ) *JavaManager {
-	provisioner := NewAdoptiumRuntimeService(managedDir, nil, httpClient)
+	client := NewAdoptiumClient(DefaultAdoptiumBaseURL, httpClient)
+	provisioner := NewAdoptiumRuntimeService(managedDir, client, httpClient)
 	return &JavaManager{
 		managedDir:  managedDir,
 		detector:    detector,
 		instRepo:    instRepo,
 		provisioner: provisioner,
+		client:      client,
 	}
 }
 
@@ -42,6 +45,15 @@ func (m *JavaManager) SetProvisioner(p *AdoptiumRuntimeService) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.provisioner = p
+}
+
+func (m *JavaManager) SetClient(c *AdoptiumClient) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.client = c
+	if m.provisioner != nil {
+		m.provisioner.SetClient(c)
+	}
 }
 
 func (m *JavaManager) GetDownloadStatus() JavaDownloadStatusDTO {
@@ -254,6 +266,182 @@ func (m *JavaManager) RemoveRuntime(path string) error {
 	}
 
 	return nil
+}
+
+// CheckRuntimeUpdates inspects installed managed Java runtimes and checks if newer releases
+// are available from Adoptium.
+func (m *JavaManager) CheckRuntimeUpdates(ctx context.Context) ([]JavaRuntimeUpdate, error) {
+	runtimes, err := m.ListRuntimes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list runtimes: %w", err)
+	}
+
+	m.mu.RLock()
+	client := m.client
+	if client == nil && m.provisioner != nil {
+		client = m.provisioner.Client()
+	}
+	m.mu.RUnlock()
+
+	if client == nil {
+		return nil, fmt.Errorf("adoptium client not initialized")
+	}
+
+	managedByMajor := make(map[int]ports.JavaInstallation)
+	for _, r := range runtimes {
+		if r.Kind == "managed" && r.MajorVersion > 0 {
+			existing, exists := managedByMajor[r.MajorVersion]
+			if !exists || IsNewerVersion(existing.FullVersion, r.FullVersion) {
+				managedByMajor[r.MajorVersion] = r
+			}
+		}
+	}
+
+	updates := make([]JavaRuntimeUpdate, 0, len(managedByMajor))
+	for major, inst := range managedByMajor {
+		rel, err := client.GetLatestRelease(ctx, major)
+		if err != nil {
+			continue
+		}
+		isNewer := IsNewerVersion(inst.FullVersion, rel.Version)
+		updates = append(updates, JavaRuntimeUpdate{
+			MajorVersion:    major,
+			CurrentVersion:  inst.FullVersion,
+			LatestVersion:   rel.Version,
+			UpdateAvailable: isNewer,
+			DownloadURL:     rel.DownloadURL,
+		})
+	}
+
+	sort.Slice(updates, func(i, j int) bool {
+		return updates[i].MajorVersion > updates[j].MajorVersion
+	})
+
+	return updates, nil
+}
+
+// UpgradeRuntime provisions the latest release of the given major Java version, relinks all
+// instances currently pointing to older managed runtimes of that major version, and removes obsolete runtimes.
+// Refuses to upgrade if ANY instance using that runtime is currently running or launching (R5).
+func (m *JavaManager) UpgradeRuntime(ctx context.Context, major int) (string, error) {
+	if major <= 0 {
+		return "", fmt.Errorf("invalid major version: %d", major)
+	}
+
+	m.mu.RLock()
+	prov := m.provisioner
+	cleanManaged := filepath.Clean(m.managedDir)
+	m.mu.RUnlock()
+
+	if prov == nil {
+		return "", fmt.Errorf("java provisioner not initialized")
+	}
+
+	// 1. Guard against upgrading if ANY instance using a managed runtime of this major is running or launching
+	if m.instRepo != nil {
+		instances, err := m.instRepo.ListAll(ctx)
+		if err == nil {
+			for _, inst := range instances {
+				if inst.JavaPath != "" {
+					cleanPath := filepath.Clean(inst.JavaPath)
+					if isSubpath(cleanPath, cleanManaged) {
+						if strings.Contains(cleanPath, fmt.Sprintf("adoptium-%d-", major)) ||
+							strings.Contains(cleanPath, fmt.Sprintf("adoptium-%d", major)) {
+							if inst.State == domain.StateRunning || inst.State == domain.StateLaunching {
+								return "", fmt.Errorf("cannot upgrade runtime: instance %q is currently %s with Java %d", inst.Name, inst.State, major)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Discover existing managed runtimes for this major
+	var oldManagedPaths []string
+	if runtimes, err := m.ListRuntimes(ctx); err == nil {
+		for _, r := range runtimes {
+			if r.Kind == "managed" && r.MajorVersion == major {
+				oldManagedPaths = append(oldManagedPaths, filepath.Clean(r.Path))
+			}
+		}
+	}
+
+	// 3. Download and provision the latest release
+	newJavaBin, err := prov.Download(ctx, major)
+	if err != nil {
+		return "", fmt.Errorf("failed to download upgraded runtime: %w", err)
+	}
+	cleanNewBin := filepath.Clean(newJavaBin)
+
+	// 4. Relink instances in the repository
+	if m.instRepo != nil {
+		instances, err := m.instRepo.ListAll(ctx)
+		if err == nil {
+			for _, inst := range instances {
+				if inst.JavaPath != "" {
+					cleanPath := filepath.Clean(inst.JavaPath)
+					shouldRelink := false
+					for _, oldPath := range oldManagedPaths {
+						if cleanPath == oldPath {
+							shouldRelink = true
+							break
+						}
+					}
+					// Also relink if the instance points to an older adoptium directory for this major
+					if !shouldRelink && isSubpath(cleanPath, cleanManaged) &&
+						(strings.Contains(cleanPath, fmt.Sprintf("adoptium-%d-", major)) || strings.Contains(cleanPath, fmt.Sprintf("adoptium-%d", major))) {
+						shouldRelink = true
+					}
+
+					if shouldRelink {
+						inst.JavaPath = cleanNewBin
+						_ = m.instRepo.Save(ctx, inst) // errcheck:ok relink instance java path
+					}
+				}
+			}
+		}
+	}
+
+	// 5. Clean up old runtime folders
+	newDir := filepath.Dir(cleanNewBin)
+	if strings.EqualFold(filepath.Base(newDir), "bin") {
+		newDir = filepath.Dir(newDir)
+	}
+
+	for _, oldPath := range oldManagedPaths {
+		if oldPath == cleanNewBin {
+			continue
+		}
+		oldDir := filepath.Dir(oldPath)
+		if strings.EqualFold(filepath.Base(oldDir), "bin") {
+			oldDir = filepath.Dir(oldDir)
+		}
+		if oldDir != newDir && isSubpath(oldDir, cleanManaged) {
+			_ = os.RemoveAll(oldDir) // errcheck:ok best-effort cleanup of superseded runtime
+		}
+	}
+
+	return cleanNewBin, nil
+}
+
+// CleanUnusedRuntimes removes all managed runtimes that are not referenced by any instance,
+// preserving safety guards against active instances and detected runtimes (R5).
+func (m *JavaManager) CleanUnusedRuntimes(ctx context.Context) ([]string, error) {
+	runtimes, err := m.ListRuntimes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list runtimes: %w", err)
+	}
+
+	var removed []string
+	for _, r := range runtimes {
+		if r.Kind == "managed" && len(r.UsedBy) == 0 {
+			if err := m.RemoveRuntime(r.Path); err == nil {
+				removed = append(removed, r.Path)
+			}
+		}
+	}
+	return removed, nil
 }
 
 // AddRuntime validates an external Java installation path by running -version and returns its installation details.
