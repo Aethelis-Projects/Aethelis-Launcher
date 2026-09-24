@@ -166,6 +166,7 @@ export interface ModFileDTO {
   game_versions: string[];
   loaders: string[];
   download_url: string;
+  changelog?: string;
 }
 
 export interface ModUpdateItemDTO {

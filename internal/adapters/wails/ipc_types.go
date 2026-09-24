@@ -164,6 +164,7 @@ type ModFileDTO struct {
 	GameVersions []string `json:"game_versions"`
 	Loaders      []string `json:"loaders"`
 	DownloadURL  string   `json:"download_url"`
+	Changelog    string   `json:"changelog,omitempty"`
 }
 
 type ModUpdateItemDTO struct {

@@ -1426,6 +1426,7 @@ func TestWailsAdapter_ListModVersions(t *testing.T) {
 				"project_id":   "sodium",
 				"name":         "Sodium 1.0.0",
 				"version_type": "release",
+				"changelog":    "Sodium 1.0.0 release notes",
 				"files": []map[string]any{
 					{
 						"id":       "file-1",
@@ -1483,6 +1484,9 @@ func TestWailsAdapter_ListModVersions(t *testing.T) {
 	if len(mrFiles1) != 1 || mrFiles1[0].ReleaseType != "release" {
 		t.Fatalf("unexpected Modrinth files: %+v", mrFiles1)
 	}
+	if mrFiles1[0].Changelog != "Sodium 1.0.0 release notes" {
+		t.Fatalf("expected Modrinth changelog populated, got: %q", mrFiles1[0].Changelog)
+	}
 	if mrHits != 1 {
 		t.Fatalf("expected 1 MR hit, got %d", mrHits)
 	}
@@ -1509,6 +1513,9 @@ func TestWailsAdapter_ListModVersions(t *testing.T) {
 	}
 	if len(cfFiles1) != 1 || cfFiles1[0].ReleaseType != "release" {
 		t.Fatalf("unexpected CurseForge files: %+v", cfFiles1)
+	}
+	if cfFiles1[0].Changelog != "" {
+		t.Fatalf("expected CurseForge changelog empty, got: %q", cfFiles1[0].Changelog)
 	}
 	if cfHits != 1 {
 		t.Fatalf("expected 1 CF hit, got %d", cfHits)

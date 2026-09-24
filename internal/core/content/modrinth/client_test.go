@@ -116,6 +116,7 @@ func TestModrinthClient_GetProjectVersions(t *testing.T) {
 				"version_number": "0.5.8",
 				"version_type":   "release",
 				"name":           "Sodium 0.5.8",
+				"changelog":      "## Sodium 0.5.8\n- Fixed performance issue",
 				"game_versions":  []string{"1.21.1"},
 				"loaders":        []string{"fabric"},
 				"date_published": time.Now().Format(time.RFC3339),
@@ -159,11 +160,17 @@ func TestModrinthClient_GetProjectVersions(t *testing.T) {
 	if v.VersionType != "release" {
 		t.Errorf("expected VersionType release, got %s", v.VersionType)
 	}
+	if v.Changelog != "## Sodium 0.5.8\n- Fixed performance issue" {
+		t.Errorf("expected changelog populated, got: %s", v.Changelog)
+	}
 	if len(v.Files) != 1 || v.Files[0].ReleaseType != "release" {
 		t.Errorf("expected file ReleaseType release, got %+v", v.Files)
 	}
 	if len(v.Files) != 1 || v.Files[0].FileName != "sodium-fabric-0.5.8.jar" {
 		t.Fatalf("unexpected files: %+v", v.Files)
+	}
+	if len(v.Files[0].Dependencies) != 1 || v.Files[0].Dependencies[0].ProjectID != "P7dR8mSH" {
+		t.Fatalf("expected file-level dependencies mapped to files[0], got: %+v", v.Files[0].Dependencies)
 	}
 	if len(v.Dependencies) != 1 || v.Dependencies[0].ProjectID != "P7dR8mSH" {
 		t.Fatalf("unexpected dependencies: %+v", v.Dependencies)
