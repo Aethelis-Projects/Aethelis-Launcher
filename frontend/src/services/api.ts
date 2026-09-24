@@ -1,4 +1,5 @@
 import type {
+  LoaderType,
   InstanceDTO,
   CreateInstanceRequest,
   UpdateInstanceRequest,
@@ -24,6 +25,11 @@ import type {
   JavaInstallationDTO,
   JavaDownloadStatusDTO,
   ModUpdateItemDTO,
+  MrPackImportPlanDTO,
+  ImportMrPackRequest,
+  MrPackImportStatusDTO,
+  ExportMrPackRequest,
+  JavaRuntimeUpdateDTO,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -58,6 +64,13 @@ interface WailsAdapterBindings {
   AddJavaRuntime?: (path: string) => Promise<JavaInstallationDTO>;
   CheckModUpdates?: (instanceId: string) => Promise<ModUpdateItemDTO[]>;
   GetDiagnosticReport?: (instanceId: string) => Promise<string>;
+  PickMrPackFile?: () => Promise<string>;
+  GetMrPackImportPlan?: (mrpackPath: string) => Promise<MrPackImportPlanDTO>;
+  ImportMrPack?: (req: ImportMrPackRequest) => Promise<InstanceDTO>;
+  GetMrPackImportStatus?: (instanceName: string) => Promise<MrPackImportStatusDTO>;
+  ExportMrPack?: (req: ExportMrPackRequest) => Promise<string>;
+  CheckJavaRuntimeUpdates?: () => Promise<JavaRuntimeUpdateDTO[]>;
+  UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
   [key: string]: unknown;
 }
 
@@ -317,6 +330,38 @@ let mockJavaDownloadStatus: JavaDownloadStatusDTO = {
   total_bytes: 0,
   percentage: 0,
 };
+
+let mockMrPackPlan: MrPackImportPlanDTO = {
+  name: "Nordic Optimized 1.21",
+  summary: "Curated performance modpack for Minecraft 1.21.1",
+  game_version: "1.21.1",
+  loader: "fabric",
+  loader_version: "0.16.5",
+  total_files: 12,
+  total_size: 14500000,
+  dependencies: {},
+};
+
+let mockMrPackStatus: MrPackImportStatusDTO = {
+  task_id: "import-mock-1",
+  status: "complete",
+  current_file: "",
+  files_done: 12,
+  total_files: 12,
+  bytes_read: 14500000,
+  total_bytes: 14500000,
+  percentage: 100,
+  error: "",
+};
+
+let mockJavaRuntimeUpdates: JavaRuntimeUpdateDTO[] = [
+  {
+    major_version: 21,
+    current_version: "21.0.2",
+    latest_version: "21.0.3",
+    update_available: true,
+  },
+];
 
 export const launcherAPI = {
   setMockUpdateInfo(info: UpdateInfoDTO): void {
@@ -735,5 +780,99 @@ export const launcherAPI = {
 
   setMockInstalledMods(instanceId: string, mods: InstalledModDTO[]): void {
     mockInstalledMods[instanceId] = [...mods];
+  },
+
+  async pickMrPackFile(): Promise<string> {
+    return invokeWails<string>("PickMrPackFile", () => "C:\\Downloads\\Nordic-Optimized.mrpack");
+  },
+
+  async getMrPackImportPlan(mrpackPath: string): Promise<MrPackImportPlanDTO> {
+    return invokeWails<MrPackImportPlanDTO>(
+      "GetMrPackImportPlan",
+      () => ({ ...mockMrPackPlan }),
+      mrpackPath
+    );
+  },
+
+  async importMrPack(req: ImportMrPackRequest): Promise<InstanceDTO> {
+    return invokeWails<InstanceDTO>(
+      "ImportMrPack",
+      () => {
+        const newInst: InstanceDTO = {
+          id: req.instance_name.toLowerCase().replace(/[^a-z0-9_-]/g, "-"),
+          name: req.instance_name,
+          game_version: mockMrPackPlan.game_version,
+          loader: (mockMrPackPlan.loader as LoaderType) || "fabric",
+          loader_version: mockMrPackPlan.loader_version,
+          min_ram_mb: 2048,
+          max_ram_mb: 4096,
+          jvm_args: [],
+          skip_java_check: false,
+          state: "idle",
+          total_play_seconds: 0,
+        };
+        mockInstances.push(newInst);
+        return newInst;
+      },
+      req
+    );
+  },
+
+  async getMrPackImportStatus(instanceName: string): Promise<MrPackImportStatusDTO> {
+    return invokeWails<MrPackImportStatusDTO>(
+      "GetMrPackImportStatus",
+      () => ({ ...mockMrPackStatus }),
+      instanceName
+    );
+  },
+
+  async exportMrPack(req: ExportMrPackRequest): Promise<string> {
+    return invokeWails<string>(
+      "ExportMrPack",
+      () => `C:\\Exports\\${req.name}.mrpack`,
+      req
+    );
+  },
+
+  async checkJavaRuntimeUpdates(): Promise<JavaRuntimeUpdateDTO[]> {
+    return invokeWails<JavaRuntimeUpdateDTO[]>(
+      "CheckJavaRuntimeUpdates",
+      () => [...mockJavaRuntimeUpdates]
+    );
+  },
+
+  async upgradeJavaRuntime(major: number): Promise<JavaInstallationDTO> {
+    return invokeWails<JavaInstallationDTO>(
+      "UpgradeJavaRuntime",
+      () => {
+        const found = mockJavaRuntimes.find((r) => r.major_version === major);
+        if (found) {
+          found.full_version = `${major}.0.3`;
+          return { ...found };
+        }
+        return {
+          path: `C:\\Nord\\runtimes\\adoptium-${major}-${major}.0.3\\bin\\java.exe`,
+          home_dir: `C:\\Nord\\runtimes\\adoptium-${major}-${major}.0.3`,
+          major_version: major,
+          full_version: `${major}.0.3`,
+          vendor: "Eclipse Adoptium",
+          kind: "managed",
+          used_by: [],
+        };
+      },
+      major
+    );
+  },
+
+  setMockMrPackPlan(plan: MrPackImportPlanDTO): void {
+    mockMrPackPlan = { ...plan };
+  },
+
+  setMockMrPackStatus(status: MrPackImportStatusDTO): void {
+    mockMrPackStatus = { ...status };
+  },
+
+  setMockJavaRuntimeUpdates(updates: JavaRuntimeUpdateDTO[]): void {
+    mockJavaRuntimeUpdates = [...updates];
   },
 };

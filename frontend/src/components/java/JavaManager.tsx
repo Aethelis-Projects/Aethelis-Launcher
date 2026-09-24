@@ -1,7 +1,7 @@
 import { Component, createSignal, onCleanup, onMount, For, Show } from "solid-js";
-import { Cpu, Download, Plus, Trash2, CheckCircle2, AlertCircle, Loader2, X, RefreshCw } from "lucide-solid";
+import { Cpu, Download, Plus, Trash2, CheckCircle2, AlertCircle, Loader2, X, RefreshCw, ArrowUpCircle } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
-import type { JavaInstallationDTO, JavaDownloadStatusDTO } from "../../bindings/ipc_types";
+import type { JavaInstallationDTO, JavaDownloadStatusDTO, JavaRuntimeUpdateDTO } from "../../bindings/ipc_types";
 
 interface JavaManagerProps {
   onClose?: () => void;
@@ -9,11 +9,14 @@ interface JavaManagerProps {
 
 export const JavaManager: Component<JavaManagerProps> = (props) => {
   const [runtimes, setRuntimes] = createSignal<JavaInstallationDTO[]>([]);
+  const [updates, setUpdates] = createSignal<JavaRuntimeUpdateDTO[]>([]);
   const [loading, setLoading] = createSignal(false);
   const [error, setError] = createSignal("");
   const [customPath, setCustomPath] = createSignal("");
   const [addingPath, setAddingPath] = createSignal(false);
   const [downloadStatus, setDownloadStatus] = createSignal<JavaDownloadStatusDTO | null>(null);
+  const [upgradingMajor, setUpgradingMajor] = createSignal<number | null>(null);
+  const [isCleaningUnused, setIsCleaningUnused] = createSignal(false);
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -30,6 +33,12 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
     try {
       const list = await launcherAPI.listJavaRuntimes();
       setRuntimes(list);
+      try {
+        const upd = await launcherAPI.checkJavaRuntimeUpdates();
+        setUpdates(upd || []);
+      } catch (_err: unknown) {
+        // non-fatal check failure
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(`Ошибка загрузки рантаймов: ${msg}`);
@@ -122,6 +131,44 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
     const s = downloadStatus()?.status;
     return s === "downloading" || s === "extracting";
   };
+
+  const handleUpgrade = async (major: number) => {
+    setUpgradingMajor(major);
+    setError("");
+    try {
+      await launcherAPI.upgradeJavaRuntime(major);
+      await refreshRuntimes();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Не удалось обновить Java ${major}: ${msg}`);
+    } finally {
+      setUpgradingMajor(null);
+    }
+  };
+
+  const handleCleanUnused = async () => {
+    setIsCleaningUnused(true);
+    setError("");
+    try {
+      const unusedList = runtimes().filter(
+        (r) => r.kind === "managed" && (!r.used_by || r.used_by.length === 0)
+      );
+      for (const rt of unusedList) {
+        await launcherAPI.removeJavaRuntime(rt.path);
+      }
+      await refreshRuntimes();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Не удалось очистить неиспользуемые рантаймы: ${msg}`);
+    } finally {
+      setIsCleaningUnused(false);
+    }
+  };
+
+  const unusedManagedCount = () =>
+    runtimes().filter(
+      (r) => r.kind === "managed" && (!r.used_by || r.used_by.length === 0)
+    ).length;
 
   return (
     <div class="space-y-6 max-w-4xl mx-auto" data-testid="java-manager-view">
@@ -347,6 +394,21 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
               Управляемые рантаймы изолированы в директории Nord Launcher
             </p>
           </div>
+
+          <Show when={unusedManagedCount() > 0}>
+            <button
+              type="button"
+              onClick={handleCleanUnused}
+              disabled={isCleaningUnused()}
+              class="px-3 py-1.5 rounded-lg bg-nord-rose/10 hover:bg-nord-rose/20 text-nord-rose border border-nord-rose/20 text-xs font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              data-testid="clean-unused-runtimes-button"
+            >
+              <Show when={isCleaningUnused()} fallback={<Trash2 class="w-3.5 h-3.5" />}>
+                <Loader2 class="w-3.5 h-3.5 animate-spin" />
+              </Show>
+              <span>Очистить неиспользуемые ({unusedManagedCount()})</span>
+            </button>
+          </Show>
         </div>
 
         <Show
@@ -359,71 +421,112 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
         >
           <div class="space-y-2.5" data-testid="java-runtimes-list">
             <For each={runtimes()}>
-              {(rt) => (
-                <div class="p-3.5 rounded-xl bg-zinc-900/70 border border-white/5 flex items-center justify-between gap-4">
-                  <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-10 h-10 rounded-lg bg-black/40 border border-white/10 flex flex-col items-center justify-center shrink-0">
-                      <span class="text-[9px] font-mono text-zinc-500 uppercase">Java</span>
-                      <span class="text-sm font-bold text-white font-mono leading-none">
-                        {rt.major_version || "?"}
-                      </span>
-                    </div>
+              {(rt) => {
+                const updateInfo = () =>
+                  updates().find((u) => u.major_version === rt.major_version && u.update_available);
+                const isUnused = () =>
+                  rt.kind === "managed" && (!rt.used_by || rt.used_by.length === 0);
 
-                    <div class="min-w-0">
-                      <div class="flex items-center gap-2">
-                        <span class="font-bold text-white text-xs">
-                          {rt.vendor || "OpenJDK"} {rt.full_version || ""}
-                        </span>
-                        <span
-                          class={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase ${
-                            rt.kind === "managed"
-                              ? "bg-nord-cyan/15 text-nord-cyan border border-nord-cyan/30"
-                              : "bg-white/10 text-zinc-300 border border-white/10"
-                          }`}
-                        >
-                          {rt.kind === "managed" ? "Managed" : "Detected"}
+                return (
+                  <div class="p-3.5 rounded-xl bg-zinc-900/70 border border-white/5 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 min-w-0">
+                      <div class="w-10 h-10 rounded-lg bg-black/40 border border-white/10 flex flex-col items-center justify-center shrink-0">
+                        <span class="text-[9px] font-mono text-zinc-500 uppercase">Java</span>
+                        <span class="text-sm font-bold text-white font-mono leading-none">
+                          {rt.major_version || "?"}
                         </span>
                       </div>
-                      <p class="font-mono text-[11px] text-zinc-500 truncate mt-0.5">
-                        {rt.path}
-                      </p>
 
-                      <Show when={rt.used_by && rt.used_by.length > 0}>
-                        <div class="flex items-center gap-1.5 mt-1.5">
-                          <span class="text-[10px] text-zinc-500 font-mono">Используется:</span>
-                          <For each={rt.used_by}>
-                            {(name) => (
-                              <span class="px-1.5 py-0.2 rounded bg-nord-emerald/10 text-nord-emerald border border-nord-emerald/20 text-[10px] font-mono">
-                                {name}
-                              </span>
-                            )}
-                          </For>
+                      <div class="min-w-0">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="font-bold text-white text-xs">
+                            {rt.vendor || "OpenJDK"} {rt.full_version || ""}
+                          </span>
+                          <span
+                            class={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold uppercase ${
+                              rt.kind === "managed"
+                                ? "bg-nord-cyan/15 text-nord-cyan border border-nord-cyan/30"
+                                : "bg-white/10 text-zinc-300 border border-white/10"
+                            }`}
+                          >
+                            {rt.kind === "managed" ? "Managed" : "Detected"}
+                          </span>
+
+                          <Show when={isUnused()}>
+                            <span
+                              class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-800 text-zinc-400 border border-white/5"
+                              data-testid={`java-unused-badge-${rt.major_version}`}
+                            >
+                              Не используется
+                            </span>
+                          </Show>
+
+                          <Show when={rt.kind === "managed" && updateInfo()}>
+                            <span
+                              class="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                              data-testid={`java-update-badge-${rt.major_version}`}
+                            >
+                              Доступна {updateInfo()?.latest_version}
+                            </span>
+                          </Show>
                         </div>
+                        <p class="font-mono text-[11px] text-zinc-500 truncate mt-0.5">
+                          {rt.path}
+                        </p>
+
+                        <Show when={rt.used_by && rt.used_by.length > 0}>
+                          <div class="flex items-center gap-1.5 mt-1.5">
+                            <span class="text-[10px] text-zinc-500 font-mono">Используется:</span>
+                            <For each={rt.used_by}>
+                              {(name) => (
+                                <span class="px-1.5 py-0.2 rounded bg-nord-emerald/10 text-nord-emerald border border-nord-emerald/20 text-[10px] font-mono">
+                                  {name}
+                                </span>
+                              )}
+                            </For>
+                          </div>
+                        </Show>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div class="flex items-center gap-2 shrink-0">
+                      <Show when={rt.kind === "managed" && updateInfo()}>
+                        <button
+                          type="button"
+                          onClick={() => handleUpgrade(rt.major_version)}
+                          disabled={upgradingMajor() === rt.major_version}
+                          class="px-2.5 py-1.5 rounded-lg bg-nord-cyan hover:bg-nord-cyan/90 text-nord-dark text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          title={`Обновить до ${updateInfo()?.latest_version}`}
+                          data-testid={`java-upgrade-button-${rt.major_version}`}
+                        >
+                          <Show when={upgradingMajor() === rt.major_version} fallback={<ArrowUpCircle class="w-3.5 h-3.5" />}>
+                            <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                          </Show>
+                          <span>Обновить</span>
+                        </button>
+                      </Show>
+
+                      <Show when={rt.kind === "managed"}>
+                        <button
+                          type="button"
+                          onClick={() => handleRemove(rt)}
+                          disabled={rt.used_by && rt.used_by.length > 0}
+                          class="p-2 rounded-lg text-zinc-400 hover:text-nord-rose hover:bg-nord-rose/10 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={
+                            rt.used_by && rt.used_by.length > 0
+                              ? `Используется сборками: ${rt.used_by.join(", ")}`
+                              : "Удалить управляемый рантайм"
+                          }
+                          data-testid={`delete-runtime-${rt.major_version}`}
+                        >
+                          <Trash2 class="w-4 h-4" />
+                        </button>
                       </Show>
                     </div>
                   </div>
-
-                  {/* Actions */}
-                  <div class="shrink-0">
-                    <Show when={rt.kind === "managed"}>
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(rt)}
-                        disabled={rt.used_by && rt.used_by.length > 0}
-                        class="p-2 rounded-lg text-zinc-400 hover:text-nord-rose hover:bg-nord-rose/10 transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed"
-                        title={
-                          rt.used_by && rt.used_by.length > 0
-                            ? `Используется сборками: ${rt.used_by.join(", ")}`
-                            : "Удалить управляемый рантайм"
-                        }
-                        data-testid={`delete-runtime-${rt.major_version}`}
-                      >
-                        <Trash2 class="w-4 h-4" />
-                      </button>
-                    </Show>
-                  </div>
-                </div>
-              )}
+                );
+              }}
             </For>
           </div>
         </Show>

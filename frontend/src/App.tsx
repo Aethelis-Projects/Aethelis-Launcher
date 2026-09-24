@@ -1,9 +1,11 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity } from "lucide-solid";
+import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
 import { InstanceSettingsModal, SettingsTab } from "./components/instance/InstanceSettingsModal";
+import { MrPackImportModal } from "./components/instance/MrPackImportModal";
+import { MrPackExportModal } from "./components/instance/MrPackExportModal";
 import { JavaManager } from "./components/java/JavaManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
@@ -42,6 +44,8 @@ export const App: Component = () => {
   const [systemError, setSystemError] = createSignal<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
+  const [isImportModalOpen, setIsImportModalOpen] = createSignal(false);
+  const [isExportModalOpen, setIsExportModalOpen] = createSignal(false);
 
   const openSettingsWithTab = (tab: SettingsTab) => {
     setSettingsInitialTab(tab);
@@ -479,6 +483,17 @@ export const App: Component = () => {
                 <span>Update {formatVersion(availableUpdate()?.version)} available</span>
               </button>
             </Show>
+
+            <button
+              type="button"
+              onClick={() => setIsImportModalOpen(true)}
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium transition-colors cursor-pointer"
+              title="Импортировать сборку формата Modrinth .mrpack"
+              data-testid="import-mrpack-btn"
+            >
+              <Download class="w-3.5 h-3.5 text-nord-cyan" />
+              <span>Импорт .mrpack</span>
+            </button>
           </div>
 
           {/* System Status Indicator */}
@@ -528,17 +543,31 @@ export const App: Component = () => {
                       </span>
                     </div>
 
-                    {/* Instance Settings Button */}
-                    <button
-                      type="button"
-                      onClick={() => openSettingsWithTab("general")}
-                      class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-                      title="Настройки сборки"
-                      data-testid="open-instance-settings-button"
-                    >
-                      <Sliders class="w-3.5 h-3.5 text-nord-cyan" />
-                      <span>Настройки</span>
-                    </button>
+                    <div class="flex items-center gap-2">
+                      {/* Export MrPack Button */}
+                      <button
+                        type="button"
+                        onClick={() => setIsExportModalOpen(true)}
+                        class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Экспортировать сборку в .mrpack"
+                        data-testid="export-mrpack-btn"
+                      >
+                        <Upload class="w-3.5 h-3.5 text-nord-cyan" />
+                        <span>Экспорт .mrpack</span>
+                      </button>
+
+                      {/* Instance Settings Button */}
+                      <button
+                        type="button"
+                        onClick={() => openSettingsWithTab("general")}
+                        class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Настройки сборки"
+                        data-testid="open-instance-settings-button"
+                      >
+                        <Sliders class="w-3.5 h-3.5 text-nord-cyan" />
+                        <span>Настройки</span>
+                      </button>
+                    </div>
                   </div>
 
                   <div>
@@ -787,6 +816,29 @@ export const App: Component = () => {
           );
         }}
         onOpenJavaManager={() => setCurrentNav("java_manager")}
+      />
+
+      {/* MrPack Import Modal (v0.6.0) */}
+      <MrPackImportModal
+        isOpen={isImportModalOpen()}
+        onClose={() => setIsImportModalOpen(false)}
+        onImported={async (newInst) => {
+          setIsImportModalOpen(false);
+          try {
+            const list = await launcherAPI.listInstances();
+            setInstances(list);
+            setSelectedInstanceId(newInst.id);
+          } catch (_err) {
+            // non-fatal
+          }
+        }}
+      />
+
+      {/* MrPack Export Modal (v0.6.0) */}
+      <MrPackExportModal
+        instance={activeInstance()}
+        isOpen={isExportModalOpen()}
+        onClose={() => setIsExportModalOpen(false)}
       />
     </div>
   );
