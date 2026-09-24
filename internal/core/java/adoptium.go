@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"runtime"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/netutil"
@@ -22,6 +24,14 @@ type AdoptiumAsset struct {
 	SHA256      string `json:"sha256"`
 	Size        int64  `json:"size"`
 	Version     string `json:"version"`
+}
+
+type JavaRuntimeUpdate struct {
+	MajorVersion    int    `json:"major_version"`
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version"`
+	UpdateAvailable bool   `json:"update_available"`
+	DownloadURL     string `json:"download_url,omitempty"`
 }
 
 type adoptiumReleaseItem struct {
@@ -110,7 +120,7 @@ func (c *AdoptiumClient) GetLatestRelease(ctx context.Context, major int) (*Adop
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body) // errcheck:ok read error body
 		return nil, fmt.Errorf("adoptium api returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -133,4 +143,73 @@ func (c *AdoptiumClient) GetLatestRelease(ctx context.Context, major int) (*Adop
 		Size:        bin.Package.Size,
 		Version:     rel.VersionData.Semver,
 	}, nil
+}
+
+// IsNewerVersion returns true if latest is strictly newer than current according to Java/Semver build numbering.
+func IsNewerVersion(current, latest string) bool {
+	currClean := strings.TrimSpace(current)
+	latClean := strings.TrimSpace(latest)
+	if currClean == "" || latClean == "" || currClean == latClean {
+		return false
+	}
+
+	currVer, currBuild := splitVersionAndBuild(currClean)
+	latVer, latBuild := splitVersionAndBuild(latClean)
+
+	currParts := strings.Split(currVer, ".")
+	latParts := strings.Split(latVer, ".")
+
+	maxLen := len(currParts)
+	if len(latParts) > maxLen {
+		maxLen = len(latParts)
+	}
+
+	for i := 0; i < maxLen; i++ {
+		var nCurr, nLat int
+		if i < len(currParts) {
+			nCurr = extractNumeric(currParts[i])
+		}
+		if i < len(latParts) {
+			nLat = extractNumeric(latParts[i])
+		}
+		if nLat > nCurr {
+			return true
+		}
+		if nLat < nCurr {
+			return false
+		}
+	}
+
+	bCurr := extractNumeric(currBuild)
+	bLat := extractNumeric(latBuild)
+	return bLat > bCurr
+}
+
+func splitVersionAndBuild(v string) (verPart, buildPart string) {
+	v = strings.TrimPrefix(v, "jdk-")
+	v = strings.TrimPrefix(v, "v")
+	if idx := strings.Index(v, "+"); idx != -1 {
+		return v[:idx], v[idx+1:]
+	}
+	if idx := strings.Index(v, "_"); idx != -1 {
+		return v[:idx], v[idx+1:]
+	}
+	if idx := strings.Index(v, "-"); idx != -1 {
+		return v[:idx], v[idx+1:]
+	}
+	return v, ""
+}
+
+func extractNumeric(s string) int {
+	var sb strings.Builder
+	for _, ch := range s {
+		if ch >= '0' && ch <= '9' {
+			sb.WriteRune(ch)
+		}
+	}
+	if sb.Len() == 0 {
+		return 0
+	}
+	n, _ := strconv.Atoi(sb.String()) // errcheck:ok fallback 0 on invalid int
+	return n
 }

@@ -192,3 +192,30 @@ func TestAdoptiumClient_Headers_UserAgentAndAccept(t *testing.T) {
 	}
 }
 
+func TestIsNewerVersion(t *testing.T) {
+	tests := []struct {
+		current  string
+		latest   string
+		expected bool
+	}{
+		{"21.0.2", "21.0.3+9", true},
+		{"21.0.2+13", "21.0.2+14", true},
+		{"21.0.2-13", "21.0.2-14", true},
+		{"21.0.2", "21.0.2+13", true},
+		{"21.0.2+13", "21.0.2", false},
+		{"21.0.2+13", "21.0.2+13", false},
+		{"21.0.2", "21.0.2", false},
+		{"17.0.10", "17.0.9", false},
+		{"8u391", "8u402", true},
+		{"", "21.0.2", false},
+		{"21.0.2", "", false},
+	}
+
+	for _, tt := range tests {
+		got := java.IsNewerVersion(tt.current, tt.latest)
+		if got != tt.expected {
+			t.Errorf("IsNewerVersion(%q, %q) = %v, want %v", tt.current, tt.latest, got, tt.expected)
+		}
+	}
+}
+

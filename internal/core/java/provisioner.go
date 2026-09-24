@@ -57,6 +57,18 @@ func NewAdoptiumRuntimeService(managedDir string, client *AdoptiumClient, httpCl
 	}
 }
 
+func (s *AdoptiumRuntimeService) Client() *AdoptiumClient {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.client
+}
+
+func (s *AdoptiumRuntimeService) SetClient(c *AdoptiumClient) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.client = c
+}
+
 func (s *AdoptiumRuntimeService) GetDownloadStatus() JavaDownloadStatusDTO {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
