@@ -117,3 +117,25 @@ func TestManifest_ReconcileWithDisk(t *testing.T) {
 		t.Errorf("expected synthesized local record for modC, got %+v", recC)
 	}
 }
+
+func TestManifest_RemoveAndNilGuards(t *testing.T) {
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:    "mod-x",
+		FileName: "mod-x.jar",
+	})
+	if m.GetRecord("mod-x.jar") == nil {
+		t.Fatalf("expected record to exist")
+	}
+
+	m.Remove("mod-x.jar")
+	if m.GetRecord("mod-x.jar") != nil {
+		t.Fatalf("expected record to be removed")
+	}
+
+	// Nil / empty guards
+	m.AddOrUpdate(nil)
+	m.AddOrUpdate(&manifest.ModRecord{})
+	m.Remove("non-existent.jar")
+}
+
