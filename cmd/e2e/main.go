@@ -1319,8 +1319,151 @@ func main() {
 	}
 	logf("PASS: Diagnostic report pack generated with anonymized paths and zero credential leakage.")
 
+	// =========================================================================
+	// 13. MrPack Round-Trip E2E: Export -> Verify -> Import -> Parity
+	// =========================================================================
+	logf("\n--- STEP 13: Modpack Round-Trip (.mrpack) E2E ---")
+	step13Tmp := filepath.Join(os.TempDir(), fmt.Sprintf("nord-e2e-step13-%d", time.Now().UnixNano()))
+	_ = os.MkdirAll(step13Tmp, 0755) // errcheck:ok create temp dir
+	defer func() {
+		_ = os.RemoveAll(step13Tmp) // errcheck:ok cleanup step 13 temp dir
+	}()
+
+	step13DBPath := filepath.Join(step13Tmp, "nord-e2e-13.db")
+	step13DB, err := storage.OpenDatabase(step13DBPath)
+	if err != nil {
+		logf("FAIL: Step 13 SQLite init failed: %v", err)
+		os.Exit(1)
+	}
+	defer func() { _ = step13DB.Close() }() // errcheck:ok close db
+	if err := step13DB.Migrate(); err != nil {
+		logf("FAIL: Step 13 migrations failed: %v", err)
+		os.Exit(1)
+	}
+
+	step13InstRepo := storage.NewInstanceRepository(step13DB)
+	step13CacheRepo := storage.NewContentCacheRepository(step13DB)
+	step13InstancesDir := filepath.Join(step13Tmp, "instances")
+	step13ExportsDir := filepath.Join(step13Tmp, "exports")
+	_ = os.MkdirAll(step13InstancesDir, 0755) // errcheck:ok create instances dir
+	_ = os.MkdirAll(step13ExportsDir, 0755)   // errcheck:ok create exports dir
+
+	// 1. Create source instance with test mods and configs
+	step13SourceInst := &domain.Instance{
+		ID:          "source-modpack-inst",
+		Name:        "Source Modpack",
+		GameVersion: "1.21.1",
+		Loader:      domain.LoaderFabric,
+		LoaderVer:   "0.16.5",
+	}
+	if err := step13InstRepo.Save(context.Background(), step13SourceInst); err != nil {
+		logf("FAIL: Step 13 save source instance failed: %v", err)
+		os.Exit(1)
+	}
+
+	sourceInstDir := filepath.Join(step13InstancesDir, step13SourceInst.ID)
+	sourceModsDir := filepath.Join(sourceInstDir, "mods")
+	sourceConfigDir := filepath.Join(sourceInstDir, "config")
+	_ = os.MkdirAll(sourceModsDir, 0755)   // errcheck:ok create mods dir
+	_ = os.MkdirAll(sourceConfigDir, 0755) // errcheck:ok create config dir
+
+	// Local test mod
+	testModData := []byte("mock-mod-jar-content-for-mrpack-export-12345")
+	testModPath := filepath.Join(sourceModsDir, "local-mod.jar")
+	if err := os.WriteFile(testModPath, testModData, 0644); err != nil {
+		logf("FAIL: Step 13 write test mod failed: %v", err)
+		os.Exit(1)
+	}
+	testModSHA1, _ := content.CalculateFileSHA1(testModPath) // errcheck:ok compute sha1
+
+	// Local test config
+	testConfigData := []byte("options.sound=1.0\nguiScale=2\n")
+	testConfigPath := filepath.Join(sourceConfigDir, "client.properties")
+	if err := os.WriteFile(testConfigPath, testConfigData, 0644); err != nil {
+		logf("FAIL: Step 13 write test config failed: %v", err)
+		os.Exit(1)
+	}
+
+	// 2. Export .mrpack using MrPackExporter
+	exporter := content.NewMrPackExporter(step13InstRepo, step13CacheRepo, step13InstancesDir, step13ExportsDir)
+	exportedMrPackPath, err := exporter.ExportMrPack(context.Background(), content.ExportMrPackOptions{
+		InstanceID:  step13SourceInst.ID,
+		PackName:    "RoundTrip Pack",
+		PackVersion: "1.0.0",
+		Summary:     "Test export pack for E2E",
+	})
+	if err != nil {
+		logf("FAIL: Step 13 ExportMrPack failed: %v", err)
+		os.Exit(1)
+	}
+	if _, statErr := os.Stat(exportedMrPackPath); statErr != nil {
+		logf("FAIL: Exported mrpack file not found: %v", statErr)
+		os.Exit(1)
+	}
+	logf("PASS: MrPack exported successfully: %s", filepath.Base(exportedMrPackPath))
+
+	// 3. Inspect mrpack plan using GetMrPackImportPlan
+	step13MrPackFile, err := os.Open(exportedMrPackPath)
+	if err != nil {
+		logf("FAIL: Open exported mrpack failed: %v", err)
+		os.Exit(1)
+	}
+	mrpackFI, _ := step13MrPackFile.Stat() // errcheck:ok stat open file
+	plan, err := content.GetMrPackImportPlan(step13MrPackFile, mrpackFI.Size(), []string{"Existing Other"})
+	_ = step13MrPackFile.Close() // errcheck:ok close file
+	if err != nil {
+		logf("FAIL: GetMrPackImportPlan failed: %v", err)
+		os.Exit(1)
+	}
+	if plan.Name != "RoundTrip Pack" || plan.GameVersion != "1.21.1" || plan.Loader != "fabric" {
+		logf("FAIL: Unexpected plan metadata: %+v", plan)
+		os.Exit(1)
+	}
+	logf("PASS: MrPack plan verified: name=%s, mc=%s, loader=%s, files=%d", plan.Name, plan.GameVersion, plan.Loader, plan.TotalFiles)
+
+	// 4. Import .mrpack into new instance using MrPackImporter
+	importer := content.NewMrPackImporter(nil, step13InstRepo, step13InstancesDir)
+	targetInstID, err := importer.ImportMrPack(context.Background(), exportedMrPackPath, content.ImportMrPackOptions{
+		InstanceName: "Imported Target Instance",
+	}, nil)
+	if err != nil {
+		logf("FAIL: ImportMrPack failed: %v", err)
+		os.Exit(1)
+	}
+
+	targetInst, err := step13InstRepo.GetByID(context.Background(), targetInstID)
+	if err != nil || targetInst == nil {
+		logf("FAIL: Imported target instance not found in repository: %v", err)
+		os.Exit(1)
+	}
+	if targetInst.GameVersion != "1.21.1" || targetInst.Loader != domain.LoaderFabric {
+		logf("FAIL: Target instance loader mismatch: %s / %s", targetInst.GameVersion, targetInst.Loader)
+		os.Exit(1)
+	}
+
+	// Verify imported mod file and config parity
+	targetModPath := filepath.Join(step13InstancesDir, targetInstID, "mods", "local-mod.jar")
+	importedData, err := os.ReadFile(targetModPath)
+	if err != nil {
+		logf("FAIL: Imported mod file missing at %s: %v", targetModPath, err)
+		os.Exit(1)
+	}
+	importedSHA1, _ := content.CalculateFileSHA1(targetModPath) // errcheck:ok compute sha1
+	if importedSHA1 != testModSHA1 || !bytes.Equal(importedData, testModData) {
+		logf("FAIL: Imported mod data mismatch: original SHA1=%s, imported SHA1=%s", testModSHA1, importedSHA1)
+		os.Exit(1)
+	}
+
+	targetConfigPath := filepath.Join(step13InstancesDir, targetInstID, "config", "client.properties")
+	importedConfig, err := os.ReadFile(targetConfigPath)
+	if err != nil || !bytes.Equal(importedConfig, testConfigData) {
+		logf("FAIL: Imported config file mismatch: %v", err)
+		os.Exit(1)
+	}
+	logf("PASS: Round-trip import verified: mod SHA-1 exact match, overrides/configs preserved.")
+
 	logf("\n=================================================================")
-	logf(" ALL 12 E2E STAGES PASSED")
+	logf(" ALL 13 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt

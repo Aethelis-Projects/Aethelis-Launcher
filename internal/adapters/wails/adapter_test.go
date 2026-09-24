@@ -1,6 +1,8 @@
 package wails_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -390,10 +392,17 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"GetModInstallStatus",
 		"CheckModUpdates",
 		"GetDiagnosticReport",
+		"PickMrPackFile",
+		"GetMrPackImportPlan",
+		"ImportMrPack",
+		"GetMrPackImportStatus",
+		"ExportMrPack",
+		"CheckJavaRuntimeUpdates",
+		"UpgradeJavaRuntime",
 	}
 
-	if len(expectedMethods) != 31 {
-		t.Fatalf("expected exactly 31 Wails methods, got %d", len(expectedMethods))
+	if len(expectedMethods) != 38 {
+		t.Fatalf("expected exactly 38 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1899,6 +1908,137 @@ func TestWailsAdapter_GetDiagnosticReport(t *testing.T) {
 	}
 	if !strings.Contains(report, "curseforge_api_key: [SET]") {
 		t.Errorf("expected masked curseforge_api_key: [SET] in report")
+	}
+}
+
+func createMockMrPackBytes(t *testing.T, name, mcVer, loader, loaderVer string) []byte {
+	t.Helper()
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	indexJSON := fmt.Sprintf(`{
+		"formatVersion": 1,
+		"game": "minecraft",
+		"versionId": "1.0.0",
+		"name": %q,
+		"summary": "Test pack summary",
+		"files": [
+			{
+				"path": "mods/test-mod.jar",
+				"hashes": {"sha1": "2aae6c35c94fcfb415dbe95f408b9ce91ee846ed"},
+				"env": {"client": "required", "server": "required"},
+				"downloads": ["https://example.com/test-mod.jar"],
+				"fileSize": 1024
+			}
+		],
+		"dependencies": {
+			"minecraft": %q,
+			%q: %q
+		}
+	}`, name, mcVer, loader, loaderVer)
+
+	f, err := zw.Create("modrinth.index.json")
+	if err != nil {
+		t.Fatalf("create modrinth.index.json in zip: %v", err)
+	}
+	if _, err := f.Write([]byte(indexJSON)); err != nil {
+		t.Fatalf("write index json: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestWailsAdapter_MrPackMethods(t *testing.T) {
+	tempDir := t.TempDir()
+	adapter := wails.NewWailsAdapter(nil)
+
+	// 1. PickMrPackFile with custom picker hook
+	expectedPath := filepath.Join(tempDir, "test.mrpack")
+	adapter.SetFilePicker(func() (string, error) {
+		return expectedPath, nil
+	})
+	picked, err := adapter.PickMrPackFile()
+	if err != nil || picked != expectedPath {
+		t.Fatalf("PickMrPackFile returned %q, err=%v (expected %q)", picked, err, expectedPath)
+	}
+
+	// 2. GetMrPackImportPlan validation
+	_, err = adapter.GetMrPackImportPlan("")
+	if err == nil {
+		t.Fatal("expected error for empty mrpack path, got nil")
+	}
+
+	mrpackData := createMockMrPackBytes(t, "SkyFactory 5", "1.20.1", "fabric", "0.15.11")
+	mrpackFile := filepath.Join(tempDir, "sample.mrpack")
+	if err := os.WriteFile(mrpackFile, mrpackData, 0644); err != nil {
+		t.Fatalf("failed to write mrpack file: %v", err)
+	}
+
+	plan, err := adapter.GetMrPackImportPlan(mrpackFile)
+	if err != nil {
+		t.Fatalf("GetMrPackImportPlan failed: %v", err)
+	}
+	if plan.Name != "SkyFactory 5" {
+		t.Errorf("expected pack name 'SkyFactory 5', got %q", plan.Name)
+	}
+	if plan.GameVersion != "1.20.1" {
+		t.Errorf("expected mc 1.20.1, got %q", plan.GameVersion)
+	}
+	if plan.Loader != "fabric" || plan.LoaderVer != "0.15.11" {
+		t.Errorf("expected fabric 0.15.11, got %q %q", plan.Loader, plan.LoaderVer)
+	}
+	if plan.TotalFiles != 1 || plan.TotalSize != 1024 {
+		t.Errorf("expected 1 file of size 1024, got %d files, %d bytes", plan.TotalFiles, plan.TotalSize)
+	}
+
+	// 3. ImportMrPack validation
+	_, err = adapter.ImportMrPack(wails.ImportMrPackRequest{MrPackPath: ""})
+	if err == nil {
+		t.Fatal("expected error importing empty mrpack path, got nil")
+	}
+
+	// 4. GetMrPackImportStatus idle default
+	status, err := adapter.GetMrPackImportStatus("nonexistent-inst")
+	if err != nil || status.Status != "idle" {
+		t.Fatalf("expected idle status for unknown instance, got %+v, err=%v", status, err)
+	}
+
+	// 5. ExportMrPack validation
+	_, err = adapter.ExportMrPack(wails.ExportMrPackRequest{InstanceID: ""})
+	if err == nil {
+		t.Fatal("expected error exporting empty instance id, got nil")
+	}
+}
+
+func TestWailsAdapter_JavaRuntimeUpdates(t *testing.T) {
+	tempDir := t.TempDir()
+	adapter := wails.NewWailsAdapter(nil)
+
+	// When JavaManager is nil
+	updates, err := adapter.CheckJavaRuntimeUpdates()
+	if err != nil || len(updates) != 0 {
+		t.Fatalf("expected empty updates when javaMgr is nil, got %+v, err=%v", updates, err)
+	}
+
+	_, err = adapter.UpgradeJavaRuntime(21)
+	if err == nil {
+		t.Fatal("expected error upgrading java when javaMgr is nil, got nil")
+	}
+
+	// With configured JavaManager
+	managedDir := filepath.Join(tempDir, "runtimes")
+	_ = os.MkdirAll(managedDir, 0755)
+	jm := java.NewJavaManager(managedDir, nil, nil, nil)
+	adapter.SetJavaManager(jm)
+
+	status, err := adapter.UpgradeJavaRuntime(21)
+	if err != nil {
+		t.Fatalf("UpgradeJavaRuntime returned error: %v", err)
+	}
+	if status == nil {
+		t.Fatal("expected non-nil download status")
 	}
 }
 

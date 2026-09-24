@@ -34,6 +34,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // WailsAdapter connects Wails IPC layer to the Hexagonal Core.
@@ -60,6 +61,10 @@ type WailsAdapter struct {
 	lastCrashes        map[string]*CrashReportDTO
 	modVersionsCache   map[string]modVersionCacheEntry
 	modInstallProgress map[string]*ModInstallProgressDTO
+	mrpackImporter     *content.MrPackImporter
+	mrpackExporter     *content.MrPackExporter
+	mrpackProgress     map[string]*MrPackImportStatusDTO
+	filePickerFn       func() (string, error)
 	mu                 sync.RWMutex
 }
 
@@ -96,6 +101,128 @@ func (a *WailsAdapter) SetDB(db *sql.DB) {
 	if db != nil {
 		a.installedModsRepo = storage.NewInstalledModsRepositoryFromDB(db)
 	}
+}
+
+func (a *WailsAdapter) SetMrPackImporter(importer *content.MrPackImporter) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.mrpackImporter = importer
+}
+
+func (a *WailsAdapter) SetMrPackExporter(exporter *content.MrPackExporter) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.mrpackExporter = exporter
+}
+
+func (a *WailsAdapter) SetFilePicker(fn func() (string, error)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.filePickerFn = fn
+}
+
+type wailsHTTPClientWrapper struct {
+	client *http.Client
+}
+
+func (w *wailsHTTPClientWrapper) Get(ctx context.Context, url string, headers map[string]string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	client := w.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("http error %d", resp.StatusCode)
+	}
+	return io.ReadAll(resp.Body)
+}
+
+func (w *wailsHTTPClientWrapper) DownloadFile(ctx context.Context, url string, destPath string, expectedSHA1 string, onProgress func(bytesRead, totalBytes int64)) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	client := w.client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download error %d", resp.StatusCode)
+	}
+	f, err := os.Create(destPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	totalBytes := resp.ContentLength
+	var bytesRead int64
+	buf := make([]byte, 32*1024)
+	for {
+		n, rErr := resp.Body.Read(buf)
+		if n > 0 {
+			if _, wErr := f.Write(buf[:n]); wErr != nil {
+				return wErr
+			}
+			bytesRead += int64(n)
+			if onProgress != nil {
+				onProgress(bytesRead, totalBytes)
+			}
+		}
+		if rErr != nil {
+			if rErr == io.EOF {
+				break
+			}
+			return rErr
+		}
+	}
+	return nil
+}
+
+func (a *WailsAdapter) getMrPackImporter() *content.MrPackImporter {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mrpackImporter == nil {
+		var repo ports.InstanceRepository
+		if a.svc != nil {
+			repo = a.svc.Repo()
+		}
+		a.mrpackImporter = content.NewMrPackImporter(&wailsHTTPClientWrapper{client: a.httpClient}, repo, a.instancesDir)
+	}
+	return a.mrpackImporter
+}
+
+func (a *WailsAdapter) getMrPackExporter() *content.MrPackExporter {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mrpackExporter == nil {
+		var repo ports.InstanceRepository
+		var cache ports.ContentCache
+		if a.svc != nil {
+			repo = a.svc.Repo()
+		}
+		if a.db != nil {
+			cache = storage.NewContentCacheRepositoryFromDB(a.db)
+		}
+		exportDir := filepath.Join(filepath.Dir(a.instancesDir), "exports")
+		a.mrpackExporter = content.NewMrPackExporter(repo, cache, a.instancesDir, exportDir)
+	}
+	return a.mrpackExporter
 }
 
 func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
@@ -1654,4 +1781,220 @@ func anonymizeDiagnosticText(text string) string {
 		text = strings.ReplaceAll(text, filepath.ToSlash(home), "~")
 	}
 	return text
+}
+
+func (a *WailsAdapter) PickMrPackFile() (string, error) {
+	a.mu.RLock()
+	picker := a.filePickerFn
+	a.mu.RUnlock()
+	if picker != nil {
+		return picker()
+	}
+
+	app := application.Get()
+	if app == nil || app.Dialog == nil {
+		return "", fmt.Errorf("file dialog not available")
+	}
+	dialog := app.Dialog.OpenFile().
+		SetTitle("Select Modpack (.mrpack)").
+		AddFilter("Modrinth Modpack (*.mrpack)", "*.mrpack").
+		CanChooseFiles(true).
+		CanChooseDirectories(false)
+	return dialog.PromptForSingleSelection()
+}
+
+func (a *WailsAdapter) GetMrPackImportPlan(mrpackPath string) (*MrPackImportPlanDTO, error) {
+	if strings.TrimSpace(mrpackPath) == "" {
+		return nil, errors.New("mrpack path cannot be empty")
+	}
+	f, err := os.Open(mrpackPath)
+	if err != nil {
+		return nil, fmt.Errorf("open mrpack: %w", err)
+	}
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat mrpack: %w", err)
+	}
+
+	var existingNames []string
+	if a.svc != nil {
+		instances := a.svc.ListInstances()
+		for _, inst := range instances {
+			existingNames = append(existingNames, inst.Name)
+		}
+	}
+
+	plan, err := content.GetMrPackImportPlan(f, fi.Size(), existingNames)
+	if err != nil {
+		return nil, fmt.Errorf("get mrpack import plan: %w", err)
+	}
+
+	return &MrPackImportPlanDTO{
+		Name:         plan.Name,
+		Summary:      plan.Summary,
+		GameVersion:  plan.GameVersion,
+		Loader:       plan.Loader,
+		LoaderVer:    plan.LoaderVersion,
+		TotalFiles:   plan.TotalFiles,
+		TotalSize:    plan.TotalBytes,
+		Dependencies: plan.Dependencies,
+	}, nil
+}
+
+func (a *WailsAdapter) ImportMrPack(req ImportMrPackRequest) (string, error) {
+	if strings.TrimSpace(req.MrPackPath) == "" {
+		return "", errors.New("mrpack path cannot be empty")
+	}
+	importer := a.getMrPackImporter()
+	if importer == nil {
+		return "", errors.New("mrpack importer not available")
+	}
+
+	opts := content.ImportMrPackOptions{
+		InstanceName: req.InstanceName,
+	}
+
+	instanceID, err := importer.ImportMrPack(context.Background(), req.MrPackPath, opts, func(p content.MrPackImportProgress) {
+		a.mu.Lock()
+		if a.mrpackProgress == nil {
+			a.mrpackProgress = make(map[string]*MrPackImportStatusDTO)
+		}
+		var pct float64
+		if p.TotalFiles > 0 {
+			pct = float64(p.DownloadedFiles) / float64(p.TotalFiles) * 100
+		}
+		statusItem := &MrPackImportStatusDTO{
+			TaskID:      req.InstanceName,
+			Status:      p.Status,
+			CurrentFile: p.CurrentFile,
+			FilesDone:   p.DownloadedFiles,
+			TotalFiles:  p.TotalFiles,
+			BytesRead:   p.DownloadedBytes,
+			TotalBytes:  p.TotalBytes,
+			Percentage:  pct,
+			Error:       p.Error,
+		}
+		a.mrpackProgress[req.InstanceName] = statusItem
+		a.mu.Unlock()
+	})
+	if err != nil {
+		return "", err
+	}
+
+	a.mu.Lock()
+	if a.mrpackProgress != nil && a.mrpackProgress[req.InstanceName] != nil {
+		a.mrpackProgress[instanceID] = a.mrpackProgress[req.InstanceName]
+	}
+	a.mu.Unlock()
+
+	return instanceID, nil
+}
+
+func (a *WailsAdapter) GetMrPackImportStatus(instanceID string) (*MrPackImportStatusDTO, error) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.mrpackProgress != nil {
+		if p, ok := a.mrpackProgress[instanceID]; ok && p != nil {
+			cp := *p
+			return &cp, nil
+		}
+	}
+	if a.mrpackImporter != nil {
+		if p, ok := a.mrpackImporter.GetStatus(instanceID); ok && p != nil {
+			var pct float64
+			if p.TotalFiles > 0 {
+				pct = float64(p.DownloadedFiles) / float64(p.TotalFiles) * 100
+			}
+			return &MrPackImportStatusDTO{
+				TaskID:      instanceID,
+				Status:      p.Status,
+				CurrentFile: p.CurrentFile,
+				FilesDone:   p.DownloadedFiles,
+				TotalFiles:  p.TotalFiles,
+				BytesRead:   p.DownloadedBytes,
+				TotalBytes:  p.TotalBytes,
+				Percentage:  pct,
+				Error:       p.Error,
+			}, nil
+		}
+	}
+	return &MrPackImportStatusDTO{
+		Status: "idle",
+	}, nil
+}
+
+func (a *WailsAdapter) ExportMrPack(req ExportMrPackRequest) (string, error) {
+	if strings.TrimSpace(req.InstanceID) == "" {
+		return "", errors.New("instance id cannot be empty")
+	}
+	exporter := a.getMrPackExporter()
+	if exporter == nil {
+		return "", errors.New("mrpack exporter not available")
+	}
+
+	opts := content.ExportMrPackOptions{
+		InstanceID:       req.InstanceID,
+		PackName:         req.Name,
+		PackVersion:      req.Version,
+		Summary:          req.Summary,
+		ExportPath:       req.OutputPath,
+		IncludeShaders:   req.IncludeShaders,
+		IncludeResources: req.IncludeResources,
+	}
+
+	return exporter.ExportMrPack(context.Background(), opts)
+}
+
+func (a *WailsAdapter) CheckJavaRuntimeUpdates() ([]JavaRuntimeUpdateDTO, error) {
+	a.mu.RLock()
+	jm := a.javaMgr
+	a.mu.RUnlock()
+
+	if jm == nil {
+		return []JavaRuntimeUpdateDTO{}, nil
+	}
+
+	updates, err := jm.CheckRuntimeUpdates(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("check java runtime updates: %w", err)
+	}
+
+	dtos := make([]JavaRuntimeUpdateDTO, 0, len(updates))
+	for _, u := range updates {
+		dtos = append(dtos, JavaRuntimeUpdateDTO{
+			MajorVersion:    u.MajorVersion,
+			CurrentVersion:  u.CurrentVersion,
+			LatestVersion:   u.LatestVersion,
+			UpdateAvailable: u.UpdateAvailable,
+			DownloadURL:     u.DownloadURL,
+		})
+	}
+	return dtos, nil
+}
+
+func (a *WailsAdapter) UpgradeJavaRuntime(major int) (*JavaDownloadStatusDTO, error) {
+	a.mu.RLock()
+	jm := a.javaMgr
+	a.mu.RUnlock()
+
+	if jm == nil {
+		return nil, fmt.Errorf("java manager not configured")
+	}
+
+	go func() {
+		_, _ = jm.UpgradeRuntime(context.Background(), major) // errcheck:ok async upgrade captured in GetJavaDownloadStatus
+	}()
+
+	status := jm.GetDownloadStatus()
+	return &JavaDownloadStatusDTO{
+		TaskID:     status.TaskID,
+		Major:      status.Major,
+		Status:     status.Status,
+		BytesRead:  status.BytesRead,
+		TotalBytes: status.TotalBytes,
+		Percentage: status.Percentage,
+		Error:      status.Error,
+	}, nil
 }
