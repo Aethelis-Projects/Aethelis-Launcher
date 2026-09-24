@@ -45,17 +45,18 @@ type MrPackFile struct {
 }
 
 type MrPackImportPlan struct {
-	Name          string   `json:"name"`
-	Version       string   `json:"version"`
-	Summary       string   `json:"summary"`
-	GameVersion   string   `json:"game_version"`
-	Loader        string   `json:"loader"`
-	LoaderVersion string   `json:"loader_version"`
-	TotalFiles    int      `json:"total_files"`
-	TotalBytes    int64    `json:"total_bytes"`
-	RequiredFiles int      `json:"required_files"`
-	OptionalFiles int      `json:"optional_files"`
-	Conflicts     []string `json:"conflicts"`
+	Name          string            `json:"name"`
+	Version       string            `json:"version"`
+	Summary       string            `json:"summary"`
+	GameVersion   string            `json:"game_version"`
+	Loader        string            `json:"loader"`
+	LoaderVersion string            `json:"loader_version"`
+	TotalFiles    int               `json:"total_files"`
+	TotalBytes    int64             `json:"total_bytes"`
+	RequiredFiles int               `json:"required_files"`
+	OptionalFiles int               `json:"optional_files"`
+	Conflicts     []string          `json:"conflicts"`
+	Dependencies  map[string]string `json:"dependencies,omitempty"`
 }
 
 // SafeRelPath validates that untrustedRelPath resolves strictly within baseDir, preventing Zip-Slip (R1).
@@ -157,6 +158,7 @@ func GetMrPackImportPlan(r io.ReaderAt, size int64, existingInstanceNames []stri
 		Loader:        loader,
 		LoaderVersion: loaderVersion,
 		TotalFiles:    len(index.Files),
+		Dependencies:  index.Dependencies,
 	}
 
 	for _, f := range index.Files {

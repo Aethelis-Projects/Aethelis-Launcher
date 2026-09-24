@@ -57,6 +57,18 @@ func NewInstanceService(
 	}
 }
 
+func (s *InstanceService) Repo() ports.InstanceRepository {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.repo
+}
+
+func (s *InstanceService) FileSystem() ports.FileSystem {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fs
+}
+
 func (s *InstanceService) SetProvisioner(p ports.GameProvisioner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

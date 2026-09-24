@@ -236,3 +236,49 @@ export interface JavaDownloadStatusDTO {
   percentage: number;
   error?: string;
 }
+
+export interface JavaRuntimeUpdateDTO {
+  major_version: number;
+  current_version: string;
+  latest_version: string;
+  update_available: boolean;
+  download_url?: string;
+}
+
+export interface MrPackImportPlanDTO {
+  name: string;
+  summary: string;
+  game_version: string;
+  loader: string;
+  loader_version: string;
+  total_files: number;
+  total_size: number;
+  dependencies: Record<string, string>;
+}
+
+export interface ImportMrPackRequest {
+  mrpack_path: string;
+  instance_name: string;
+}
+
+export interface MrPackImportStatusDTO {
+  task_id: string;
+  status: "idle" | "downloading" | "extracting" | "complete" | "failed";
+  current_file: string;
+  files_done: number;
+  total_files: number;
+  bytes_read: number;
+  total_bytes: number;
+  percentage: number;
+  error?: string;
+}
+
+export interface ExportMrPackRequest {
+  instance_id: string;
+  name: string;
+  version: string;
+  summary: string;
+  output_path?: string;
+  include_shaders?: boolean;
+  include_resources?: boolean;
+}

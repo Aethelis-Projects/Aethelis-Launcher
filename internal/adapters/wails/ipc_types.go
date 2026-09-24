@@ -234,3 +234,49 @@ type JavaDownloadStatusDTO struct {
 	Percentage float64 `json:"percentage"`
 	Error      string  `json:"error,omitempty"`
 }
+
+type JavaRuntimeUpdateDTO struct {
+	MajorVersion    int    `json:"major_version"`
+	CurrentVersion  string `json:"current_version"`
+	LatestVersion   string `json:"latest_version"`
+	UpdateAvailable bool   `json:"update_available"`
+	DownloadURL     string `json:"download_url,omitempty"`
+}
+
+type MrPackImportPlanDTO struct {
+	Name         string            `json:"name"`
+	Summary      string            `json:"summary"`
+	GameVersion  string            `json:"game_version"`
+	Loader       string            `json:"loader"`
+	LoaderVer    string            `json:"loader_version"`
+	TotalFiles   int               `json:"total_files"`
+	TotalSize    int64             `json:"total_size"`
+	Dependencies map[string]string `json:"dependencies"`
+}
+
+type ImportMrPackRequest struct {
+	MrPackPath   string `json:"mrpack_path"`
+	InstanceName string `json:"instance_name"`
+}
+
+type MrPackImportStatusDTO struct {
+	TaskID      string  `json:"task_id"`
+	Status      string  `json:"status"`
+	CurrentFile string  `json:"current_file"`
+	FilesDone   int     `json:"files_done"`
+	TotalFiles  int     `json:"total_files"`
+	BytesRead   int64   `json:"bytes_read"`
+	TotalBytes  int64   `json:"total_bytes"`
+	Percentage  float64 `json:"percentage"`
+	Error       string  `json:"error,omitempty"`
+}
+
+type ExportMrPackRequest struct {
+	InstanceID       string `json:"instance_id"`
+	Name             string `json:"name"`
+	Version          string `json:"version"`
+	Summary          string `json:"summary"`
+	OutputPath       string `json:"output_path,omitempty"`
+	IncludeShaders   bool   `json:"include_shaders,omitempty"`
+	IncludeResources bool   `json:"include_resources,omitempty"`
+}
