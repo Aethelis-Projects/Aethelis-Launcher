@@ -285,10 +285,10 @@ const mockModCatalog: ModItemDTO[] = [
 
 let mockUpdateInfo: UpdateInfoDTO = {
   has_update: false,
-  version: "0.5.0",
-  current_version: "0.5.0",
-  release_date: "2026-09-20T12:00:00Z",
-  release_notes: "Nord Launcher v0.5.0 (stable channel) release.",
+  version: "0.6.0",
+  current_version: "0.6.0",
+  release_date: "2026-09-24T12:00:00Z",
+  release_notes: "Nord Launcher v0.6.0 (stable channel) release.",
   download_url: "",
   sha256: "",
   size: 0,
@@ -375,10 +375,10 @@ export const launcherAPI = {
   resetMockUpdater(): void {
     mockUpdateInfo = {
       has_update: false,
-      version: "0.5.0",
-      current_version: "0.5.0",
-      release_date: "2026-09-20T12:00:00Z",
-      release_notes: "Nord Launcher v0.5.0 (stable channel) release.",
+      version: "0.6.0",
+      current_version: "0.6.0",
+      release_date: "2026-09-24T12:00:00Z",
+      release_notes: "Nord Launcher v0.6.0 (stable channel) release.",
       download_url: "",
       sha256: "",
       size: 0,
@@ -391,7 +391,7 @@ export const launcherAPI = {
   },
 
   async getCurrentVersion(): Promise<string> {
-    return invokeWails("GetCurrentVersion", () => "0.5.0");
+    return invokeWails("GetCurrentVersion", () => "0.6.0");
   },
 
   async listInstances(): Promise<InstanceDTO[]> {
@@ -765,7 +765,7 @@ export const launcherAPI = {
   async getDiagnosticReport(instanceId: string): Promise<string> {
     return invokeWails<string>(
       "GetDiagnosticReport",
-      () => "=== Nord Launcher Diagnostic Report (Mock) ===\nLauncher Version: 0.5.0",
+      () => "=== Nord Launcher Diagnostic Report (Mock) ===\nLauncher Version: 0.6.0",
       instanceId
     );
   },

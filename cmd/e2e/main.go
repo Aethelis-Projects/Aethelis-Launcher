@@ -1083,7 +1083,7 @@ func main() {
 	// =========================================================================
 	logf("\n--- STEP 12: NetUtil HTTP Client, Content Cache Persistence & Modrinth Meta Header E2E (C6, B7) ---")
 
-	expectedUA := netutil.FormatUserAgent("0.5.0")
+	expectedUA := netutil.FormatUserAgent("0.6.0")
 	var step12UACheckCount int
 	var step12ReceivedModrinthMeta string
 	var step12CFHitCount int
@@ -1193,7 +1193,7 @@ func main() {
 	defer step12Server.Close()
 
 	// 1. Verify NetUtil HTTP Client carries User-Agent
-	netClient := netutil.NewHTTPClient("0.5.0", 5*time.Second)
+	netClient := netutil.NewHTTPClient("0.6.0", 5*time.Second)
 	resp, err := netClient.Get(step12Server.URL + "/v2/search")
 	if err != nil {
 		logf("FAIL: NetUtil NewHTTPClient request failed: %v", err)
@@ -1265,7 +1265,7 @@ func main() {
 	}
 
 	step12Adapter := wails.NewWailsAdapter(nil)
-	step12Adapter.SetVersion("0.5.0")
+	step12Adapter.SetVersion("0.6.0")
 	step12ServerURL, _ := url.Parse(step12Server.URL)
 	step12Adapter.SetAllowedHosts([]string{step12ServerURL.Hostname(), step12ServerURL.Host})
 	step12Adapter.SetFileSystem(fs.NewOSFileSystem(), step12InstancesDir)
@@ -1309,7 +1309,7 @@ func main() {
 		logf("FAIL: Diagnostic report missing header banner: %s", diagReport)
 		os.Exit(1)
 	}
-	if !strings.Contains(diagReport, "0.5.0") {
+	if !strings.Contains(diagReport, "0.6.0") {
 		logf("FAIL: Diagnostic report missing version: %s", diagReport)
 		os.Exit(1)
 	}

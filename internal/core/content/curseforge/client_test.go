@@ -399,14 +399,14 @@ func TestCurseForgeClient_Headers_UserAgentAndAccept(t *testing.T) {
 	defer server.Close()
 
 	client := curseforge.NewClient(server.URL, "my-secret-key", server.Client())
-	client.SetVersion("0.5.0")
+	client.SetVersion("0.6.0")
 
 	_, _, err := client.SearchMods(context.Background(), "test", "1.21.1", "fabric", 20, 0)
 	if err != nil {
 		t.Fatalf("SearchMods failed: %v", err)
 	}
 
-	expectedUA := "NordLauncher/0.5.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"
+	expectedUA := "NordLauncher/0.6.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"
 	if capturedUA != expectedUA {
 		t.Errorf("captured User-Agent = %q; want %q", capturedUA, expectedUA)
 	}

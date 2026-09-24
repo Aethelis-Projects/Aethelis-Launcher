@@ -3,6 +3,25 @@
 All notable changes to Nord Launcher are documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.6.0] - 2026-09-24
+
+### Added
+- Modpack round-trip support for Modrinth (.mrpack) format.
+- Modpack import planner with SHA-1/SHA-512 checksum validation and idempotent download resuming.
+- Modpack export pipeline with instance bundling, config packaging, and override manifest creation.
+- Mod version history browsing with full markdown changelog viewer in ModCatalog.
+- Adoptium Temurin Java runtime update detection and one-click upgrade workflow.
+- Java runtime hygiene with unassigned runtime detection and bulk cleanup.
+- Safeguards preventing Java runtime deletion while associated instances are active.
+- Frontend modals for .mrpack import (plan inspection, progress, error banner) and export.
+
+### Changed
+- Modrinth API client enhanced to parse changelogs, dependencies, and file metadata.
+- Wails IPC bindings extended with 7 new methods for modpacks and Java lifecycle management.
+
+### Security
+- Hardened zip archive extractor against path traversal attacks (zip-slip vulnerability).
+
 ## [0.5.0] - 2026-09-20
 
 ### Added

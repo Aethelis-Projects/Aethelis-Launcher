@@ -24,11 +24,11 @@ func NewFabricClient(baseURL string, client *http.Client) *FabricClient {
 		baseURL = DefaultFabricMetaURL
 	}
 	if client == nil {
-		client = netutil.NewHTTPClient("0.5.0", 15*time.Second)
+		client = netutil.NewHTTPClient("0.6.0", 15*time.Second)
 	}
 	return &FabricClient{
 		baseURL:    baseURL,
-		version:    "0.5.0",
+		version:    "0.6.0",
 		httpClient: client,
 	}
 }
