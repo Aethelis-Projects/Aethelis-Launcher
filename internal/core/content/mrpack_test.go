@@ -138,3 +138,128 @@ func TestMrPack_InvalidZip(t *testing.T) {
 		t.Fatalf("expected error on extract invalid zip, got nil")
 	}
 }
+
+func TestExtractMrPackOverrides_ZipSlip(t *testing.T) {
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	// Create a malicious override entry trying to traverse above destDir
+	fBad, err := zw.Create("overrides/../../escaped.txt")
+	if err != nil {
+		t.Fatalf("create bad entry: %v", err)
+	}
+	_, _ = fBad.Write([]byte("malicious content"))
+	_ = zw.Close()
+
+	destDir := filepath.Join(t.TempDir(), "instance")
+	_ = os.MkdirAll(destDir, 0755)
+
+	zipBytes := buf.Bytes()
+	err = content.ExtractMrPackOverrides(bytes.NewReader(zipBytes), int64(len(zipBytes)), destDir)
+	if err == nil {
+		t.Fatalf("CRITICAL SECURITY ERROR: expected Zip-Slip path traversal to fail, but got nil")
+	}
+
+	// Verify nothing was written outside destDir
+	escapedPath := filepath.Join(destDir, "..", "..", "escaped.txt")
+	if _, statErr := os.Stat(escapedPath); statErr == nil {
+		t.Fatalf("CRITICAL SECURITY ERROR: escaped.txt was written outside destination directory!")
+	}
+}
+
+func TestMrPack_FormatVersionValidation(t *testing.T) {
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+	f, _ := zw.Create("modrinth.index.json")
+	_, _ = f.Write([]byte(`{"formatVersion": 2, "game": "minecraft"}`))
+	_ = zw.Close()
+
+	data := buf.Bytes()
+	_, err := content.ParseMrPack(bytes.NewReader(data), int64(len(data)))
+	if err == nil {
+		t.Fatalf("expected error for formatVersion 2, got nil")
+	}
+}
+
+func TestMrPack_MagicBytesValidation(t *testing.T) {
+	data := []byte("INVALID_BYTES_NOT_ZIP_MAGIC_HEADER")
+	_, err := content.ParseMrPack(bytes.NewReader(data), int64(len(data)))
+	if err == nil {
+		t.Fatalf("expected error on missing zip magic bytes, got nil")
+	}
+}
+
+func TestMrPack_MaxArchiveSizeCap(t *testing.T) {
+	dummyReader := bytes.NewReader([]byte{0x50, 0x4B, 0x03, 0x04})
+	hugeSize := int64(600 * 1024 * 1024) // 600 MB > 512 MB
+	_, err := content.ParseMrPack(dummyReader, hugeSize)
+	if err == nil {
+		t.Fatalf("expected error for size exceeding 512 MB, got nil")
+	}
+}
+
+func TestMrPack_GetImportPlan(t *testing.T) {
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	indexJSON := `{
+		"formatVersion": 1,
+		"game": "minecraft",
+		"versionId": "1.0.0",
+		"name": "Fabulously Optimized",
+		"summary": "Simple optimization pack",
+		"files": [
+			{
+				"path": "mods/sodium.jar",
+				"hashes": {"sha1": "abcd"},
+				"env": {"client": "required"},
+				"downloads": ["https://cdn.modrinth.com/sodium.jar"],
+				"fileSize": 204800
+			},
+			{
+				"path": "mods/iris.jar",
+				"hashes": {"sha1": "efgh"},
+				"env": {"client": "optional"},
+				"downloads": ["https://cdn.modrinth.com/iris.jar"],
+				"fileSize": 102400
+			}
+		],
+		"dependencies": {
+			"minecraft": "1.20.1",
+			"fabric-loader": "0.15.11"
+		}
+	}`
+
+	fIndex, _ := zw.Create("modrinth.index.json")
+	_, _ = fIndex.Write([]byte(indexJSON))
+	_ = zw.Close()
+
+	data := buf.Bytes()
+	plan, err := content.GetMrPackImportPlan(bytes.NewReader(data), int64(len(data)), []string{"Fabulously Optimized"})
+	if err != nil {
+		t.Fatalf("GetMrPackImportPlan failed: %v", err)
+	}
+
+	if plan.Name != "Fabulously Optimized" {
+		t.Errorf("expected pack name 'Fabulously Optimized', got %s", plan.Name)
+	}
+	if plan.GameVersion != "1.20.1" {
+		t.Errorf("expected mc 1.20.1, got %s", plan.GameVersion)
+	}
+	if plan.Loader != "fabric" || plan.LoaderVersion != "0.15.11" {
+		t.Errorf("expected fabric 0.15.11, got %s %s", plan.Loader, plan.LoaderVersion)
+	}
+	if plan.TotalFiles != 2 {
+		t.Errorf("expected 2 files, got %d", plan.TotalFiles)
+	}
+	if plan.RequiredFiles != 1 || plan.OptionalFiles != 1 {
+		t.Errorf("expected 1 required and 1 optional file, got req=%d, opt=%d", plan.RequiredFiles, plan.OptionalFiles)
+	}
+	if plan.TotalBytes != 307200 {
+		t.Errorf("expected 307200 bytes, got %d", plan.TotalBytes)
+	}
+	if len(plan.Conflicts) == 0 {
+		t.Errorf("expected conflict detected for existing instance name, got 0 conflicts")
+	}
+}
+
