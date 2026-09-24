@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/content"
 	"github.com/nord-launcher/launcher/internal/core/domain"
@@ -1005,6 +1006,312 @@ func TestMrPack_GetImportPlan_LoadersAndConflicts(t *testing.T) {
 		t.Errorf("expected missing minecraft conflict, got: %v", plan.Conflicts)
 	}
 }
+
+func TestMrPack_ExportRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	instancesDir := filepath.Join(tmpDir, "instances")
+	exportsDir := filepath.Join(tmpDir, "exports")
+	instID := "test-export-inst"
+	instDir := filepath.Join(instancesDir, instID)
+
+	// Create instance in repo
+	mockRepo := &mockInstanceRepo{}
+	inst := &domain.Instance{
+		ID:          instID,
+		Name:        "Nordic Export Pack",
+		GameVersion: "1.21.1",
+		Loader:      domain.LoaderFabric,
+		LoaderVer:   "0.16.5",
+		State:       domain.StateIdle,
+	}
+	_ = mockRepo.Save(context.Background(), inst)
+
+	// Create directories and files in instanceDir
+	modsDir := filepath.Join(instDir, "mods")
+	configDir := filepath.Join(instDir, "config")
+	logsDir := filepath.Join(instDir, "logs")
+	screenshotsDir := filepath.Join(instDir, "screenshots")
+	_ = os.MkdirAll(modsDir, 0755)
+	_ = os.MkdirAll(configDir, 0755)
+	_ = os.MkdirAll(logsDir, 0755)
+	_ = os.MkdirAll(screenshotsDir, 0755)
+
+	// Mod 1: Modrinth tracked mod
+	mod1Content := []byte("mod sodium jar content")
+	s1 := testSha1Hex(mod1Content)
+	_ = os.WriteFile(filepath.Join(modsDir, "sodium.jar"), mod1Content, 0644)
+
+	// Mod 2: Local untracked mod (no CDN) -> should be packaged in overrides/mods/
+	localModContent := []byte("local custom mod jar content")
+	_ = os.WriteFile(filepath.Join(modsDir, "custom-local.jar"), localModContent, 0644)
+
+	// Manifest with record for sodium.jar
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "sodium",
+		FileName:    "sodium.jar",
+		Source:      "modrinth",
+		VersionID:   "v123",
+		InstalledAt: time.Now(),
+	})
+	_ = m.Save(modsDir)
+
+	// Config file
+	cfgContent := []byte(`{"render_distance": 24}`)
+	_ = os.WriteFile(filepath.Join(configDir, "sodium.json"), cfgContent, 0644)
+
+	// Blacklisted files that must NOT be exported
+	_ = os.WriteFile(filepath.Join(instDir, "nord-launcher.log"), []byte("secret log"), 0644)
+	_ = os.WriteFile(filepath.Join(logsDir, "latest.log"), []byte("game logs"), 0644)
+	_ = os.WriteFile(filepath.Join(screenshotsDir, "shot.png"), []byte("png image"), 0644)
+
+	// Create exporter
+	exporter := content.NewMrPackExporter(mockRepo, nil, instancesDir, exportsDir)
+
+	exportPath := filepath.Join(exportsDir, "exported.mrpack")
+	resPath, err := exporter.ExportMrPack(context.Background(), content.ExportMrPackOptions{
+		InstanceID:  instID,
+		PackName:    "Nordic Performance Export",
+		PackVersion: "1.0.0",
+		Summary:     "Test export pack",
+		ExportPath:  exportPath,
+	})
+	if err != nil {
+		t.Fatalf("ExportMrPack failed: %v", err)
+	}
+	if resPath != exportPath {
+		t.Errorf("expected return path %s, got %s", exportPath, resPath)
+	}
+
+	// Verify export file exists
+	fi, err := os.Stat(exportPath)
+	if err != nil {
+		t.Fatalf("export file does not exist: %v", err)
+	}
+	if fi.Size() == 0 {
+		t.Fatalf("export file is empty")
+	}
+
+	// Round-trip verification: Parse exported .mrpack
+	f, err := os.Open(exportPath)
+	if err != nil {
+		t.Fatalf("open exported mrpack: %v", err)
+	}
+	defer f.Close()
+
+	index, err := content.ParseMrPack(f, fi.Size())
+	if err != nil {
+		t.Fatalf("ParseMrPack on exported file failed: %v", err)
+	}
+
+	// Verify index fields
+	if index.FormatVersion != 1 {
+		t.Errorf("expected formatVersion 1, got %d", index.FormatVersion)
+	}
+	if index.Game != "minecraft" {
+		t.Errorf("expected game minecraft, got %s", index.Game)
+	}
+	if index.Name != "Nordic Performance Export" {
+		t.Errorf("expected pack name 'Nordic Performance Export', got %s", index.Name)
+	}
+	if index.Dependencies["minecraft"] != "1.21.1" {
+		t.Errorf("expected mc 1.21.1, got %s", index.Dependencies["minecraft"])
+	}
+	if index.Dependencies["fabric-loader"] != "0.16.5" {
+		t.Errorf("expected fabric-loader 0.16.5, got %s", index.Dependencies["fabric-loader"])
+	}
+
+	// Verify sodium is in index.Files
+	if len(index.Files) != 1 {
+		t.Fatalf("expected exactly 1 file in index.Files (sodium), got %d", len(index.Files))
+	}
+	if index.Files[0].Path != "mods/sodium.jar" {
+		t.Errorf("expected file path 'mods/sodium.jar', got %s", index.Files[0].Path)
+	}
+	if index.Files[0].Hashes["sha1"] != s1 {
+		t.Errorf("expected sha1 %s, got %s", s1, index.Files[0].Hashes["sha1"])
+	}
+	if len(index.Files[0].Downloads) == 0 || !strings.Contains(index.Files[0].Downloads[0], "cdn.modrinth.com") {
+		t.Errorf("expected modrinth CDN download URL, got: %v", index.Files[0].Downloads)
+	}
+
+	// Verify zip contents and blacklist
+	zr, err := zip.NewReader(f, fi.Size())
+	if err != nil {
+		t.Fatalf("zip reader failed: %v", err)
+	}
+
+	entries := make(map[string]bool)
+	for _, zf := range zr.File {
+		entries[zf.Name] = true
+	}
+
+	// Must contain overrides/config/sodium.json
+	if !entries["overrides/config/sodium.json"] {
+		t.Errorf("missing overrides/config/sodium.json in exported zip")
+	}
+	// Must contain overrides/mods/custom-local.jar (local mod packaged in overrides)
+	if !entries["overrides/mods/custom-local.jar"] {
+		t.Errorf("missing overrides/mods/custom-local.jar in exported zip")
+	}
+
+	// Must NOT contain blacklisted files
+	if entries["nord-launcher.log"] || entries["overrides/nord-launcher.log"] {
+		t.Errorf("blacklisted nord-launcher.log found in export!")
+	}
+	if entries["logs/latest.log"] || entries["overrides/logs/latest.log"] {
+		t.Errorf("blacklisted latest.log found in export!")
+	}
+	if entries["screenshots/shot.png"] || entries["overrides/screenshots/shot.png"] {
+		t.Errorf("blacklisted screenshot found in export!")
+	}
+	if entries["overrides/mods/nord-installs.json"] {
+		t.Errorf("manifest nord-installs.json should not be in overrides!")
+	}
+
+	// Test ExtractMrPackOverrides extracts overrides/ cleanly
+	extractDir := filepath.Join(tmpDir, "extracted")
+	if err := content.ExtractMrPackOverrides(f, fi.Size(), extractDir); err != nil {
+		t.Fatalf("ExtractMrPackOverrides failed: %v", err)
+	}
+	extractedCfg, err := os.ReadFile(filepath.Join(extractDir, "config", "sodium.json"))
+	if err != nil || string(extractedCfg) != string(cfgContent) {
+		t.Errorf("extracted config mismatch: %v", err)
+	}
+	extractedLocal, err := os.ReadFile(filepath.Join(extractDir, "mods", "custom-local.jar"))
+	if err != nil || string(extractedLocal) != string(localModContent) {
+		t.Errorf("extracted local mod mismatch: %v", err)
+	}
+}
+
+type mockContentCache struct {
+	data map[string]string
+}
+
+func (m *mockContentCache) Get(ctx context.Context, kind, key string) (string, time.Time, bool, error) {
+	if m.data == nil {
+		return "", time.Time{}, false, nil
+	}
+	val, ok := m.data[kind+":"+key]
+	return val, time.Now().Add(time.Hour), ok, nil
+}
+
+func (m *mockContentCache) Set(ctx context.Context, kind, key, payload string, ttl time.Duration) error {
+	if m.data == nil {
+		m.data = make(map[string]string)
+	}
+	m.data[kind+":"+key] = payload
+	return nil
+}
+
+func (m *mockContentCache) PruneExpired(ctx context.Context) error { return nil }
+func (m *mockContentCache) Clear(ctx context.Context) error        { return nil }
+
+func TestMrPack_Exporter_CoverageBoosters(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// 1. Defaults
+	defExporter := content.NewMrPackExporter(nil, nil, "", "")
+	if defExporter == nil {
+		t.Fatalf("expected non-nil default exporter")
+	}
+
+	// 2. Empty instance ID
+	_, err := defExporter.ExportMrPack(context.Background(), content.ExportMrPackOptions{InstanceID: ""})
+	if err == nil || !strings.Contains(err.Error(), "instance id cannot be empty") {
+		t.Errorf("expected empty instance id error, got: %v", err)
+	}
+
+	// 3. Nil repo
+	_, err = defExporter.ExportMrPack(context.Background(), content.ExportMrPackOptions{InstanceID: "inst-1"})
+	if err == nil || !strings.Contains(err.Error(), "instance repository is required") {
+		t.Errorf("expected nil repo error, got: %v", err)
+	}
+
+	// 4. Missing instance in repo
+	mockRepo := &mockInstanceRepo{}
+	exporter := content.NewMrPackExporter(mockRepo, nil, tmpDir, tmpDir)
+	_, err = exporter.ExportMrPack(context.Background(), content.ExportMrPackOptions{InstanceID: "missing-inst"})
+	if err == nil || !strings.Contains(err.Error(), "instance not found") {
+		t.Errorf("expected missing instance error, got: %v", err)
+	}
+
+	// 5. Missing instance directory on disk
+	inst := &domain.Instance{
+		ID:          "missing-dir-inst",
+		Name:        "Missing Dir",
+		GameVersion: "1.21.1",
+		Loader:      domain.LoaderQuilt,
+		LoaderVer:   "0.24.0",
+	}
+	_ = mockRepo.Save(context.Background(), inst)
+	_, err = exporter.ExportMrPack(context.Background(), content.ExportMrPackOptions{InstanceID: inst.ID})
+	if err == nil || !strings.Contains(err.Error(), "instance directory does not exist") {
+		t.Errorf("expected missing dir error, got: %v", err)
+	}
+
+	// 6. Test ContentCache lookup and shader/resource whitelist
+	realInstDir := filepath.Join(tmpDir, "instances", "cached-inst")
+	_ = os.MkdirAll(filepath.Join(realInstDir, "mods"), 0755)
+	_ = os.MkdirAll(filepath.Join(realInstDir, "shaderpacks"), 0755)
+	_ = os.MkdirAll(filepath.Join(realInstDir, "resourcepacks"), 0755)
+
+	cacheMod := []byte("cache resolved mod content")
+	cSha1 := testSha1Hex(cacheMod)
+	_ = os.WriteFile(filepath.Join(realInstDir, "mods", "cached.jar"), cacheMod, 0644)
+	_ = os.WriteFile(filepath.Join(realInstDir, "shaderpacks", "bsl.zip"), []byte("shaders"), 0644)
+	_ = os.WriteFile(filepath.Join(realInstDir, "resourcepacks", "faithful.zip"), []byte("resources"), 0644)
+
+	cachedInst := &domain.Instance{
+		ID:          "cached-inst",
+		Name:        "Cached Pack",
+		GameVersion: "1.21.1",
+		Loader:      domain.LoaderNeoForge,
+		LoaderVer:   "21.1.20",
+	}
+	_ = mockRepo.Save(context.Background(), cachedInst)
+
+	cache := &mockContentCache{
+		data: map[string]string{
+			"mod_hash:" + cSha1: "https://cdn.modrinth.com/data/cached/cached.jar",
+		},
+	}
+
+	cacheExporter := content.NewMrPackExporter(mockRepo, cache, filepath.Join(tmpDir, "instances"), filepath.Join(tmpDir, "exports"))
+	exportPath, err := cacheExporter.ExportMrPack(context.Background(), content.ExportMrPackOptions{
+		InstanceID:       cachedInst.ID,
+		IncludeShaders:   true,
+		IncludeResources: true,
+	})
+	if err != nil {
+		t.Fatalf("export with cache failed: %v", err)
+	}
+
+	fi, err := os.Stat(exportPath)
+	if err != nil {
+		t.Fatalf("stat export: %v", err)
+	}
+
+	f, err := os.Open(exportPath)
+	if err != nil {
+		t.Fatalf("open export: %v", err)
+	}
+	defer f.Close()
+
+	index, err := content.ParseMrPack(f, fi.Size())
+	if err != nil {
+		t.Fatalf("parse export index: %v", err)
+	}
+
+	if index.Dependencies["neoforge"] != "21.1.20" {
+		t.Errorf("expected neoforge dep, got: %+v", index.Dependencies)
+	}
+	if len(index.Files) != 1 || index.Files[0].Downloads[0] != "https://cdn.modrinth.com/data/cached/cached.jar" {
+		t.Errorf("expected cached mod download URL, got: %+v", index.Files)
+	}
+}
+
+
 
 
 
