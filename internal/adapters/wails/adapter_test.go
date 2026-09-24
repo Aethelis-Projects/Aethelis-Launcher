@@ -1860,7 +1860,7 @@ func TestWailsAdapter_CheckModUpdates(t *testing.T) {
 
 func TestWailsAdapter_GetDiagnosticReport(t *testing.T) {
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetVersion("0.5.0")
+	adapter.SetVersion("0.6.0")
 
 	tmpDir := t.TempDir()
 	instDir := filepath.Join(tmpDir, "instances")
@@ -1894,7 +1894,7 @@ func TestWailsAdapter_GetDiagnosticReport(t *testing.T) {
 	if !strings.Contains(report, "=== Nord Launcher Diagnostic Report ===") {
 		t.Errorf("expected diagnostic header in report")
 	}
-	if !strings.Contains(report, "Launcher Version: 0.5.0") {
+	if !strings.Contains(report, "Launcher Version: 0.6.0") {
 		t.Errorf("expected launcher version in report")
 	}
 	if !strings.Contains(report, "OS:") || !strings.Contains(report, "Architecture:") {

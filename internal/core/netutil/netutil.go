@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	DefaultVersion = "0.5.0"
+	DefaultVersion = "0.6.0"
 	RepoURL        = "https://github.com/Aethelis-Projects/Aethelis-Launcher"
 )
 

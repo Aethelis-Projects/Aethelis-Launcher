@@ -37,9 +37,9 @@ describe("App Component (B1, B2, D2, M1)", () => {
     vi.restoreAllMocks();
     vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
       has_update: false,
-      version: "0.5.0",
-      current_version: "0.5.0",
-      release_date: "2026-09-20T12:00:00Z",
+      version: "0.6.0",
+      current_version: "0.6.0",
+      release_date: "2026-09-24T12:00:00Z",
       release_notes: "",
       download_url: "",
       sha256: "",
@@ -306,9 +306,9 @@ describe("App Component (B1, B2, D2, M1)", () => {
       vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
       vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
         has_update: false,
-        version: "0.5.0",
-        current_version: "0.5.0",
-        release_date: "2026-09-20T12:00:00Z",
+        version: "0.6.0",
+        current_version: "0.6.0",
+        release_date: "2026-09-24T12:00:00Z",
         release_notes: "",
         download_url: "",
         sha256: "",
@@ -327,8 +327,8 @@ describe("App Component (B1, B2, D2, M1)", () => {
       vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
       vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
         has_update: true,
-        version: "0.5.1",
-        current_version: "0.5.0",
+        version: "0.6.1",
+        current_version: "0.6.0",
         release_date: "2026-09-25T12:00:00Z",
         release_notes: "### Added\n- Awesome feature",
         download_url: "https://example.com/update.exe",
@@ -340,7 +340,7 @@ describe("App Component (B1, B2, D2, M1)", () => {
 
       const modal = await screen.findByTestId("startup-update-modal");
       expect(modal).toBeTruthy();
-      expect(screen.getByText("Доступно обновление Nord Launcher v0.5.1")).toBeTruthy();
+      expect(screen.getByText("Доступно обновление Nord Launcher v0.6.1")).toBeTruthy();
       expect(screen.getByTestId("nav-settings-update-dot")).toBeTruthy();
     });
 
@@ -348,8 +348,8 @@ describe("App Component (B1, B2, D2, M1)", () => {
       vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
       vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
         has_update: true,
-        version: "0.5.1",
-        current_version: "0.5.0",
+        version: "0.6.1",
+        current_version: "0.6.0",
         release_date: "2026-09-25T12:00:00Z",
         release_notes: "### Added\n- Awesome feature",
         download_url: "https://example.com/update.exe",
@@ -376,8 +376,8 @@ describe("App Component (B1, B2, D2, M1)", () => {
       vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
       vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
         has_update: true,
-        version: "0.5.1",
-        current_version: "0.5.0",
+        version: "0.6.1",
+        current_version: "0.6.0",
         release_date: "2026-09-25T12:00:00Z",
         release_notes: "Changelog",
         download_url: "https://example.com/update.exe",
@@ -397,8 +397,8 @@ describe("App Component (B1, B2, D2, M1)", () => {
       vi.spyOn(launcherAPI, "listInstances").mockResolvedValue(mockInstances);
       vi.spyOn(launcherAPI, "checkForUpdates").mockResolvedValue({
         has_update: true,
-        version: "0.5.1",
-        current_version: "0.5.0",
+        version: "0.6.1",
+        current_version: "0.6.0",
         release_date: "2026-09-25T12:00:00Z",
         release_notes: "Changelog",
         download_url: "https://example.com/update.exe",

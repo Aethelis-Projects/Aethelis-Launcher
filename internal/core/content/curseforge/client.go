@@ -190,13 +190,13 @@ func NewClient(baseURL, apiKey string, httpClient *http.Client) *Client {
 		apiKey = GetBuiltinAPIKey()
 	}
 	if httpClient == nil {
-		httpClient = netutil.NewHTTPClient("0.5.0", 30*time.Second)
+		httpClient = netutil.NewHTTPClient("0.6.0", 30*time.Second)
 	}
 	clk := clock.NewRealClock()
 	return &Client{
 		baseURL:     baseURL,
 		apiKey:      apiKey,
-		version:     "0.5.0",
+		version:     "0.6.0",
 		httpClient:  httpClient,
 		clock:       clk,
 		limiter:     newTokenBucket(1.0, 5.0, clk),

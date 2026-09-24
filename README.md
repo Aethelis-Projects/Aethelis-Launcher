@@ -160,6 +160,7 @@ Every push and pull request must pass the CI Quality Gate:
 - **v0.3.0** — CurseForge & Modrinth integration, sidecar key resolution.
 - **v0.4.0** — Contextual mod management, deterministic version selection, sidecar manifest & reconcile.
 - **v0.5.0** — CurseForge resilience, SQLite content cache, startup update modal & honest 7-state badge.
+- **v0.6.0** — Modpack Round-trip (.mrpack), Mod Version Histories & Changelogs, Temurin update detection & runtime hygiene.
 - **Later** — beta update channel, opt-in telemetry, macOS.
 
 ---

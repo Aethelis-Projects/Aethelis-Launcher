@@ -19,7 +19,7 @@ const (
 	DefaultBaseURL = "https://api.modrinth.com"
 )
 
-var DefaultUserAgent = netutil.FormatUserAgent("0.5.0")
+var DefaultUserAgent = netutil.FormatUserAgent("0.6.0")
 
 type Client struct {
 	baseURL    string
@@ -32,7 +32,7 @@ func NewClient(baseURL string, httpClient *http.Client) *Client {
 		baseURL = DefaultBaseURL
 	}
 	if httpClient == nil {
-		httpClient = netutil.NewHTTPClient("0.5.0", 30*time.Second)
+		httpClient = netutil.NewHTTPClient("0.6.0", 30*time.Second)
 	}
 	return &Client{
 		baseURL:    baseURL,
