@@ -566,6 +566,7 @@ func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO
 					GameVersions: v.GameVersions,
 					Loaders:      v.Loaders,
 					DownloadURL:  f.URL,
+					Changelog:    v.Changelog,
 				})
 			}
 		}

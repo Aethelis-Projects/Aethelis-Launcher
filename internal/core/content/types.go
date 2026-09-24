@@ -89,6 +89,7 @@ type ModVersion struct {
 	VersionNum   string          `json:"version_number"`
 	Name         string          `json:"name"`
 	VersionType  string          `json:"version_type,omitempty"` // "release", "beta", "alpha"
+	Changelog    string          `json:"changelog,omitempty"`
 	GameVersions []string        `json:"game_versions"`
 	Loaders      []string        `json:"loaders"`
 	Files        []ModFile       `json:"files"`
