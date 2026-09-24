@@ -28,11 +28,13 @@ const (
 type InstanceState string
 
 const (
-	StateIdle       InstanceState = "idle"
+	StateIdle        InstanceState = "idle"
 	StateDownloading InstanceState = "downloading"
 	StateLaunching   InstanceState = "launching"
 	StateRunning     InstanceState = "running"
 	StateCrashed     InstanceState = "crashed"
+	StateImporting   InstanceState = "importing"
+	StateError       InstanceState = "error"
 )
 
 // Instance represents an isolated Minecraft installation.
