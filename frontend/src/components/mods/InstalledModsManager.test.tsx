@@ -188,4 +188,39 @@ describe("InstalledModsManager Component", () => {
     expect(modal.textContent).toContain("0.5.9");
     expect(modal.textContent).toContain("fabric-api");
   });
+
+  it("displays duplicate heal toast on mount if disabled duplicate mods exist (C1/tail)", async () => {
+    launcherAPI.setMockInstalledMods("nord-opti-1", [
+      {
+        file_name: "sodium-fabric-0.5.9.jar",
+        mod_id: "sodium",
+        name: "Sodium",
+        version: "0.5.9",
+        enabled: true,
+        size_bytes: 1048576,
+      },
+      {
+        file_name: "sodium-fabric-0.5.8.jar.disabled",
+        mod_id: "sodium",
+        name: "Sodium",
+        version: "0.5.8",
+        enabled: false,
+        size_bytes: 1048000,
+      },
+    ]);
+
+    render(() => <InstalledModsManager instanceId="nord-opti-1" />);
+
+    const toast = await screen.findByTestId("duplicate-heal-toast");
+    expect(toast.textContent).toContain("Отключены устаревшие дубликаты (1)");
+    expect(toast.textContent).toContain("sodium-fabric-0.5.8.jar");
+
+    const closeBtn = toast.querySelector('button[title="Скрыть"]');
+    expect(closeBtn).toBeTruthy();
+    fireEvent.click(closeBtn!);
+
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId("duplicate-heal-toast")).toBeNull();
+    });
+  });
 });
