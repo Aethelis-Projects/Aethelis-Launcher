@@ -153,7 +153,7 @@ func TestManifest_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
 		t.Errorf("expected changed=true on duplicate self-heal")
 	}
 	if len(res.DisabledDuplicates) != 1 || res.DisabledDuplicates[0] != "modmenu-11.0.4.jar" {
-		t.Errorf("expected disabled duplicate ['modmenu-11.0.4.jar'], got: %v", res.DisabledDuplicates)
+		t.Errorf("expected deleted duplicate ['modmenu-11.0.4.jar'], got: %v", res.DisabledDuplicates)
 	}
 
 	// Verify new file is still active
@@ -161,13 +161,13 @@ func TestManifest_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
 		t.Errorf("expected newer file to remain active, but stat failed: %v", err)
 	}
 
-	// Verify old file is renamed to .disabled
-	if _, err := os.Stat(oldFile); err == nil {
-		t.Errorf("expected old active jar to no longer exist")
+	// Verify old file is DELETED (not renamed to .disabled)
+	if _, err := os.Stat(oldFile); err == nil || !os.IsNotExist(err) {
+		t.Errorf("expected old active jar to be deleted")
 	}
 	disabledOld := filepath.Join(tempDir, "modmenu-11.0.4.jar.disabled")
-	if _, err := os.Stat(disabledOld); err != nil {
-		t.Errorf("expected old jar to be renamed to .disabled: %v", err)
+	if _, err := os.Stat(disabledOld); err == nil || !os.IsNotExist(err) {
+		t.Errorf("expected old jar to not exist as .disabled")
 	}
 
 	// Idempotency: second reconcile should find 0 disabled duplicates

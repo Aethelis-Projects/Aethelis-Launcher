@@ -209,11 +209,12 @@ func (m *InstallsManifest) GetRecord(fileName string) *ModRecord {
 
 // ReconcileWithDisk audits the manifest against the actual files on disk in modsDir.
 // The filesystem is the source of truth:
-// 1. Duplicate active .jar files for the same canonical mod are self-healed: the newest is kept, older are renamed to .jar.disabled.
-// 2. Files on disk not tracked in the manifest are synthesized and added.
-// 3. Tracked records missing from disk (neither .jar nor .jar.disabled) are removed.
-// 4. Status changes (.jar <-> .jar.disabled) update the record's FileName.
-// Returns a ReconcileResult with change status and list of disabled duplicate filenames.
+// 1. Duplicate active .jar files for the same canonical mod are cleaned: the newest is kept, older are deleted.
+// 2. Lingering .disabled files for which an active version exists are deleted.
+// 3. Files on disk not tracked in the manifest are synthesized and added.
+// 4. Tracked records missing from disk (neither .jar nor .jar.disabled) are removed.
+// 5. Status changes (.jar <-> .jar.disabled) update the record's FileName.
+// Returns a ReconcileResult with change status and list of deleted duplicate filenames.
 func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -232,6 +233,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 
 	changed := false
 	var disabledDuplicates []string
+	deletedSet := make(map[string]bool)
 
 	// 1. Detect duplicate active .jar files and self-heal
 	type activeFileEntry struct {
@@ -282,25 +284,53 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 			return files[i].name > files[j].name
 		})
 
-		// files[0] is the newest: kept active. Older duplicates (files[1..]) are renamed to .disabled.
+		// files[0] is the newest: kept active. Older duplicates (files[1..]) are deleted.
 		for k := 1; k < len(files); k++ {
 			oldName := files[k].name
-			disabledName := oldName + ".disabled"
 			oldPath := filepath.Join(modsDir, oldName)
-			newPath := filepath.Join(modsDir, disabledName)
 
-			if err := os.Rename(oldPath, newPath); err == nil {
-				disabledDuplicates = append(disabledDuplicates, oldName)
+			if err := os.Remove(oldPath); err == nil || os.IsNotExist(err) {
+				if !deletedSet[oldName] {
+					deletedSet[oldName] = true
+					disabledDuplicates = append(disabledDuplicates, oldName)
+				}
 				changed = true
 				cleanOld := CleanModKey(oldName)
-				if rec, ok := m.Mods[cleanOld]; ok && rec != nil {
-					rec.FileName = disabledName
+				delete(m.Mods, cleanOld)
+			}
+			// Also clean up any lingering .disabled file for this older duplicate
+			disabledOldPath := filepath.Join(modsDir, oldName+".disabled")
+			if _, err := os.Stat(disabledOldPath); err == nil {
+				_ = os.Remove(disabledOldPath) // errcheck:ok
+			}
+		}
+	}
+
+	// 1b. Delete any stale .disabled duplicate files where an active version of the same mod exists
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".disabled") {
+			canonKey := m.CanonicalModKey(name)
+			if activeFiles, ok := activeByMod[canonKey]; ok && len(activeFiles) > 0 {
+				disabledPath := filepath.Join(modsDir, name)
+				if err := os.Remove(disabledPath); err == nil || os.IsNotExist(err) {
+					cleanOld := CleanModKey(name)
+					cleanName := strings.TrimSuffix(name, ".disabled")
+					if !deletedSet[cleanName] {
+						deletedSet[cleanName] = true
+						disabledDuplicates = append(disabledDuplicates, cleanName)
+					}
+					changed = true
+					delete(m.Mods, cleanOld)
 				}
 			}
 		}
 	}
 
-	// 2. Re-read directory entries after possible renames
+	// 2. Re-read directory entries after deletions
 	if len(disabledDuplicates) > 0 {
 		if updatedEntries, err := os.ReadDir(modsDir); err == nil {
 			entries = updatedEntries
