@@ -212,7 +212,7 @@ func TestAdoptiumClient_Headers_UserAgentAndAccept(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	expectedUA := netutil.FormatUserAgent("0.6.0")
+	expectedUA := netutil.FormatUserAgent("0.6.1")
 
 	// 1. Client with custom http.Client (wraps Transport)
 	client := java.NewAdoptiumClient(srv.URL, srv.Client())

@@ -30,6 +30,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
   const [status, setStatus] = createSignal<UpdateStatus>("idle");
   const [updateInfo, setUpdateInfo] = createSignal<UpdateInfoDTO | null>(null);
   const [installedVersion, setInstalledVersion] = createSignal<string>("");
+  const [lastCheckedTime, setLastCheckedTime] = createSignal<string>("");
   const [applyResult, setApplyResult] = createSignal<UpdateApplyResultDTO | null>(null);
   const [errorMessage, setErrorMessage] = createSignal<string>("");
   const currentChannel = () => props.channel || "stable";
@@ -57,6 +58,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
     try {
       const info = await launcherAPI.checkForUpdates();
       setUpdateInfo(info);
+      setLastCheckedTime(new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
       if (info.has_update) {
         setStatus("available");
         if (props.onUpdateAvailable) {
@@ -156,30 +158,38 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
         </div>
 
         <div class="mt-6 flex items-center justify-between pt-4 border-t border-white/5">
-          <span class="text-xs text-zinc-400">
-            {status() === "checking"
-              ? "Checking remote manifest..."
-              : status() === "available"
-              ? "New update available"
-              : status() === "up_to_date"
-              ? "System is up to date"
-              : "Check for release updates"}
-          </span>
+          <div class="flex flex-col gap-0.5">
+            <span class="text-xs text-zinc-300 font-medium">
+              {status() === "checking"
+                ? "Проверка удаленного манифеста..."
+                : status() === "available"
+                ? "Доступна новая версия"
+                : status() === "up_to_date"
+                ? "Установлена актуальная версия"
+                : "Проверка обновлений релиза"}
+            </span>
+            <Show when={lastCheckedTime()}>
+              <span class="text-[11px] font-mono text-zinc-500">
+                Последняя проверка: {lastCheckedTime()}
+              </span>
+            </Show>
+          </div>
 
           <button
             type="button"
             onClick={handleCheck}
             disabled={status() === "checking" || status() === "applying"}
-            class="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-white text-xs font-medium font-mono border border-white/10 transition-all cursor-pointer disabled:cursor-not-allowed shadow-sm"
+            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-nord-cyan hover:bg-nord-cyan/90 disabled:opacity-50 text-nord-dark text-xs font-bold font-mono border border-nord-cyan/30 transition-all cursor-pointer disabled:cursor-not-allowed shadow-[0_0_12px_rgba(0,212,178,0.2)]"
+            title="Проверить обновления / Check for updates"
             data-testid="check-updates-button"
           >
             <Show
               when={status() === "checking"}
-              fallback={<RefreshCw class="w-3.5 h-3.5 text-nord-cyan" />}
+              fallback={<RefreshCw class="w-4 h-4 text-nord-dark" />}
             >
-              <Loader2 class="w-3.5 h-3.5 text-nord-cyan animate-spin" />
+              <Loader2 class="w-4 h-4 text-nord-dark animate-spin" />
             </Show>
-            <span>{status() === "checking" ? "Checking..." : "Check for updates"}</span>
+            <span>{status() === "checking" ? "Проверка... / Checking..." : "Проверить обновления / Check for updates"}</span>
           </button>
         </div>
       </section>
@@ -187,16 +197,30 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
       {/* Up-to-date State */}
       <Show when={status() === "up_to_date"}>
         <section
-          class="p-5 rounded-xl bg-nord-emerald/10 border border-nord-emerald/20 flex items-center gap-4 transition-all"
+          class="p-5 rounded-xl bg-nord-emerald/10 border border-nord-emerald/20 flex items-center justify-between gap-4 transition-all"
           data-testid="up-to-date-banner"
         >
-          <div class="w-10 h-10 rounded-lg bg-nord-emerald/20 flex items-center justify-center text-nord-emerald shrink-0">
-            <CheckCircle2 class="w-5 h-5" />
+          <div class="flex items-center gap-4">
+            <div class="w-10 h-10 rounded-lg bg-nord-emerald/20 flex items-center justify-center text-nord-emerald shrink-0">
+              <CheckCircle2 class="w-5 h-5" />
+            </div>
+            <div class="flex flex-col">
+              <span class="font-semibold text-sm text-white">
+                Установлена актуальная версия / You are running the latest version
+              </span>
+              <span class="text-xs text-zinc-300 mt-0.5">
+                Nord Launcher {currentDisplayVersion()} обновлен до актуальной версии. Обновлений не найдено.
+              </span>
+              <Show when={lastCheckedTime()}>
+                <span class="text-[11px] font-mono text-zinc-400 mt-1" data-testid="last-checked-time">
+                  Последняя проверка: {lastCheckedTime()}
+                </span>
+              </Show>
+            </div>
           </div>
-          <div class="flex flex-col">
-            <span class="font-semibold text-sm text-white">You are running the latest version</span>
-            <span class="text-xs text-zinc-400 mt-0.5">
-              Nord Launcher {currentDisplayVersion()} is up to date.
+          <div class="shrink-0">
+            <span class="px-2.5 py-1 rounded-md text-xs font-mono font-medium bg-nord-emerald/20 text-nord-emerald border border-nord-emerald/30">
+              Актуально
             </span>
           </div>
         </section>
@@ -348,7 +372,7 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
           <div class="flex items-center gap-3">
             <AlertCircle class="w-5 h-5 text-red-400 shrink-0" />
             <div class="flex flex-col">
-              <span class="text-sm font-semibold text-white">Operation failed</span>
+              <span class="text-sm font-semibold text-white">Ошибка проверки обновлений / Operation failed</span>
               <span class="text-xs text-red-300 font-mono mt-0.5" data-testid="error-message">
                 {errorMessage()}
               </span>
@@ -358,10 +382,10 @@ export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
           <button
             type="button"
             onClick={handleCheck}
-            class="px-3.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-mono font-medium text-white border border-white/10 transition-colors shrink-0"
+            class="px-3.5 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs font-mono font-medium text-white border border-white/10 transition-colors shrink-0 cursor-pointer"
             data-testid="retry-button"
           >
-            Retry
+            Повторить / Retry
           </button>
         </section>
       </Show>

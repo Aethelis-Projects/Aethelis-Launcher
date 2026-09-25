@@ -3,6 +3,22 @@
 All notable changes to Nord Launcher are documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.6.1] - 2026-09-25
+
+### Added
+- Manifest-driven Java recommendation chip in Instance Settings with 1-click install/select action (F2, H3).
+- Expanded LTS Java matrix supporting Java 25 for Minecraft 26.1+, Adoptium 25 download provisioner, and Java Manager offer list {25, 21, 17, 11, 8}.
+- Platform native folder opener (OpenPath) integrating native file managers (explorer on Windows, open on macOS, xdg-open on Linux) across MrPackExportModal, InstanceSettingsModal, and InstanceCard (F3).
+- Prominent manual update check button, last checked timestamp tracking, and clear status indicators in UpdatePanel (F4, H4).
+
+### Fixed
+- Atomic mod update workflow with immediate target file replacement and reliable deletion of older .jar versions (F1, H1).
+- Self-healing duplicate active mod .jar files during instance disk reconciliation by disabling stale duplicates (F1, H1).
+- Fixed phantom update loop in CheckModUpdates by ensuring target version comparison ignores identical versions (F1, H2).
+
+### Changed
+- Bumped application version to v0.6.1 across desktop runtime, IPC bindings, netutil user-agent, and frontend (H5).
+
 ## [0.6.0] - 2026-09-24
 
 ### Added
