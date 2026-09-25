@@ -2,6 +2,7 @@ import { Component, createSignal, createResource, createEffect, on, For, Show } 
 import { Package, Trash2, Power, Search, RefreshCw, Download, Loader2, X } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstalledModDTO, ModUpdateItemDTO } from "../../bindings/ipc_types";
+import { ModUpdatesDiffModal } from "./ModUpdatesDiffModal";
 
 interface InstalledModsManagerProps {
   instanceId: string;
@@ -21,6 +22,7 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
   const [updatingAll, setUpdatingAll] = createSignal(false);
   const [updatingFiles, setUpdatingFiles] = createSignal<Set<string>>(new Set());
   const [updateError, setUpdateError] = createSignal<string | null>(null);
+  const [showDiffModal, setShowDiffModal] = createSignal(false);
 
   const normName = (fn: string) => fn.replace(/\.disabled$/, "");
 
@@ -207,9 +209,15 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
 
             <Show when={updates().length > 0}>
               <div class="flex items-center gap-2" data-testid="updates-banner">
-                <span class="text-xs font-mono px-2 py-0.5 rounded bg-[#00D4B2]/10 border border-[#00D4B2]/40 text-[#00D4B2] font-semibold">
+                <button
+                  type="button"
+                  onClick={() => setShowDiffModal(true)}
+                  data-testid="updates-diff-chip-btn"
+                  title="Посмотреть подробности обновлений"
+                  class="text-xs font-mono px-2 py-0.5 rounded bg-[#00D4B2]/10 border border-[#00D4B2]/40 text-[#00D4B2] font-semibold hover:bg-[#00D4B2]/20 hover:border-[#00D4B2] transition-colors cursor-pointer"
+                >
                   {updates().length} обновлений доступно
-                </span>
+                </button>
                 <button
                   type="button"
                   onClick={handleUpdateAll}
@@ -362,6 +370,17 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
           )}
         </For>
       </div>
+
+      <ModUpdatesDiffModal
+        isOpen={showDiffModal()}
+        onClose={() => setShowDiffModal(false)}
+        installedMods={mods() || []}
+        updates={updates()}
+        onUpdateMod={handleUpdateMod}
+        onUpdateAll={handleUpdateAll}
+        updatingFiles={updatingFiles()}
+        updatingAll={updatingAll()}
+      />
     </div>
   );
 };

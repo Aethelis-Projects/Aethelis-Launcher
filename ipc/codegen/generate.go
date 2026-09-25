@@ -173,6 +173,7 @@ type ModFileDTO struct {
 	Loaders      []string ` + "`" + `json:"loaders"` + "`" + `
 	DownloadURL  string   ` + "`" + `json:"download_url"` + "`" + `
 	Changelog    string   ` + "`" + `json:"changelog,omitempty"` + "`" + `
+	Dependencies []string ` + "`" + `json:"dependencies,omitempty"` + "`" + `
 }
 
 type ModUpdateItemDTO struct {
@@ -183,6 +184,8 @@ type ModUpdateItemDTO struct {
 	LatestVersion   string ` + "`" + `json:"latest_version"` + "`" + `
 	LatestVersionID string ` + "`" + `json:"latest_version_id"` + "`" + `
 	ReleaseType     string ` + "`" + `json:"release_type"` + "`" + `
+	Dependencies    []string ` + "`" + `json:"dependencies,omitempty"` + "`" + `
+	Changelog       string   ` + "`" + `json:"changelog,omitempty"` + "`" + `
 }
 
 type ModInstallProgressDTO struct {
@@ -459,6 +462,7 @@ export interface ModFileDTO {
   loaders: string[];
   download_url: string;
   changelog?: string;
+  dependencies?: string[];
 }
 
 export interface ModUpdateItemDTO {
@@ -469,6 +473,8 @@ export interface ModUpdateItemDTO {
   latest_version: string;
   latest_version_id: string;
   release_type: string;
+  dependencies?: string[];
+  changelog?: string;
 }
 
 export interface ModInstallProgressDTO {

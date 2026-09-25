@@ -167,6 +167,7 @@ export interface ModFileDTO {
   loaders: string[];
   download_url: string;
   changelog?: string;
+  dependencies?: string[];
 }
 
 export interface ModUpdateItemDTO {
@@ -177,6 +178,8 @@ export interface ModUpdateItemDTO {
   latest_version: string;
   latest_version_id: string;
   release_type: string;
+  dependencies?: string[];
+  changelog?: string;
 }
 
 export interface ModInstallProgressDTO {
