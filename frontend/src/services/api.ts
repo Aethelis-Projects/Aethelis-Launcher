@@ -22,6 +22,7 @@ import type {
   SetSettingRequest,
   InstallModRequest,
   InstallModResponse,
+  UpdateModRequest,
   JavaInstallationDTO,
   JavaDownloadStatusDTO,
   ModUpdateItemDTO,
@@ -55,6 +56,7 @@ interface WailsAdapterBindings {
   GetSettings?: () => Promise<GetSettingsResponse>;
   SetSetting?: (req: SetSettingRequest) => Promise<void>;
   InstallMod?: (req: InstallModRequest) => Promise<InstallModResponse>;
+  UpdateMod?: (req: UpdateModRequest) => Promise<InstallModResponse>;
   HasBuiltinCurseForgeKey?: () => Promise<boolean>;
   GetLogTail?: (instanceId: string, n: number) => Promise<string[]>;
   ListJavaRuntimes?: () => Promise<JavaInstallationDTO[]>;
@@ -649,6 +651,39 @@ export const launcherAPI = {
     );
     if (!res.success) {
       throw new Error(res.message || "Failed to install mod");
+    }
+    return res;
+  },
+
+  async updateMod(req: UpdateModRequest): Promise<InstallModResponse> {
+    const res = await invokeWails<InstallModResponse>(
+      "UpdateMod",
+      () => {
+        const instMods = mockInstalledMods[req.instance_id] || [];
+        const oldIdx = instMods.findIndex((m) => m.file_name === req.old_file_name);
+        const newFileName = `${req.mod_id}-${req.target_version_id || "latest"}.jar`;
+        if (oldIdx !== -1) {
+          instMods.splice(oldIdx, 1);
+        }
+        instMods.push({
+          file_name: newFileName,
+          mod_id: req.mod_id,
+          name: req.mod_id,
+          version: req.target_version_id,
+          enabled: true,
+          size_bytes: 1572864,
+        });
+        mockInstalledMods[req.instance_id] = instMods;
+        return {
+          success: true,
+          file_name: newFileName,
+          message: `Mod ${newFileName} updated successfully`,
+        };
+      },
+      req
+    );
+    if (!res.success) {
+      throw new Error(res.message || "Failed to update mod");
     }
     return res;
   },

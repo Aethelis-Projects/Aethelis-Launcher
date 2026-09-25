@@ -759,9 +759,12 @@ func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, 
 	if err != nil {
 		m = manifest.NewManifest()
 	}
-	changed, _ := m.ReconcileWithDisk(modsDir)
-	if changed {
+	recRes, _ := m.ReconcileWithDisk(modsDir)
+	if recRes != nil && recRes.Changed {
 		_ = m.Save(modsDir) // errcheck:ok best effort manifest save on reconcile
+		if updatedEntries, err := os.ReadDir(modsDir); err == nil {
+			entries = updatedEntries
+		}
 	}
 
 	var res []InstalledModDTO
@@ -1425,6 +1428,445 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 	}, nil
 }
 
+func (a *WailsAdapter) UpdateMod(req UpdateModRequest) (*InstallModResponse, error) {
+	if strings.TrimSpace(req.InstanceID) == "" {
+		return nil, errors.New("instance_id is required")
+	}
+	if strings.TrimSpace(req.ModID) == "" {
+		return nil, errors.New("mod_id is required")
+	}
+	if strings.TrimSpace(req.OldFileName) == "" {
+		return nil, errors.New("old_file_name is required")
+	}
+
+	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+		TaskID:     fmt.Sprintf("update-%s", req.ModID),
+		InstanceID: req.InstanceID,
+		ModID:      req.ModID,
+		Status:     "resolving_dependencies",
+		Percentage: 10,
+	})
+
+	var updateErr error
+	defer func() {
+		if updateErr != nil {
+			a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+				TaskID:     fmt.Sprintf("update-%s", req.ModID),
+				InstanceID: req.InstanceID,
+				ModID:      req.ModID,
+				Status:     "failed",
+				Error:      updateErr.Error(),
+			})
+		}
+	}()
+
+	source := strings.ToLower(strings.TrimSpace(req.Source))
+	if source == "" {
+		source = "modrinth"
+	}
+
+	var gameVersion, loader string
+	if a.svc != nil {
+		if inst, err := a.svc.GetInstance(req.InstanceID); err == nil && inst != nil {
+			gameVersion = inst.GameVersion
+			loader = string(inst.Loader)
+		}
+	}
+	if req.GameVersion != "" {
+		gameVersion = req.GameVersion
+	}
+	if req.Loader != "" {
+		loader = req.Loader
+	}
+
+	var fileToDownload *content.ModFile
+
+	switch source {
+	case "modrinth":
+		a.mu.RLock()
+		mr := a.modrinth
+		a.mu.RUnlock()
+		if mr == nil {
+			updateErr = errors.New("modrinth client not initialized")
+			return nil, updateErr
+		}
+
+		ctx := context.Background()
+		versions, err := mr.GetProjectVersions(ctx, req.ModID, gameVersion, loader)
+		if (err != nil || len(versions) == 0) && (gameVersion != "" || loader != "") {
+			if vFallback, err2 := mr.GetProjectVersions(ctx, req.ModID, "", ""); err2 == nil && len(vFallback) > 0 {
+				versions = vFallback
+				err = nil
+			}
+		}
+		if err != nil {
+			updateErr = fmt.Errorf("fetch modrinth versions: %w", err)
+			return nil, updateErr
+		}
+		if len(versions) == 0 {
+			updateErr = errors.New("no compatible versions found for mod")
+			return nil, updateErr
+		}
+
+		if req.TargetVersionID != "" {
+			for i := range versions {
+				v := &versions[i]
+				if v.ID == req.TargetVersionID {
+					for j := range v.Files {
+						if v.Files[j].Primary {
+							fileToDownload = &v.Files[j]
+							break
+						}
+					}
+					if fileToDownload == nil && len(v.Files) > 0 {
+						fileToDownload = &v.Files[0]
+					}
+					break
+				}
+				for j := range v.Files {
+					if v.Files[j].ID == req.TargetVersionID {
+						fileToDownload = &v.Files[j]
+						break
+					}
+				}
+				if fileToDownload != nil {
+					break
+				}
+			}
+		}
+
+		if fileToDownload == nil {
+			selRes, err := content.SelectBestModVersion(versions, gameVersion, loader)
+			if err != nil {
+				updateErr = err
+				return nil, updateErr
+			}
+			fileToDownload = selRes.File
+		}
+
+	case "curseforge":
+		a.mu.RLock()
+		cf := a.curseforge
+		a.mu.RUnlock()
+		if cf == nil {
+			updateErr = errors.New("curseforge client not initialized")
+			return nil, updateErr
+		}
+
+		cfModID, err := strconv.ParseInt(req.ModID, 10, 64)
+		if err != nil {
+			updateErr = fmt.Errorf("invalid curseforge mod id: %w", err)
+			return nil, updateErr
+		}
+
+		ctx := context.Background()
+		files, err := cf.GetModFiles(ctx, cfModID, gameVersion, loader)
+		if (err != nil || len(files) == 0) && (gameVersion != "" || loader != "") {
+			if fFallback, err2 := cf.GetModFiles(ctx, cfModID, "", ""); err2 == nil && len(fFallback) > 0 {
+				files = fFallback
+				err = nil
+			}
+		}
+		if err != nil {
+			updateErr = fmt.Errorf("fetch curseforge files: %w", err)
+			return nil, updateErr
+		}
+		if len(files) == 0 {
+			updateErr = errors.New("no compatible files found for mod")
+			return nil, updateErr
+		}
+
+		if req.TargetVersionID != "" {
+			for i := range files {
+				if files[i].ID == req.TargetVersionID {
+					fileToDownload = &files[i]
+					break
+				}
+			}
+		}
+
+		if fileToDownload == nil {
+			selRes, err := content.SelectBestModFile(files, gameVersion, loader)
+			if err != nil {
+				updateErr = err
+				return nil, updateErr
+			}
+			fileToDownload = selRes.File
+		}
+
+	default:
+		updateErr = fmt.Errorf("unsupported mod source: %s", req.Source)
+		return nil, updateErr
+	}
+
+	if fileToDownload == nil || fileToDownload.URL == "" {
+		updateErr = errors.New("mod file download URL is missing")
+		return nil, updateErr
+	}
+
+	parsedURL, err := url.Parse(fileToDownload.URL)
+	if err != nil {
+		updateErr = fmt.Errorf("invalid download URL: %w", err)
+		return nil, updateErr
+	}
+	if !a.isAllowedDownloadHost(parsedURL.Host) {
+		updateErr = fmt.Errorf("download host not allowed: %s", parsedURL.Host)
+		return nil, updateErr
+	}
+
+	modsDir := a.getModsDir(req.InstanceID)
+	if err := os.MkdirAll(modsDir, 0755); err != nil {
+		updateErr = fmt.Errorf("create mods directory: %w", err)
+		return nil, updateErr
+	}
+
+	fileName := filepath.Base(fileToDownload.FileName)
+	if fileName == "" || fileName == "." || fileName == "/" {
+		fileName = filepath.Base(fileToDownload.URL)
+	}
+	if fileName == "" || fileName == "." || fileName == "/" {
+		fileName = fmt.Sprintf("%s.jar", req.ModID)
+	}
+	if !strings.HasSuffix(fileName, ".jar") {
+		fileName = fileName + ".jar"
+	}
+
+	destPath := filepath.Join(modsDir, fileName)
+
+	// Idempotency check: if destination file already exists and matches requested version
+	if fileName == req.OldFileName {
+		if _, err := os.Stat(destPath); err == nil {
+			a.recordInstalledMod(req.InstanceID, req.ModID, fileName, source, fileToDownload, req.TargetVersionID)
+			a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+				TaskID:     fmt.Sprintf("update-%s", req.ModID),
+				InstanceID: req.InstanceID,
+				ModID:      req.ModID,
+				FileName:   fileName,
+				Status:     "completed",
+				Percentage: 100,
+			})
+			return &InstallModResponse{
+				Success:  true,
+				FileName: fileName,
+				Message:  "Mod already up to date",
+			}, nil
+		}
+	}
+
+	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+		TaskID:     fmt.Sprintf("update-%s", req.ModID),
+		InstanceID: req.InstanceID,
+		ModID:      req.ModID,
+		FileName:   fileName,
+		Status:     "downloading",
+		Percentage: 50,
+	})
+
+	tempFile, err := os.CreateTemp(modsDir, ".tmp-update-*.jar")
+	if err != nil {
+		updateErr = fmt.Errorf("create temporary download file: %w", err)
+		return nil, updateErr
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close() // errcheck:ok safe to ignore close error
+		if _, statErr := os.Stat(tempPath); statErr == nil {
+			_ = os.Remove(tempPath) // errcheck:ok cleanup temp file on failure
+		}
+	}()
+
+	baseClient := a.getHTTPClient()
+	timeout := 60 * time.Second
+	if baseClient.Timeout > 0 {
+		timeout = baseClient.Timeout
+	}
+	downloadClient := &http.Client{
+		Timeout:   timeout,
+		Transport: baseClient.Transport,
+		CheckRedirect: func(redirectReq *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return errors.New("stopped after 10 redirects")
+			}
+			if !a.isAllowedDownloadHost(redirectReq.URL.Host) {
+				return fmt.Errorf("redirect to non-allowlisted host rejected: %s", redirectReq.URL.Host)
+			}
+			return nil
+		},
+	}
+
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, fileToDownload.URL, nil)
+	if err != nil {
+		updateErr = fmt.Errorf("create download request: %w", err)
+		return nil, updateErr
+	}
+	if httpReq.Header.Get("User-Agent") == "" {
+		httpReq.Header.Set("User-Agent", netutil.FormatUserAgent(a.GetCurrentVersion()))
+	}
+	if httpReq.Header.Get("Accept") == "" {
+		httpReq.Header.Set("Accept", "*/*")
+	}
+	if req.Source == "modrinth" {
+		metaObj := map[string]string{
+			"reason":       "standalone",
+			"game_version": gameVersion,
+			"loader":       loader,
+		}
+		if metaBytes, err := json.Marshal(metaObj); err == nil {
+			httpReq.Header.Set("modrinth-download-meta", string(metaBytes))
+		}
+	}
+
+	resp, err := downloadClient.Do(httpReq)
+	if err != nil {
+		updateErr = fmt.Errorf("download mod file: %w", err)
+		return nil, updateErr
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		updateErr = fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+		return nil, updateErr
+	}
+
+	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+		TaskID:     fmt.Sprintf("update-%s", req.ModID),
+		InstanceID: req.InstanceID,
+		ModID:      req.ModID,
+		FileName:   fileName,
+		Status:     "verifying",
+		Percentage: 90,
+	})
+
+	hSha1 := sha1.New()
+	hSha512 := sha512.New()
+	mw := io.MultiWriter(tempFile, hSha1, hSha512)
+
+	if _, err := io.Copy(mw, resp.Body); err != nil {
+		updateErr = fmt.Errorf("write mod file: %w", err)
+		return nil, updateErr
+	}
+
+	if err := tempFile.Close(); err != nil {
+		updateErr = fmt.Errorf("close temp file: %w", err)
+		return nil, updateErr
+	}
+
+	// Checksum validation
+	if fileToDownload.SHA512 != "" {
+		actualSha512 := hex.EncodeToString(hSha512.Sum(nil))
+		if !strings.EqualFold(actualSha512, fileToDownload.SHA512) {
+			updateErr = fmt.Errorf("sha512 mismatch: expected %s, got %s", fileToDownload.SHA512, actualSha512)
+			return nil, updateErr
+		}
+	} else if fileToDownload.SHA1 != "" {
+		actualSha1 := hex.EncodeToString(hSha1.Sum(nil))
+		if !strings.EqualFold(actualSha1, fileToDownload.SHA1) {
+			updateErr = fmt.Errorf("sha1 mismatch: expected %s, got %s", fileToDownload.SHA1, actualSha1)
+			return nil, updateErr
+		}
+	}
+
+	// Atomic replacement: remove old mod file from disk if different
+	if fileName != req.OldFileName {
+		oldPath := filepath.Join(modsDir, req.OldFileName)
+		_ = os.Remove(oldPath) // errcheck:ok best effort removal of old active file
+		rawClean := strings.TrimSuffix(strings.TrimSuffix(req.OldFileName, ".disabled"), ".jar")
+		_ = os.Remove(filepath.Join(modsDir, rawClean+".jar.disabled")) // errcheck:ok
+	}
+
+	// On Windows, remove destination file if it already exists before renaming
+	if _, err := os.Stat(destPath); err == nil {
+		_ = os.Remove(destPath) // errcheck:ok
+	}
+
+	if err := os.Rename(tempPath, destPath); err != nil {
+		updateErr = fmt.Errorf("finalize mod update: %w", err)
+		return nil, updateErr
+	}
+
+	// Update manifest
+	m, err := manifest.LoadManifest(modsDir)
+	if err == nil {
+		if fileName != req.OldFileName {
+			m.Remove(req.OldFileName)
+			rawClean := strings.TrimSuffix(strings.TrimSuffix(req.OldFileName, ".disabled"), ".jar")
+			m.Remove(rawClean)
+		}
+		versionStr := req.TargetVersionID
+		releaseTypeStr := ""
+		modTitle := req.ModID
+		if fileToDownload != nil {
+			if versionStr == "" {
+				versionStr = fileToDownload.ID
+			}
+			releaseTypeStr = fileToDownload.ReleaseType
+			if fileToDownload.FileName != "" {
+				modTitle = fileToDownload.FileName
+			}
+		}
+		m.AddOrUpdate(&manifest.ModRecord{
+			ModID:       req.ModID,
+			ModName:     modTitle,
+			FileName:    fileName,
+			Source:      source,
+			VersionID:   versionStr,
+			ReleaseType: releaseTypeStr,
+			InstalledAt: time.Now(),
+		})
+
+		// Reconcile remaining duplicates on disk
+		recRes, _ := m.ReconcileWithDisk(modsDir)
+		_ = m.Save(modsDir) // errcheck:ok best effort manifest save on update
+
+		// Update SQLite
+		a.mu.RLock()
+		repo := a.installedModsRepo
+		a.mu.RUnlock()
+		if repo != nil {
+			if fileName != req.OldFileName {
+				rawClean := strings.TrimSuffix(strings.TrimSuffix(req.OldFileName, ".disabled"), ".jar")
+				_ = repo.DeleteByCleanName(context.Background(), req.InstanceID, rawClean) // errcheck:ok best effort cache delete on update
+			}
+			_ = repo.Save(context.Background(), storage.InstalledModRecord{ // errcheck:ok best effort cache save on update
+				InstanceID:  req.InstanceID,
+				ModID:       req.ModID,
+				FileName:    fileName,
+				Source:      source,
+				VersionID:   versionStr,
+				ReleaseType: releaseTypeStr,
+				InstalledAt: time.Now(),
+			})
+		}
+
+		var disabledDuplicates []string
+		if recRes != nil && len(recRes.DisabledDuplicates) > 0 {
+			disabledDuplicates = recRes.DisabledDuplicates
+		}
+
+		a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
+			TaskID:     fmt.Sprintf("update-%s", req.ModID),
+			InstanceID: req.InstanceID,
+			ModID:      req.ModID,
+			FileName:   fileName,
+			Status:     "completed",
+			Percentage: 100,
+		})
+
+		return &InstallModResponse{
+			Success:            true,
+			FileName:           fileName,
+			Message:            fmt.Sprintf("Mod %s updated successfully", fileName),
+			DisabledDuplicates: disabledDuplicates,
+		}, nil
+	}
+
+	return &InstallModResponse{
+		Success:  true,
+		FileName: fileName,
+		Message:  fmt.Sprintf("Mod %s updated successfully", fileName),
+	}, nil
+}
+
 func (a *WailsAdapter) recordInstalledMod(instanceID, modID, fileName, source string, fileToDownload *content.ModFile, reqVersionID string) {
 	modsDir := a.getModsDir(instanceID)
 	versionStr := reqVersionID
@@ -1664,9 +2106,13 @@ func (a *WailsAdapter) CheckModUpdates(instanceID string) ([]ModUpdateItemDTO, e
 
 		latest := files[0]
 		isNewer := false
-		if mod.Version != "" && latest.ID != "" && latest.ID != mod.Version {
+		cleanInstalled := strings.TrimSuffix(mod.FileName, ".disabled")
+
+		if latest.FileName != "" && cleanInstalled != "" && latest.FileName != cleanInstalled {
 			isNewer = true
-		} else if latest.FileName != "" && mod.FileName != "" && latest.FileName != mod.FileName {
+		} else if latest.FileName != "" && cleanInstalled != "" && latest.FileName == cleanInstalled {
+			isNewer = false
+		} else if mod.Version != "" && latest.ID != "" && latest.ID != mod.Version {
 			isNewer = true
 		}
 

@@ -35,6 +35,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
@@ -399,10 +400,11 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"ExportMrPack",
 		"CheckJavaRuntimeUpdates",
 		"UpgradeJavaRuntime",
+		"UpdateMod",
 	}
 
-	if len(expectedMethods) != 38 {
-		t.Fatalf("expected exactly 38 Wails methods, got %d", len(expectedMethods))
+	if len(expectedMethods) != 39 {
+		t.Fatalf("expected exactly 39 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1048,6 +1050,458 @@ func TestWailsAdapter_InstallMod_RedirectToUnauthorizedHost(t *testing.T) {
 	entries, _ := os.ReadDir(modsDir)
 	if len(entries) != 0 {
 		t.Fatalf("expected mods directory to be clean after redirect rejection, found %d entries", len(entries))
+	}
+}
+
+func TestWailsAdapter_UpdateMod_AtomicReplacement(t *testing.T) {
+	tempDir := t.TempDir()
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	_ = os.MkdirAll(modsDir, 0755)
+
+	oldPath := filepath.Join(modsDir, "test-mod-1.0.0.jar")
+	_ = os.WriteFile(oldPath, []byte("v1-bytes"), 0644)
+
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "test-mod",
+		ModName:     "Test Mod",
+		FileName:    "test-mod-1.0.0.jar",
+		Source:      "modrinth",
+		VersionID:   "ver-1",
+		InstalledAt: time.Now().Add(-1 * time.Hour),
+	})
+	_ = m.Save(modsDir)
+
+	v2Data := []byte("PK\x03\x04test-mod-v2-bytes")
+	hSha1 := sha1.Sum(v2Data)
+	sha1Hex := hex.EncodeToString(hSha1[:])
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/test-mod/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-2",
+					"project_id":     "test-mod",
+					"version_number": "2.0.0",
+					"name":           "Test Mod 2.0.0",
+					"files": []map[string]interface{}{
+						{
+							"hashes": map[string]string{
+								"sha1": sha1Hex,
+							},
+							"url":      fmt.Sprintf("http://%s/download/test-mod-2.0.0.jar", r.Host),
+							"filename": "test-mod-2.0.0.jar",
+							"primary":  true,
+							"size":     len(v2Data),
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/test-mod-2.0.0.jar" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(v2Data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+	adapter.SetHTTPClient(ts.Client())
+
+	res, err := adapter.UpdateMod(wails.UpdateModRequest{
+		InstanceID:      "inst-test",
+		ModID:           "test-mod",
+		OldFileName:     "test-mod-1.0.0.jar",
+		Source:          "modrinth",
+		TargetVersionID: "ver-2",
+	})
+	if err != nil {
+		t.Fatalf("UpdateMod failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected success, got: %+v", res)
+	}
+	if res.FileName != "test-mod-2.0.0.jar" {
+		t.Errorf("expected filename 'test-mod-2.0.0.jar', got %q", res.FileName)
+	}
+
+	// Verify old jar is deleted
+	if _, err := os.Stat(oldPath); err == nil {
+		t.Errorf("expected old jar to be deleted, but it still exists")
+	}
+
+	// Verify new jar exists
+	newPath := filepath.Join(modsDir, "test-mod-2.0.0.jar")
+	content, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("failed to read updated mod file: %v", err)
+	}
+	if string(content) != string(v2Data) {
+		t.Errorf("expected updated content %q, got %q", string(v2Data), string(content))
+	}
+
+	// Verify exactly 1 jar exists in directory
+	entries, _ := os.ReadDir(modsDir)
+	var jarCount int
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".jar") {
+			jarCount++
+		}
+	}
+	if jarCount != 1 {
+		t.Errorf("expected exactly 1 .jar file on disk, found %d", jarCount)
+	}
+
+	// Verify manifest
+	loadedM, _ := manifest.LoadManifest(modsDir)
+	if loadedM.GetRecord("test-mod-1.0.0.jar") != nil {
+		t.Errorf("expected old mod record removed from manifest")
+	}
+	rec2 := loadedM.GetRecord("test-mod-2.0.0.jar")
+	if rec2 == nil || rec2.VersionID != "ver-2" {
+		t.Errorf("expected new mod record in manifest with version ver-2, got %+v", rec2)
+	}
+}
+
+func TestWailsAdapter_UpdateMod_RollbackOnCorruptedDownload(t *testing.T) {
+	tempDir := t.TempDir()
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	_ = os.MkdirAll(modsDir, 0755)
+
+	oldPath := filepath.Join(modsDir, "test-mod-1.0.0.jar")
+	_ = os.WriteFile(oldPath, []byte("v1-original-bytes"), 0644)
+
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "test-mod",
+		ModName:     "Test Mod",
+		FileName:    "test-mod-1.0.0.jar",
+		Source:      "modrinth",
+		VersionID:   "ver-1",
+		InstalledAt: time.Now().Add(-1 * time.Hour),
+	})
+	_ = m.Save(modsDir)
+
+	corruptData := []byte("corrupt-bytes")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/test-mod/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-2",
+					"project_id":     "test-mod",
+					"version_number": "2.0.0",
+					"files": []map[string]interface{}{
+						{
+							"hashes": map[string]string{
+								"sha1": "0000000000000000000000000000000000000000",
+							},
+							"url":      fmt.Sprintf("http://%s/download/test-mod-2.0.0.jar", r.Host),
+							"filename": "test-mod-2.0.0.jar",
+							"primary":  true,
+							"size":     len(corruptData),
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/test-mod-2.0.0.jar" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(corruptData)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+	adapter.SetHTTPClient(ts.Client())
+
+	_, err := adapter.UpdateMod(wails.UpdateModRequest{
+		InstanceID:      "inst-test",
+		ModID:           "test-mod",
+		OldFileName:     "test-mod-1.0.0.jar",
+		Source:          "modrinth",
+		TargetVersionID: "ver-2",
+	})
+	if err == nil {
+		t.Fatalf("expected error on corrupt download, got nil")
+	}
+	if !strings.Contains(err.Error(), "sha1 mismatch") {
+		t.Errorf("expected sha1 mismatch error, got: %v", err)
+	}
+
+	// Verify old file is intact
+	content, err := os.ReadFile(oldPath)
+	if err != nil {
+		t.Fatalf("expected old mod file to still exist: %v", err)
+	}
+	if string(content) != "v1-original-bytes" {
+		t.Errorf("expected old mod file content untouched, got %q", string(content))
+	}
+
+	// Verify no new or temp file remains
+	newPath := filepath.Join(modsDir, "test-mod-2.0.0.jar")
+	if _, err := os.Stat(newPath); err == nil {
+		t.Errorf("corrupt new file should not exist on disk")
+	}
+
+	// Verify manifest still has old record
+	loadedM, _ := manifest.LoadManifest(modsDir)
+	if loadedM.GetRecord("test-mod-1.0.0.jar") == nil {
+		t.Errorf("expected old mod record to remain in manifest")
+	}
+}
+
+func TestWailsAdapter_UpdateMod_Idempotent(t *testing.T) {
+	tempDir := t.TempDir()
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	_ = os.MkdirAll(modsDir, 0755)
+
+	destPath := filepath.Join(modsDir, "test-mod-2.0.0.jar")
+	_ = os.WriteFile(destPath, []byte("v2-bytes"), 0644)
+
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "test-mod",
+		ModName:     "Test Mod",
+		FileName:    "test-mod-2.0.0.jar",
+		Source:      "modrinth",
+		VersionID:   "ver-2",
+		InstalledAt: time.Now(),
+	})
+	_ = m.Save(modsDir)
+
+	var downloadCount int
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/test-mod/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-2",
+					"project_id":     "test-mod",
+					"version_number": "2.0.0",
+					"files": []map[string]interface{}{
+						{
+							"url":      fmt.Sprintf("http://%s/download/test-mod-2.0.0.jar", r.Host),
+							"filename": "test-mod-2.0.0.jar",
+							"primary":  true,
+							"size":     8,
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/test-mod-2.0.0.jar" {
+			downloadCount++
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("v2-bytes"))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+	adapter.SetHTTPClient(ts.Client())
+
+	res, err := adapter.UpdateMod(wails.UpdateModRequest{
+		InstanceID:      "inst-test",
+		ModID:           "test-mod",
+		OldFileName:     "test-mod-2.0.0.jar",
+		Source:          "modrinth",
+		TargetVersionID: "ver-2",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !res.Success || res.Message != "Mod already up to date" {
+		t.Fatalf("expected idempotent success, got: %+v", res)
+	}
+	if downloadCount != 0 {
+		t.Fatalf("expected 0 download requests on idempotent update, got %d", downloadCount)
+	}
+}
+
+func TestWailsAdapter_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
+	tempDir := t.TempDir()
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	_ = os.MkdirAll(modsDir, 0755)
+
+	oldPath := filepath.Join(modsDir, "modmenu-11.0.4.jar")
+	newPath := filepath.Join(modsDir, "modmenu-11.0.5.jar")
+	_ = os.WriteFile(oldPath, []byte("old-modmenu"), 0644)
+	_ = os.WriteFile(newPath, []byte("new-modmenu"), 0644)
+
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "m915XbhN",
+		ModSlug:     "modmenu",
+		ModName:     "Mod Menu",
+		FileName:    "modmenu-11.0.4.jar",
+		Source:      "modrinth",
+		VersionID:   "11.0.4",
+		InstalledAt: time.Now().Add(-1 * time.Hour),
+	})
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "m915XbhN",
+		ModSlug:     "modmenu",
+		ModName:     "Mod Menu",
+		FileName:    "modmenu-11.0.5.jar",
+		Source:      "modrinth",
+		VersionID:   "11.0.5",
+		InstalledAt: time.Now(),
+	})
+	_ = m.Save(modsDir)
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+
+	mods, err := adapter.ListInstalledMods("inst-test")
+	if err != nil {
+		t.Fatalf("ListInstalledMods failed: %v", err)
+	}
+
+	// Should have self-healed: 1 enabled, 1 disabled
+	var enabledCount, disabledCount int
+	for _, mod := range mods {
+		if mod.Enabled {
+			enabledCount++
+			if mod.FileName != "modmenu-11.0.5.jar" {
+				t.Errorf("expected modmenu-11.0.5.jar to be enabled, got %s", mod.FileName)
+			}
+		} else {
+			disabledCount++
+			if mod.FileName != "modmenu-11.0.4.jar.disabled" {
+				t.Errorf("expected modmenu-11.0.4.jar.disabled to be disabled, got %s", mod.FileName)
+			}
+		}
+	}
+	if enabledCount != 1 || disabledCount != 1 {
+		t.Errorf("expected 1 enabled and 1 disabled mod, got enabled=%d, disabled=%d", enabledCount, disabledCount)
+	}
+
+	// Verify file system state
+	if _, err := os.Stat(oldPath); err == nil {
+		t.Errorf("expected active old jar to no longer exist on disk")
+	}
+	if _, err := os.Stat(filepath.Join(modsDir, "modmenu-11.0.4.jar.disabled")); err != nil {
+		t.Errorf("expected modmenu-11.0.4.jar.disabled to exist on disk: %v", err)
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Errorf("expected modmenu-11.0.5.jar to exist on disk: %v", err)
+	}
+}
+
+func TestWailsAdapter_CheckModUpdates_RegressionH2(t *testing.T) {
+	tempDir := t.TempDir()
+	modsDir := filepath.Join(tempDir, "inst-test", "mods")
+	_ = os.MkdirAll(modsDir, 0755)
+
+	v2Data := []byte("PK\x03\x04test-mod-v2-bytes")
+	hSha1 := sha1.Sum(v2Data)
+	sha1Hex := hex.EncodeToString(hSha1[:])
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/v2/project/test-mod/version") {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{
+					"id":             "ver-2",
+					"project_id":     "test-mod",
+					"version_number": "2.0.0",
+					"name":           "Test Mod 2.0.0",
+					"files": []map[string]interface{}{
+						{
+							"hashes": map[string]string{
+								"sha1": sha1Hex,
+							},
+							"url":      fmt.Sprintf("http://%s/download/test-mod-2.0.0.jar", r.Host),
+							"filename": "test-mod-2.0.0.jar",
+							"primary":  true,
+							"size":     len(v2Data),
+						},
+					},
+				},
+			})
+			return
+		}
+		if r.URL.Path == "/download/test-mod-2.0.0.jar" {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(v2Data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer ts.Close()
+
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, tempDir)
+	u, _ := url.Parse(ts.URL)
+	adapter.SetAllowedHosts([]string{u.Hostname()})
+	mr := modrinth.NewClient(ts.URL, ts.Client())
+	adapter.SetContent(mr, nil)
+	adapter.SetHTTPClient(ts.Client())
+
+	// Step 1: Pre-install v1
+	oldPath := filepath.Join(modsDir, "test-mod-1.0.0.jar")
+	_ = os.WriteFile(oldPath, []byte("v1-bytes"), 0644)
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "test-mod",
+		ModName:     "Test Mod",
+		FileName:    "test-mod-1.0.0.jar",
+		Source:      "modrinth",
+		VersionID:   "ver-1",
+		InstalledAt: time.Now().Add(-1 * time.Hour),
+	})
+	_ = m.Save(modsDir)
+
+	// Step 2: Update to v2 via UpdateMod
+	upRes, err := adapter.UpdateMod(wails.UpdateModRequest{
+		InstanceID:      "inst-test",
+		ModID:           "test-mod",
+		OldFileName:     "test-mod-1.0.0.jar",
+		Source:          "modrinth",
+		TargetVersionID: "ver-2",
+	})
+	if err != nil || !upRes.Success {
+		t.Fatalf("UpdateMod failed: %v", err)
+	}
+
+	// Step 3: Check for updates immediately after replace
+	updates, err := adapter.CheckModUpdates("inst-test")
+	if err != nil {
+		t.Fatalf("CheckModUpdates failed: %v", err)
+	}
+	if len(updates) != 0 {
+		t.Fatalf("H2 regression failed: expected 0 updates after replace, got %d updates: %+v", len(updates), updates)
 	}
 }
 

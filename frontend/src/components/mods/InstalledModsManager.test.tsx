@@ -53,7 +53,7 @@ describe("InstalledModsManager Component", () => {
     });
   });
 
-  it("checks for updates, displays updates banner, and installs individual update (C6)", async () => {
+  it("checks for updates, displays updates banner, and updates individual mod via updateMod (C1)", async () => {
     vi.spyOn(launcherAPI, "checkModUpdates").mockResolvedValue([
       {
         file_name: "sodium-fabric-0.5.8.jar",
@@ -65,10 +65,10 @@ describe("InstalledModsManager Component", () => {
         release_type: "release",
       },
     ]);
-    const installSpy = vi.spyOn(launcherAPI, "installMod").mockResolvedValue({
+    const updateSpy = vi.spyOn(launcherAPI, "updateMod").mockResolvedValue({
       success: true,
       file_name: "sodium-fabric-0.5.9.jar",
-      message: "Mod installed",
+      message: "Mod updated",
     });
 
     render(() => <InstalledModsManager instanceId="nord-opti-1" />);
@@ -89,15 +89,17 @@ describe("InstalledModsManager Component", () => {
     fireEvent.click(updateModBtn!);
 
     await vi.waitFor(() => {
-      expect(installSpy).toHaveBeenCalledWith(
-        "nord-opti-1",
-        expect.objectContaining({ id: "sodium", source: "modrinth" }),
-        "sodium-0.5.9-id"
-      );
+      expect(updateSpy).toHaveBeenCalledWith({
+        instance_id: "nord-opti-1",
+        mod_id: "sodium",
+        old_file_name: "sodium-fabric-0.5.8.jar",
+        source: "modrinth",
+        target_version_id: "sodium-0.5.9-id",
+      });
     });
   });
 
-  it("updates all available mods when 'Обновить все' is clicked (C6)", async () => {
+  it("updates all available mods via updateMod and shows duplicate heal toast with undo (C1)", async () => {
     vi.spyOn(launcherAPI, "checkModUpdates").mockResolvedValue([
       {
         file_name: "sodium-fabric-0.5.8.jar",
@@ -109,11 +111,13 @@ describe("InstalledModsManager Component", () => {
         release_type: "release",
       },
     ]);
-    const installSpy = vi.spyOn(launcherAPI, "installMod").mockResolvedValue({
+    const updateSpy = vi.spyOn(launcherAPI, "updateMod").mockResolvedValue({
       success: true,
       file_name: "sodium-fabric-0.5.9.jar",
-      message: "Mod installed",
+      message: "Mod updated",
+      disabled_duplicates: ["sodium-fabric-0.5.8.jar"],
     });
+    const toggleSpy = vi.spyOn(launcherAPI, "toggleMod").mockResolvedValue();
 
     render(() => <InstalledModsManager instanceId="nord-opti-1" />);
     await screen.findByText("Sodium");
@@ -126,7 +130,23 @@ describe("InstalledModsManager Component", () => {
     fireEvent.click(updateAllBtn);
 
     await vi.waitFor(() => {
-      expect(installSpy).toHaveBeenCalledTimes(1);
+      expect(updateSpy).toHaveBeenCalledTimes(1);
+    });
+
+    const toast = await screen.findByTestId("duplicate-heal-toast");
+    expect(toast.textContent).toContain("Отключены устаревшие дубликаты (1)");
+    expect(toast.textContent).toContain("sodium-fabric-0.5.8.jar");
+
+    const undoBtn = screen.getByTestId("undo-duplicate-heal-btn");
+    expect(undoBtn).toBeTruthy();
+    fireEvent.click(undoBtn);
+
+    await vi.waitFor(() => {
+      expect(toggleSpy).toHaveBeenCalledWith({
+        instance_id: "nord-opti-1",
+        file_name: "sodium-fabric-0.5.8.jar.disabled",
+        enable: true,
+      });
     });
   });
 

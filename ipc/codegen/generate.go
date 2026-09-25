@@ -211,10 +211,26 @@ type InstallModRequest struct {
 	VersionID   string ` + "`" + `json:"version_id,omitempty"` + "`" + `
 }
 
+type UpdateModRequest struct {
+	InstanceID      string ` + "`" + `json:"instance_id"` + "`" + `
+	ModID           string ` + "`" + `json:"mod_id"` + "`" + `
+	OldFileName     string ` + "`" + `json:"old_file_name"` + "`" + `
+	Source          string ` + "`" + `json:"source"` + "`" + `
+	TargetVersionID string ` + "`" + `json:"target_version_id"` + "`" + `
+	GameVersion     string ` + "`" + `json:"game_version,omitempty"` + "`" + `
+	Loader          string ` + "`" + `json:"loader,omitempty"` + "`" + `
+}
+
 type InstallModResponse struct {
-	Success  bool   ` + "`" + `json:"success"` + "`" + `
-	FileName string ` + "`" + `json:"file_name"` + "`" + `
-	Message  string ` + "`" + `json:"message"` + "`" + `
+	Success            bool     ` + "`" + `json:"success"` + "`" + `
+	FileName           string   ` + "`" + `json:"file_name"` + "`" + `
+	Message            string   ` + "`" + `json:"message"` + "`" + `
+	DisabledDuplicates []string ` + "`" + `json:"disabled_duplicates,omitempty"` + "`" + `
+}
+
+type ReconcileNoticeDTO struct {
+	InstanceID         string   ` + "`" + `json:"instance_id"` + "`" + `
+	DisabledDuplicates []string ` + "`" + `json:"disabled_duplicates"` + "`" + `
 }
 
 type SetSettingRequest struct {
@@ -500,10 +516,26 @@ export interface InstallModRequest {
   version_id?: string;
 }
 
+export interface UpdateModRequest {
+  instance_id: string;
+  mod_id: string;
+  old_file_name: string;
+  source: ModSource;
+  target_version_id: string;
+  game_version?: string;
+  loader?: string;
+}
+
 export interface InstallModResponse {
   success: boolean;
   file_name: string;
   message: string;
+  disabled_duplicates?: string[];
+}
+
+export interface ReconcileNoticeDTO {
+  instance_id: string;
+  disabled_duplicates: string[];
 }
 
 export interface SetSettingRequest {
