@@ -2,6 +2,7 @@ import { Component, createSignal, createResource, For, Show, onMount, onCleanup 
 import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle, ChevronDown, AlertTriangle, FileText } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { ModItemDTO, ModSource, ModFileDTO, ModInstallProgressDTO } from "../../bindings/ipc_types";
+import { renderMarkdownLite } from "../common/MarkdownLite";
 
 interface ModCatalogProps {
   activeInstanceId: string;
@@ -684,13 +685,13 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
                                 </div>
                               </div>
 
-                              {/* Expandable Changelog Viewer (M2) */}
+                              {/* Expandable Changelog Viewer (M2, G2) */}
                               <Show when={expandedChangelogIds().has(file.id) && file.changelog}>
                                 <div
-                                  class="p-2.5 rounded-lg bg-black/40 border border-white/5 text-[11px] font-mono text-zinc-300 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto"
+                                  class="p-2.5 rounded-lg bg-black/40 border border-white/5 text-[11px] font-mono text-zinc-300 leading-relaxed max-h-40 overflow-y-auto"
                                   data-testid={`changelog-viewer-${file.id}`}
                                 >
-                                  {file.changelog}
+                                  {renderMarkdownLite(file.changelog)}
                                 </div>
                               </Show>
                             </div>

@@ -1,4 +1,4 @@
-import { Component, createSignal, Show, onMount, For } from "solid-js";
+import { Component, createSignal, Show, onMount } from "solid-js";
 import { RefreshCw, Download, CheckCircle2, AlertCircle, ShieldCheck, Loader2, RotateCcw } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { UpdateInfoDTO, UpdateApplyResultDTO } from "../../bindings/ipc_types";
@@ -23,47 +23,8 @@ export const formatVersion = (v?: string): string => {
   return v.startsWith("v") ? v : `v${v}`;
 };
 
-export const renderMarkdownLite = (text?: string) => {
-  if (!text) {
-    return <p class="text-zinc-400">Regular maintenance release with security and performance improvements.</p>;
-  }
-  const lines = text.split("\n");
-  return (
-    <div class="space-y-1">
-      <For each={lines}>
-        {(line) => {
-          const trimmed = line.trim();
-          if (trimmed.startsWith("### ")) {
-            return (
-              <div class="font-bold text-zinc-200 text-[11px] uppercase tracking-wider mt-2.5 mb-1 text-nord-cyan/90">
-                {trimmed.substring(4)}
-              </div>
-            );
-          }
-          if (trimmed.startsWith("## ")) {
-            return (
-              <div class="font-bold text-white text-xs mt-3 mb-1">
-                {trimmed.substring(3)}
-              </div>
-            );
-          }
-          if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-            return (
-              <div class="flex items-start gap-2 pl-1.5 py-0.5 text-zinc-300">
-                <span class="text-nord-cyan select-none leading-none mt-1 text-[10px]">•</span>
-                <span class="leading-snug">{trimmed.substring(2)}</span>
-              </div>
-            );
-          }
-          if (trimmed === "") {
-            return <div class="h-1" />;
-          }
-          return <div class="leading-relaxed text-zinc-300">{line}</div>;
-        }}
-      </For>
-    </div>
-  );
-};
+import { renderMarkdownLite } from "../common/MarkdownLite";
+export { renderMarkdownLite };
 
 export const UpdatePanel: Component<UpdatePanelProps> = (props) => {
   const [status, setStatus] = createSignal<UpdateStatus>("idle");

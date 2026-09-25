@@ -635,6 +635,12 @@ func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO
 			if !f.FileDate.IsZero() {
 				fDate = f.FileDate.Format(time.RFC3339)
 			}
+			var deps []string
+			for _, d := range f.Dependencies {
+				if d.ProjectID != "" {
+					deps = append(deps, d.ProjectID)
+				}
+			}
 			result = append(result, ModFileDTO{
 				ID:           f.ID,
 				ModID:        req.ModID,
@@ -646,6 +652,7 @@ func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO
 				GameVersions: f.GameVersions,
 				Loaders:      f.Loaders,
 				DownloadURL:  f.URL,
+				Dependencies: deps,
 			})
 		}
 
@@ -682,6 +689,12 @@ func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO
 				if v.Name != "" && v.Name != f.FileName {
 					dispName = fmt.Sprintf("%s (%s)", v.Name, f.FileName)
 				}
+				var deps []string
+				for _, d := range f.Dependencies {
+					if d.ProjectID != "" {
+						deps = append(deps, d.ProjectID)
+					}
+				}
 				result = append(result, ModFileDTO{
 					ID:           f.ID,
 					ModID:        req.ModID,
@@ -694,6 +707,7 @@ func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO
 					Loaders:      v.Loaders,
 					DownloadURL:  f.URL,
 					Changelog:    v.Changelog,
+					Dependencies: deps,
 				})
 			}
 		}
@@ -1665,6 +1679,8 @@ func (a *WailsAdapter) CheckModUpdates(instanceID string) ([]ModUpdateItemDTO, e
 				LatestVersion:   latest.DisplayName,
 				LatestVersionID: latest.ID,
 				ReleaseType:     latest.ReleaseType,
+				Dependencies:    latest.Dependencies,
+				Changelog:       latest.Changelog,
 			})
 		}
 	}

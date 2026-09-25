@@ -129,4 +129,43 @@ describe("InstalledModsManager Component", () => {
       expect(installSpy).toHaveBeenCalledTimes(1);
     });
   });
+
+  it("opens ModUpdatesDiffModal when updates chip is clicked (G1, G3)", async () => {
+    vi.spyOn(launcherAPI, "checkModUpdates").mockResolvedValue([
+      {
+        file_name: "sodium-fabric-0.5.8.jar",
+        mod_id: "sodium",
+        source: "modrinth",
+        current_version: "0.5.8",
+        latest_version: "0.5.9",
+        latest_version_id: "sodium-0.5.9-id",
+        release_type: "release",
+        dependencies: ["fabric-api"],
+        changelog: "Bug fixes and optimizations",
+      },
+    ]);
+
+    render(() => <InstalledModsManager instanceId="nord-opti-1" />);
+    await screen.findByText("Sodium");
+
+    const checkBtn = screen.getByTestId("check-updates-btn");
+    fireEvent.click(checkBtn);
+
+    const diffChipBtn = await screen.findByTestId("updates-diff-chip-btn");
+    expect(diffChipBtn.textContent).toContain("1 обновлений доступно");
+
+    // Modal is not visible initially
+    expect(screen.queryByTestId("mod-updates-diff-modal")).toBeNull();
+
+    // Click chip
+    fireEvent.click(diffChipBtn);
+
+    // Modal should now be open
+    const modal = await screen.findByTestId("mod-updates-diff-modal");
+    expect(modal).toBeTruthy();
+    expect(modal.textContent).toContain("Доступные обновления");
+    expect(modal.textContent).toContain("0.5.8");
+    expect(modal.textContent).toContain("0.5.9");
+    expect(modal.textContent).toContain("fabric-api");
+  });
 });

@@ -165,6 +165,7 @@ type ModFileDTO struct {
 	Loaders      []string `json:"loaders"`
 	DownloadURL  string   `json:"download_url"`
 	Changelog    string   `json:"changelog,omitempty"`
+	Dependencies []string `json:"dependencies,omitempty"`
 }
 
 type ModUpdateItemDTO struct {
@@ -175,6 +176,8 @@ type ModUpdateItemDTO struct {
 	LatestVersion   string `json:"latest_version"`
 	LatestVersionID string `json:"latest_version_id"`
 	ReleaseType     string `json:"release_type"`
+	Dependencies    []string `json:"dependencies,omitempty"`
+	Changelog       string   `json:"changelog,omitempty"`
 }
 
 type ModInstallProgressDTO struct {

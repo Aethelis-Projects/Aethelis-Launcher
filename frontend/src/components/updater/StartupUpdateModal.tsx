@@ -1,7 +1,8 @@
 import { Component, Show } from "solid-js";
 import { Download, X, Loader2, Sparkles } from "lucide-solid";
 import type { UpdateInfoDTO } from "../../bindings/ipc_types";
-import { renderMarkdownLite, formatVersion } from "./UpdatePanel";
+import { formatVersion } from "./UpdatePanel";
+import { renderMarkdownLite } from "../common/MarkdownLite";
 
 export interface StartupUpdateModalProps {
   isOpen: boolean;
