@@ -205,10 +205,26 @@ export interface InstallModRequest {
   version_id?: string;
 }
 
+export interface UpdateModRequest {
+  instance_id: string;
+  mod_id: string;
+  old_file_name: string;
+  source: ModSource;
+  target_version_id: string;
+  game_version?: string;
+  loader?: string;
+}
+
 export interface InstallModResponse {
   success: boolean;
   file_name: string;
   message: string;
+  disabled_duplicates?: string[];
+}
+
+export interface ReconcileNoticeDTO {
+  instance_id: string;
+  disabled_duplicates: string[];
 }
 
 export interface SetSettingRequest {

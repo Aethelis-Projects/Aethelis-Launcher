@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +20,13 @@ const (
 
 var (
 	ErrUnsupportedSchemaVersion = errors.New("unsupported manifest schema version")
+	modBaseRegex                = regexp.MustCompile(`(?i)^([a-zA-Z0-9_\-\+]+?)[-_+ ](v?\d+(\.\d+).*|mc\d+.*)$`)
 )
+
+type ReconcileResult struct {
+	Changed            bool     `json:"changed"`
+	DisabledDuplicates []string `json:"disabled_duplicates"`
+}
 
 type ModRecord struct {
 	ModID       string    `json:"mod_id"`
@@ -49,6 +57,32 @@ func CleanModKey(fileName string) string {
 	name := strings.TrimSuffix(fileName, ".disabled")
 	name = strings.TrimSuffix(name, ".jar")
 	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// CanonicalModBase extracts a normalized mod identity base from a filename by stripping version segments.
+func CanonicalModBase(fileName string) string {
+	clean := strings.TrimSuffix(strings.TrimSuffix(fileName, ".disabled"), ".jar")
+	clean = strings.TrimSpace(clean)
+	if match := modBaseRegex.FindStringSubmatch(clean); len(match) > 1 {
+		return strings.ToLower(match[1])
+	}
+	return strings.ToLower(clean)
+}
+
+// CanonicalModKey determines the canonical group key for a file, consulting manifest records if available.
+func (m *InstallsManifest) CanonicalModKey(fileName string) string {
+	cleanKey := CleanModKey(fileName)
+	if m != nil && m.Mods != nil {
+		if rec, ok := m.Mods[cleanKey]; ok && rec != nil {
+			if rec.ModID != "" && strings.ToLower(rec.ModID) != cleanKey {
+				return strings.ToLower(rec.ModID)
+			}
+			if rec.ModSlug != "" {
+				return strings.ToLower(rec.ModSlug)
+			}
+		}
+	}
+	return CanonicalModBase(fileName)
 }
 
 // LoadManifest reads and parses nord-installs.json in the specified mods directory.
@@ -175,25 +209,105 @@ func (m *InstallsManifest) GetRecord(fileName string) *ModRecord {
 
 // ReconcileWithDisk audits the manifest against the actual files on disk in modsDir.
 // The filesystem is the source of truth:
-// 1. Files on disk not tracked in the manifest are synthesized and added.
-// 2. Tracked records missing from disk (neither .jar nor .jar.disabled) are removed.
-// 3. Status changes (.jar <-> .jar.disabled) update the record's FileName.
-// Returns true if any changes were made to the manifest.
-func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (bool, error) {
+// 1. Duplicate active .jar files for the same canonical mod are self-healed: the newest is kept, older are renamed to .jar.disabled.
+// 2. Files on disk not tracked in the manifest are synthesized and added.
+// 3. Tracked records missing from disk (neither .jar nor .jar.disabled) are removed.
+// 4. Status changes (.jar <-> .jar.disabled) update the record's FileName.
+// Returns a ReconcileResult with change status and list of disabled duplicate filenames.
+func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	entries, err := os.ReadDir(modsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, nil
+			return &ReconcileResult{Changed: false, DisabledDuplicates: []string{}}, nil
 		}
-		return false, fmt.Errorf("read mods directory for reconcile: %w", err)
+		return nil, fmt.Errorf("read mods directory for reconcile: %w", err)
+	}
+
+	if m.Mods == nil {
+		m.Mods = make(map[string]*ModRecord)
 	}
 
 	changed := false
-	diskFiles := make(map[string]os.DirEntry)
+	var disabledDuplicates []string
 
+	// 1. Detect duplicate active .jar files and self-heal
+	type activeFileEntry struct {
+		name     string
+		modTime  time.Time
+	}
+	activeByMod := make(map[string][]activeFileEntry)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasSuffix(name, ".jar") && !strings.HasSuffix(name, ".disabled") {
+			mTime := time.Now()
+			if info, err := entry.Info(); err == nil {
+				mTime = info.ModTime()
+			}
+			canonKey := m.CanonicalModKey(name)
+			activeByMod[canonKey] = append(activeByMod[canonKey], activeFileEntry{
+				name:    name,
+				modTime: mTime,
+			})
+		}
+	}
+
+	for _, files := range activeByMod {
+		if len(files) <= 1 {
+			continue
+		}
+		// Sort descending: newest first
+		sort.Slice(files, func(i, j int) bool {
+			var tI, tJ time.Time
+			cleanI := CleanModKey(files[i].name)
+			if recI, ok := m.Mods[cleanI]; ok && recI != nil && !recI.InstalledAt.IsZero() {
+				tI = recI.InstalledAt
+			} else {
+				tI = files[i].modTime
+			}
+			cleanJ := CleanModKey(files[j].name)
+			if recJ, ok := m.Mods[cleanJ]; ok && recJ != nil && !recJ.InstalledAt.IsZero() {
+				tJ = recJ.InstalledAt
+			} else {
+				tJ = files[j].modTime
+			}
+			if !tI.Equal(tJ) {
+				return tI.After(tJ)
+			}
+			return files[i].name > files[j].name
+		})
+
+		// files[0] is the newest: kept active. Older duplicates (files[1..]) are renamed to .disabled.
+		for k := 1; k < len(files); k++ {
+			oldName := files[k].name
+			disabledName := oldName + ".disabled"
+			oldPath := filepath.Join(modsDir, oldName)
+			newPath := filepath.Join(modsDir, disabledName)
+
+			if err := os.Rename(oldPath, newPath); err == nil {
+				disabledDuplicates = append(disabledDuplicates, oldName)
+				changed = true
+				cleanOld := CleanModKey(oldName)
+				if rec, ok := m.Mods[cleanOld]; ok && rec != nil {
+					rec.FileName = disabledName
+				}
+			}
+		}
+	}
+
+	// 2. Re-read directory entries after possible renames
+	if len(disabledDuplicates) > 0 {
+		if updatedEntries, err := os.ReadDir(modsDir); err == nil {
+			entries = updatedEntries
+		}
+	}
+
+	diskFiles := make(map[string]os.DirEntry)
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -205,11 +319,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (bool, error) {
 		}
 	}
 
-	if m.Mods == nil {
-		m.Mods = make(map[string]*ModRecord)
-	}
-
-	// 1. Reconcile existing manifest entries against disk
+	// 3. Reconcile existing manifest entries against disk
 	for key, rec := range m.Mods {
 		entry, existsOnDisk := diskFiles[key]
 		if !existsOnDisk {
@@ -226,7 +336,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (bool, error) {
 		}
 	}
 
-	// 2. Discover unmanifested files on disk (manual drops)
+	// 4. Discover unmanifested files on disk (manual drops)
 	for key, entry := range diskFiles {
 		if _, tracked := m.Mods[key]; !tracked {
 			name := entry.Name()
@@ -246,5 +356,12 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (bool, error) {
 		}
 	}
 
-	return changed, nil
+	if disabledDuplicates == nil {
+		disabledDuplicates = []string{}
+	}
+
+	return &ReconcileResult{
+		Changed:            changed,
+		DisabledDuplicates: disabledDuplicates,
+	}, nil
 }

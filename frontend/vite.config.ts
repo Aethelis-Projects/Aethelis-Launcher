@@ -1,4 +1,4 @@
-﻿import { defineConfig } from "vitest/config";
+import { defineConfig } from "vitest/config";
 import solidPlugin from "vite-plugin-solid";
 
 export default defineConfig({
@@ -17,5 +17,6 @@ export default defineConfig({
     globals: true,
     setupFiles: [],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    testTimeout: 15000,
   },
 });

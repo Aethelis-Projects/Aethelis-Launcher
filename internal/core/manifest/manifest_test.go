@@ -92,11 +92,11 @@ func TestManifest_ReconcileWithDisk(t *testing.T) {
 		t.Fatalf("write modC: %v", err)
 	}
 
-	changed, err := m.ReconcileWithDisk(tempDir)
+	res, err := m.ReconcileWithDisk(tempDir)
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}
-	if !changed {
+	if !res.Changed {
 		t.Fatalf("expected changed=true from reconcile")
 	}
 
@@ -115,6 +115,89 @@ func TestManifest_ReconcileWithDisk(t *testing.T) {
 	recC := m.GetRecord("mod-c-2.0.jar")
 	if recC == nil || recC.Source != "local" {
 		t.Errorf("expected synthesized local record for modC, got %+v", recC)
+	}
+}
+
+func TestManifest_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
+	tempDir := t.TempDir()
+
+	m := manifest.NewManifest()
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "modmenu",
+		FileName:    "modmenu-11.0.4.jar",
+		Source:      "modrinth",
+		InstalledAt: time.Now().Add(-10 * time.Minute),
+	})
+	m.AddOrUpdate(&manifest.ModRecord{
+		ModID:       "modmenu",
+		FileName:    "modmenu-11.0.5.jar",
+		Source:      "modrinth",
+		InstalledAt: time.Now(),
+	})
+
+	// Create both files on disk as active jars
+	oldFile := filepath.Join(tempDir, "modmenu-11.0.4.jar")
+	newFile := filepath.Join(tempDir, "modmenu-11.0.5.jar")
+	if err := os.WriteFile(oldFile, []byte("modmenu-old"), 0644); err != nil {
+		t.Fatalf("write old jar: %v", err)
+	}
+	if err := os.WriteFile(newFile, []byte("modmenu-new"), 0644); err != nil {
+		t.Fatalf("write new jar: %v", err)
+	}
+
+	res, err := m.ReconcileWithDisk(tempDir)
+	if err != nil {
+		t.Fatalf("reconcile failed: %v", err)
+	}
+	if !res.Changed {
+		t.Errorf("expected changed=true on duplicate self-heal")
+	}
+	if len(res.DisabledDuplicates) != 1 || res.DisabledDuplicates[0] != "modmenu-11.0.4.jar" {
+		t.Errorf("expected disabled duplicate ['modmenu-11.0.4.jar'], got: %v", res.DisabledDuplicates)
+	}
+
+	// Verify new file is still active
+	if _, err := os.Stat(newFile); err != nil {
+		t.Errorf("expected newer file to remain active, but stat failed: %v", err)
+	}
+
+	// Verify old file is renamed to .disabled
+	if _, err := os.Stat(oldFile); err == nil {
+		t.Errorf("expected old active jar to no longer exist")
+	}
+	disabledOld := filepath.Join(tempDir, "modmenu-11.0.4.jar.disabled")
+	if _, err := os.Stat(disabledOld); err != nil {
+		t.Errorf("expected old jar to be renamed to .disabled: %v", err)
+	}
+
+	// Idempotency: second reconcile should find 0 disabled duplicates
+	res2, err := m.ReconcileWithDisk(tempDir)
+	if err != nil {
+		t.Fatalf("second reconcile failed: %v", err)
+	}
+	if len(res2.DisabledDuplicates) != 0 {
+		t.Errorf("expected 0 disabled duplicates on second run, got: %v", res2.DisabledDuplicates)
+	}
+}
+
+func TestCanonicalModBase(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected string
+	}{
+		{"modmenu-11.0.4.jar", "modmenu"},
+		{"modmenu-11.0.5.jar.disabled", "modmenu"},
+		{"fabric-api-0.92.0+1.20.4.jar", "fabric-api"},
+		{"sodium-fabric-0.5.8.jar", "sodium-fabric"},
+		{"OptiFine_1.20.4_HD_U_I7.jar", "optifine"},
+		{"simplemod.jar", "simplemod"},
+	}
+
+	for _, c := range cases {
+		got := manifest.CanonicalModBase(c.input)
+		if got != c.expected {
+			t.Errorf("CanonicalModBase(%q) = %q, expected %q", c.input, got, c.expected)
+		}
 	}
 }
 

@@ -23,8 +23,27 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
   const [updatingFiles, setUpdatingFiles] = createSignal<Set<string>>(new Set());
   const [updateError, setUpdateError] = createSignal<string | null>(null);
   const [showDiffModal, setShowDiffModal] = createSignal(false);
+  const [duplicateToast, setDuplicateToast] = createSignal<{
+    files: string[];
+    visible: boolean;
+  } | null>(null);
 
   const normName = (fn: string) => fn.replace(/\.disabled$/, "");
+
+  const handleUndoDuplicateHeal = async () => {
+    const toast = duplicateToast();
+    if (!toast) return;
+    for (const f of toast.files) {
+      const disabledName = f.endsWith(".disabled") ? f : `${f}.disabled`;
+      await launcherAPI.toggleMod({
+        instance_id: props.instanceId,
+        file_name: disabledName,
+        enable: true,
+      });
+    }
+    setDuplicateToast(null);
+    refetch();
+  };
 
   // Initialize baseline when mods are first loaded for an instance
   createEffect(() => {
@@ -46,6 +65,7 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
         setBaseline(null);
         setUpdates([]);
         setUpdateError(null);
+        setDuplicateToast(null);
       }
     )
   );
@@ -94,11 +114,19 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
     setUpdatingFiles((prev) => new Set([...prev, update.file_name]));
     setUpdateError(null);
     try {
-      await launcherAPI.installMod(
-        props.instanceId,
-        { id: update.mod_id, source: update.source, name: update.file_name, slug: update.mod_id },
-        update.latest_version_id
-      );
+      const res = await launcherAPI.updateMod({
+        instance_id: props.instanceId,
+        mod_id: update.mod_id,
+        old_file_name: update.file_name,
+        source: update.source,
+        target_version_id: update.latest_version_id,
+      });
+      if (res.disabled_duplicates && res.disabled_duplicates.length > 0) {
+        setDuplicateToast({
+          files: res.disabled_duplicates,
+          visible: true,
+        });
+      }
       setUpdates((prev) => prev.filter((u) => u.file_name !== update.file_name));
       refetch();
     } catch (err: unknown) {
@@ -117,13 +145,25 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
     if (list.length === 0) return;
     setUpdatingAll(true);
     setUpdateError(null);
+    const allDisabled: string[] = [];
     try {
       for (const u of list) {
-        await launcherAPI.installMod(
-          props.instanceId,
-          { id: u.mod_id, source: u.source, name: u.file_name, slug: u.mod_id },
-          u.latest_version_id
-        );
+        const res = await launcherAPI.updateMod({
+          instance_id: props.instanceId,
+          mod_id: u.mod_id,
+          old_file_name: u.file_name,
+          source: u.source,
+          target_version_id: u.latest_version_id,
+        });
+        if (res.disabled_duplicates && res.disabled_duplicates.length > 0) {
+          allDisabled.push(...res.disabled_duplicates);
+        }
+      }
+      if (allDisabled.length > 0) {
+        setDuplicateToast({
+          files: Array.from(new Set(allDisabled)),
+          visible: true,
+        });
       }
       setUpdates([]);
       refetch();
@@ -252,6 +292,41 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
             <button type="button" onClick={() => setUpdateError(null)} class="text-zinc-400 hover:text-zinc-200">
               <X class="w-3.5 h-3.5" />
             </button>
+          </div>
+        </Show>
+
+        <Show when={duplicateToast()?.visible}>
+          <div
+            class="px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-mono flex items-center justify-between gap-3"
+            data-testid="duplicate-heal-toast"
+          >
+            <div class="flex items-center gap-2">
+              <Package class="w-4 h-4 text-amber-400 shrink-0" />
+              <span>
+                Отключены устаревшие дубликаты ({duplicateToast()?.files.length}):{" "}
+                <span class="text-amber-200 font-semibold">
+                  {duplicateToast()?.files.join(", ")}
+                </span>
+              </span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleUndoDuplicateHeal}
+                data-testid="undo-duplicate-heal-btn"
+                class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-sans font-medium transition-colors"
+              >
+                Отменить
+              </button>
+              <button
+                type="button"
+                onClick={() => setDuplicateToast(null)}
+                class="text-amber-400 hover:text-amber-200 p-0.5"
+                title="Скрыть"
+              >
+                <X class="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
         </Show>
       </div>
