@@ -82,9 +82,6 @@ func main() {
 		fmt.Printf("Warning: Failed to open SQLite database: %v. Running in in-memory mode.\n", err)
 	} else {
 		defer db.Close()
-		if err := db.Migrate(); err != nil {
-			fmt.Printf("Warning: Failed to run migrations: %v\n", err)
-		}
 	}
 
 	var instRepo *storage.InstanceRepository

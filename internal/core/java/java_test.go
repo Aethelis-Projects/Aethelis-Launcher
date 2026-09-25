@@ -15,7 +15,12 @@ func TestResolveJavaMajor(t *testing.T) {
 		mcVersion     string
 		expectedMajor int
 	}{
-		// Modern 1.20.5+ -> Java 21
+		// Modern 26.1+ -> Java 25
+		{"26.3", 25},
+		{"26.1", 25},
+
+		// Modern 1.20.5 - 26.0 -> Java 21
+		{"26.0", 21},
 		{"1.21.1", 21},
 		{"1.21", 21},
 		{"1.20.6", 21},
@@ -47,6 +52,48 @@ func TestResolveJavaMajor(t *testing.T) {
 				t.Errorf("mc %s: expected java %d, got %d", tt.mcVersion, tt.expectedMajor, major)
 			}
 		})
+	}
+}
+
+func TestAdoptiumClient_GetLatestRelease_Java25(t *testing.T) {
+	mockResponse := `[
+		{
+			"binaries": [
+				{
+					"image_type": "jdk",
+					"os": "windows",
+					"architecture": "x64",
+					"package": {
+						"name": "OpenJDK25U-jdk_x64_windows_hotspot_25.0.0_1.zip",
+						"link": "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.0%2B1/OpenJDK25U-jdk_x64_windows_hotspot_25.0.0_1.zip",
+						"checksum": "e25a273b4eb8dc6a5ef4ffec6cfcf7918a5956a643ee1c6f932ea439062ee960",
+						"size": 215000000
+					}
+				}
+			],
+			"version_data": {
+				"semver": "25.0.0+1"
+			}
+		}
+	]`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(mockResponse)) // errcheck:ok mock response write
+	}))
+	defer srv.Close()
+
+	client := java.NewAdoptiumClient(srv.URL, srv.Client())
+	asset, err := client.GetLatestRelease(context.Background(), 25)
+	if err != nil {
+		t.Fatalf("failed to fetch release for java 25: %v", err)
+	}
+
+	if asset.Name != "OpenJDK25U-jdk_x64_windows_hotspot_25.0.0_1.zip" {
+		t.Errorf("unexpected asset name: %s", asset.Name)
+	}
+	if asset.Version != "25.0.0+1" {
+		t.Errorf("unexpected version: %s", asset.Version)
 	}
 }
 

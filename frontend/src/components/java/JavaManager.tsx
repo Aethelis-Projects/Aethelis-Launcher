@@ -247,7 +247,25 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
         </div>
 
         {/* Action Buttons */}
-        <div class="grid grid-cols-3 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <button
+            type="button"
+            onClick={() => startDownload(25)}
+            disabled={isDownloading()}
+            class="p-3.5 rounded-xl bg-zinc-900 border border-white/10 hover:border-nord-cyan/40 text-left transition-all cursor-pointer disabled:opacity-50 group"
+            data-testid="download-java-25-button"
+          >
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-white text-xs group-hover:text-nord-cyan transition-colors">
+                Java 25 LTS
+              </span>
+              <Download class="w-4 h-4 text-zinc-500 group-hover:text-nord-cyan transition-colors" />
+            </div>
+            <p class="text-[11px] text-zinc-400">
+              Minecraft 26.1+ (Temurin 25)
+            </p>
+          </button>
+
           <button
             type="button"
             onClick={() => startDownload(21)}
@@ -262,7 +280,7 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
               <Download class="w-4 h-4 text-zinc-500 group-hover:text-nord-cyan transition-colors" />
             </div>
             <p class="text-[11px] text-zinc-400">
-              Minecraft 1.20.5+ (Temurin 21)
+              Minecraft 1.20.5 - 26.0 (Temurin 21)
             </p>
           </button>
 
@@ -281,6 +299,24 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
             </div>
             <p class="text-[11px] text-zinc-400">
               Minecraft 1.17 - 1.20.4 (Temurin 17)
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => startDownload(11)}
+            disabled={isDownloading()}
+            class="p-3.5 rounded-xl bg-zinc-900 border border-white/10 hover:border-nord-cyan/40 text-left transition-all cursor-pointer disabled:opacity-50 group"
+            data-testid="download-java-11-button"
+          >
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-white text-xs group-hover:text-nord-cyan transition-colors">
+                Java 11 LTS
+              </span>
+              <Download class="w-4 h-4 text-zinc-500 group-hover:text-nord-cyan transition-colors" />
+            </div>
+            <p class="text-[11px] text-zinc-400">
+              Legacy / Модпаки (Temurin 11)
             </p>
           </button>
 

@@ -164,4 +164,79 @@ describe("InstanceSettingsModal (J2)", () => {
     const errorBanner = await screen.findByTestId("settings-error-banner");
     expect(errorBanner.textContent).toContain("Минимальный объем памяти не может превышать максимальный");
   });
+
+  it("renders Java recommendation chip for MC 26.3 -> Java 25 LTS and triggers download", async () => {
+    const downloadSpy = vi.spyOn(launcherAPI, "downloadJavaRuntime").mockResolvedValue();
+    const inst26: InstanceDTO = {
+      ...mockInstance,
+      id: "inst-26",
+      game_version: "26.3",
+    };
+
+    render(() => (
+      <InstanceSettingsModal
+        instance={inst26}
+        isOpen={true}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />
+    ));
+
+    const chip = await screen.findByTestId("recommended-java-chip");
+    expect(chip.textContent).toContain("Java 25 LTS");
+
+    const installBtn = screen.getByTestId("install-recommended-java-button");
+    expect(installBtn.textContent).toContain("Java 25");
+    fireEvent.click(installBtn);
+
+    await vi.waitFor(() => {
+      expect(downloadSpy).toHaveBeenCalledWith(25);
+    });
+
+    const toast = await screen.findByTestId("java-action-toast");
+    expect(toast.textContent).toContain("Загрузка Java 25 LTS запущена");
+  });
+
+  it("renders Java recommendation chip for MC 1.20.1 -> Java 17 LTS and allows 1-click selection when installed", async () => {
+    vi.spyOn(launcherAPI, "listJavaRuntimes").mockResolvedValue([
+      {
+        path: "C:\\Java\\jdk-17\\bin\\java.exe",
+        home_dir: "C:\\Java\\jdk-17",
+        major_version: 17,
+        full_version: "17.0.10",
+        vendor: "Eclipse Adoptium",
+        kind: "managed",
+        used_by: [],
+      },
+    ]);
+
+    const inst17: InstanceDTO = {
+      ...mockInstance,
+      id: "inst-17",
+      game_version: "1.20.1",
+      java_path: "",
+    };
+
+    render(() => (
+      <InstanceSettingsModal
+        instance={inst17}
+        isOpen={true}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />
+    ));
+
+    const chip = await screen.findByTestId("recommended-java-chip");
+    expect(chip.textContent).toContain("Java 17 LTS");
+
+    const selectBtn = await screen.findByTestId("select-recommended-java-button");
+    expect(selectBtn.textContent).toContain("Выбрать Java 17");
+    fireEvent.click(selectBtn);
+
+    // Switch to Java tab to verify java_path input has been filled
+    fireEvent.click(screen.getByTestId("tab-java"));
+    const pathInput = screen.getByTestId("settings-java-path-input") as HTMLInputElement;
+    expect(pathInput.value).toBe("C:\\Java\\jdk-17\\bin\\java.exe");
+  });
 });
+

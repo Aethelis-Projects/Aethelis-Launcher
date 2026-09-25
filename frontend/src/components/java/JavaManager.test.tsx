@@ -84,6 +84,22 @@ describe("JavaManager Component (J1)", () => {
     expect(progress.textContent).toContain("50%");
   });
 
+  it("renders expanded offer list with Java 25 and triggers download for Java 25", async () => {
+    const downloadSpy = vi.spyOn(launcherAPI, "downloadJavaRuntime").mockResolvedValue();
+    render(() => <JavaManager />);
+
+    expect(await screen.findByTestId("download-java-25-button")).toBeTruthy();
+    expect(screen.getByTestId("download-java-21-button")).toBeTruthy();
+    expect(screen.getByTestId("download-java-17-button")).toBeTruthy();
+    expect(screen.getByTestId("download-java-11-button")).toBeTruthy();
+    expect(screen.getByTestId("download-java-8-button")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("download-java-25-button"));
+    await vi.waitFor(() => {
+      expect(downloadSpy).toHaveBeenCalledWith(25);
+    });
+  });
+
   it("adds external custom Java runtime path", async () => {
     const addSpy = vi.spyOn(launcherAPI, "addJavaRuntime").mockResolvedValue({
       path: "C:\\Custom\\Java\\bin\\java.exe",

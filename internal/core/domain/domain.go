@@ -137,11 +137,18 @@ type DownloadArtifactInfo struct {
 	URL  string `json:"url"`
 }
 
+// JavaVersionInfo describes the required Java runtime version metadata from Mojang manifest.
+type JavaVersionInfo struct {
+	Component    string `json:"component"`
+	MajorVersion int    `json:"majorVersion"`
+}
+
 // VersionJSON represents the Mojang/Fabric/Forge version descriptor.
 type VersionJSON struct {
-	ID        string `json:"id"`
-	MainClass string `json:"mainClass"`
-	Arguments *struct {
+	ID          string           `json:"id"`
+	MainClass   string           `json:"mainClass"`
+	JavaVersion *JavaVersionInfo `json:"javaVersion,omitempty"`
+	Arguments   *struct {
 		Game []any `json:"game"`
 		JVM  []any `json:"jvm"`
 	} `json:"arguments,omitempty"`

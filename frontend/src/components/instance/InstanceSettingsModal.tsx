@@ -1,9 +1,41 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
 import { ModCatalog } from "../mods/ModCatalog";
+
+export function getRecommendedJavaMajor(version: string): number {
+  if (!version) return 21;
+  const clean = version.replace(/^v/, "");
+  const parts = clean.split(".").map((p) => {
+    const m = p.match(/^\d+/);
+    return m ? parseInt(m[0], 10) : 0;
+  });
+  const major = parts[0] || 0;
+  const minor = parts[1] || 0;
+  // 26.1+ -> 25
+  if (major > 26 || (major === 26 && minor >= 1)) {
+    return 25;
+  }
+  // 1.20.5 - 26.0 -> 21
+  if (major === 26 && minor === 0) {
+    return 21;
+  }
+  if (major === 1) {
+    if (minor > 20 || (minor === 20 && (parts[2] || 0) >= 5)) {
+      return 21;
+    }
+    if (minor >= 17) {
+      return 17;
+    }
+    return 8;
+  }
+  if (major > 1 && major < 26) {
+    return 21;
+  }
+  return 21;
+}
 
 export type SettingsTab = "general" | "java" | "memory" | "args" | "mods";
 
@@ -28,6 +60,35 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const [saving, setSaving] = createSignal(false);
   const [error, setError] = createSignal("");
   const [availableRuntimes, setAvailableRuntimes] = createSignal<JavaInstallationDTO[]>([]);
+  const [installingJava, setInstallingJava] = createSignal(false);
+  const [installedJavaToast, setInstalledJavaToast] = createSignal("");
+
+  const recommendedJava = () => getRecommendedJavaMajor(props.instance.game_version);
+
+  const matchingInstalledRuntime = () => {
+    const rec = recommendedJava();
+    return availableRuntimes().find((r) => r.major_version === rec);
+  };
+
+  const handleInstallRecommendedJava = async () => {
+    const rec = recommendedJava();
+    setInstallingJava(true);
+    setError("");
+    try {
+      await launcherAPI.downloadJavaRuntime(rec);
+      setInstalledJavaToast(`Загрузка Java ${rec} LTS запущена`);
+      await loadRuntimes();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`Ошибка запуска установки Java: ${msg}`);
+    } finally {
+      setInstallingJava(false);
+    }
+  };
+
+  const handleSelectRecommendedJava = (path: string) => {
+    setJavaPath(path);
+  };
 
   // Sync state whenever modal opens or instance changes
   createEffect(() => {
@@ -246,6 +307,85 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                     </p>
                   </div>
                 </div>
+
+                {/* Java Recommendation Chip */}
+                <div
+                  class="p-3.5 rounded-xl bg-nord-cyan/5 border border-nord-cyan/20 flex items-center justify-between gap-3"
+                  data-testid="recommended-java-chip"
+                >
+                  <div class="flex items-center gap-2.5">
+                    <div class="p-1.5 rounded-lg bg-nord-cyan/10 text-nord-cyan">
+                      <Cpu class="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p class="text-xs font-semibold text-white">
+                        Рекомендуется для Minecraft {props.instance.game_version}: Java {recommendedJava()} LTS
+                      </p>
+                      <p class="text-[11px] text-zinc-400">
+                        <Show
+                          when={matchingInstalledRuntime()}
+                          fallback={"Рантайм не установлен в системе"}
+                        >
+                          <Show
+                            when={javaPath() === matchingInstalledRuntime()!.path || (!javaPath() && matchingInstalledRuntime()?.kind === "managed")}
+                            fallback={`Установлен: ${matchingInstalledRuntime()!.path}`}
+                          >
+                            Рантайм установлен и активен
+                          </Show>
+                        </Show>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <Show
+                      when={matchingInstalledRuntime()}
+                      fallback={
+                        <button
+                          type="button"
+                          onClick={handleInstallRecommendedJava}
+                          disabled={installingJava()}
+                          class="px-3 py-1.5 rounded-lg bg-nord-cyan/20 hover:bg-nord-cyan/30 text-nord-cyan border border-nord-cyan/40 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          data-testid="install-recommended-java-button"
+                        >
+                          <Download class="w-3.5 h-3.5" />
+                          <span>{installingJava() ? "Установка..." : `Установить Java ${recommendedJava()}`}</span>
+                        </button>
+                      }
+                    >
+                      {(rt) => (
+                        <Show
+                          when={javaPath() === rt().path}
+                          fallback={
+                            <button
+                              type="button"
+                              onClick={() => handleSelectRecommendedJava(rt().path)}
+                              class="px-3 py-1.5 rounded-lg bg-nord-cyan/20 hover:bg-nord-cyan/30 text-nord-cyan border border-nord-cyan/40 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                              data-testid="select-recommended-java-button"
+                            >
+                              <Check class="w-3.5 h-3.5" />
+                              <span>Выбрать Java {recommendedJava()}</span>
+                            </button>
+                          }
+                        >
+                          <span class="px-2.5 py-1 rounded-md bg-nord-emerald/10 border border-nord-emerald/20 text-nord-emerald text-[11px] font-medium flex items-center gap-1">
+                            <Check class="w-3 h-3" />
+                            Активна
+                          </span>
+                        </Show>
+                      )}
+                    </Show>
+                  </div>
+                </div>
+
+                <Show when={installedJavaToast()}>
+                  <div
+                    class="p-2.5 rounded-lg bg-nord-cyan/10 border border-nord-cyan/20 text-xs text-nord-cyan font-mono"
+                    data-testid="java-action-toast"
+                  >
+                    {installedJavaToast()}
+                  </div>
+                </Show>
               </div>
             </Show>
 
