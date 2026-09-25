@@ -1,5 +1,5 @@
 import { Component, createSignal, createEffect, Show } from "solid-js";
-import { Package, Loader2, CheckCircle2, AlertCircle, X, Upload } from "lucide-solid";
+import { Package, Loader2, CheckCircle2, AlertCircle, X, Upload, FolderOpen } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO } from "../../bindings/ipc_types";
 
@@ -144,6 +144,17 @@ export const MrPackExportModal: Component<MrPackExportModalProps> = (props) => {
                   <p class="text-xs text-zinc-500">
                     Пакет содержит манифест modrinth.index.json и все модификации/конфигурации.
                   </p>
+                  <div class="pt-2">
+                    <button
+                      type="button"
+                      onClick={() => launcherAPI.openPath(exportPath())}
+                      class="px-3.5 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium inline-flex items-center gap-2 transition-colors cursor-pointer"
+                      data-testid="open-export-folder-button"
+                    >
+                      <FolderOpen class="w-4 h-4 text-nord-cyan" />
+                      <span>Открыть папку экспорта</span>
+                    </button>
+                  </div>
                 </div>
               }
             >

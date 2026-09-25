@@ -1,6 +1,7 @@
 import { render, fireEvent, screen } from "@solidjs/testing-library";
 import { describe, it, expect, vi } from "vitest";
 import { InstanceCard } from "./InstanceCard";
+import { launcherAPI } from "../../services/api";
 import { InstanceDTO } from "../../bindings/ipc_types";
 
 describe("InstanceCard", () => {
@@ -36,5 +37,18 @@ describe("InstanceCard", () => {
 
     fireEvent.keyDown(card, { key: "Enter" });
     expect(onSelect).toHaveBeenCalledTimes(2);
+  });
+
+  it("calls openPath when folder button is clicked without selecting card", () => {
+    const onSelect = vi.fn();
+    const openPathSpy = vi.spyOn(launcherAPI, "openPath").mockResolvedValue();
+
+    render(() => <InstanceCard instance={mockInstance} onSelect={onSelect} />);
+
+    const folderBtn = screen.getByTestId("instance-open-folder-btn");
+    fireEvent.click(folderBtn);
+
+    expect(openPathSpy).toHaveBeenCalledWith("test-inst-1");
+    expect(onSelect).not.toHaveBeenCalled();
   });
 });

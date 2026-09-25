@@ -1,5 +1,5 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
@@ -386,6 +386,25 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                     {installedJavaToast()}
                   </div>
                 </Show>
+
+                {/* Instance Folder Opener */}
+                <div class="flex items-center justify-between p-3.5 rounded-xl bg-black/20 border border-white/5">
+                  <div>
+                    <span class="text-xs font-semibold text-white">Каталог файлов инстанса</span>
+                    <p class="text-[11px] text-zinc-400">
+                      Открыть корневую папку сборки, конфигураций и сохранений в проводнике
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => launcherAPI.openPath(props.instance.id)}
+                    class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                    data-testid="settings-open-folder-btn"
+                  >
+                    <FolderOpen class="w-3.5 h-3.5 text-nord-cyan" />
+                    <span>Папка инстанса</span>
+                  </button>
+                </div>
               </div>
             </Show>
 
