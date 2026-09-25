@@ -27,6 +27,7 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
     files: string[];
     visible: boolean;
   } | null>(null);
+  const [reconcileNoticeDismissed, setReconcileNoticeDismissed] = createSignal(false);
 
   const normName = (fn: string) => fn.replace(/\.disabled$/, "");
 
@@ -41,6 +42,7 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
         enable: true,
       });
     }
+    setReconcileNoticeDismissed(true);
     setDuplicateToast(null);
     refetch();
   };
@@ -57,6 +59,38 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
     }
   });
 
+  // ReconcileNotice: Show duplicate self-heal toast on mount if disabled duplicate files exist
+  createEffect(
+    on(
+      mods,
+      (list) => {
+        if (!list || reconcileNoticeDismissed()) return;
+
+        const activeModIds = new Set<string>();
+        for (const m of list) {
+          if (m.enabled && !m.file_name.endsWith(".disabled") && m.mod_id) {
+            activeModIds.add(m.mod_id);
+          }
+        }
+
+        const disabledDups: string[] = [];
+        for (const m of list) {
+          if (m.file_name.endsWith(".disabled") && m.mod_id && activeModIds.has(m.mod_id)) {
+            disabledDups.push(normName(m.file_name));
+          }
+        }
+
+        if (disabledDups.length > 0 && !duplicateToast()) {
+          setDuplicateToast({
+            files: Array.from(new Set(disabledDups)),
+            visible: true,
+          });
+        }
+      },
+      { defer: false }
+    )
+  );
+
   // Reset baseline & updates when instance changes
   createEffect(
     on(
@@ -66,6 +100,7 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
         setUpdates([]);
         setUpdateError(null);
         setDuplicateToast(null);
+        setReconcileNoticeDismissed(false);
       }
     )
   );
@@ -320,7 +355,10 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
               </button>
               <button
                 type="button"
-                onClick={() => setDuplicateToast(null)}
+                onClick={() => {
+                  setDuplicateToast(null);
+                  setReconcileNoticeDismissed(true);
+                }}
                 class="text-amber-400 hover:text-amber-200 p-0.5"
                 title="Скрыть"
               >

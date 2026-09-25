@@ -50,6 +50,20 @@ func main() {
 	// 0. Clean up stale backup executable from previous update
 	updater.CleanupStaleBackup()
 
+	// Parse CLI flags early
+	isIdleTest := false
+	customDataDir := ""
+	for i := 1; i < len(os.Args); i++ {
+		if os.Args[i] == "--idle-test" {
+			isIdleTest = true
+		} else if os.Args[i] == "--datadir" && i+1 < len(os.Args) {
+			customDataDir = os.Args[i+1]
+			i++
+		} else if strings.HasPrefix(os.Args[i], "--datadir=") {
+			customDataDir = strings.TrimPrefix(os.Args[i], "--datadir=")
+		}
+	}
+
 	// 1. Initialize Hexagonal Core Ports & Adapters
 	fileSys := fs.NewOSFileSystem()
 	procMgr := process.NewProcessManager()
@@ -67,11 +81,24 @@ func main() {
 	}
 
 	// 3. Initialize Database & Migrations
-	appData, err := os.UserConfigDir()
-	if err != nil {
-		appData = "."
+	var dbDir string
+	if customDataDir != "" {
+		dbDir = customDataDir
+	} else if isIdleTest {
+		// Isolated datadir for NFR benchmark to prevent AppData VM cold-start lock jitter
+		tempDataDir, err := os.MkdirTemp("", "nord-idle-*")
+		if err == nil {
+			dbDir = tempDataDir
+			defer os.RemoveAll(tempDataDir)
+		}
 	}
-	dbDir := filepath.Join(appData, "nord-launcher")
+	if dbDir == "" {
+		appData, err := os.UserConfigDir()
+		if err != nil {
+			appData = "."
+		}
+		dbDir = filepath.Join(appData, "nord-launcher")
+	}
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		fmt.Printf("Warning: Failed to create database directory %s: %v\n", dbDir, err)
 	}
@@ -82,6 +109,9 @@ func main() {
 		fmt.Printf("Warning: Failed to open SQLite database: %v. Running in in-memory mode.\n", err)
 	} else {
 		defer db.Close()
+		if err := db.Migrate(); err != nil {
+			fmt.Printf("Warning: Failed to run migrations: %v\n", err)
+		}
 	}
 
 	var instRepo *storage.InstanceRepository

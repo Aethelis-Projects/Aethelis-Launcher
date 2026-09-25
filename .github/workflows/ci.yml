@@ -159,7 +159,6 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          ./build/nord-launcher.exe --idle-test > /dev/null 2>&1 || true
           ./build/nord-launcher.exe --idle-test | tee idle_test.log
           node -e '
             const fs = require("fs");

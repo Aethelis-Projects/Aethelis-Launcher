@@ -2502,7 +2502,6 @@ func (a *WailsAdapter) OpenPath(targetPath string) error {
 	if err != nil {
 		if a.instancesDir != "" {
 			instPath := filepath.Join(a.instancesDir, cleanPath)
-			_ = os.MkdirAll(instPath, 0755) // errcheck:ok ensure instance directory exists when opening
 			if ifi, ierr := os.Stat(instPath); ierr == nil {
 				return openPathExec(instPath, ifi.IsDir())
 			}
