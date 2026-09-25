@@ -40,9 +40,9 @@ type AdoptiumRuntimeService struct {
 
 func NewAdoptiumRuntimeService(managedDir string, client *AdoptiumClient, httpClient *http.Client) *AdoptiumRuntimeService {
 	if httpClient == nil {
-		httpClient = netutil.NewHTTPClient("0.6.0", 15*time.Minute)
+		httpClient = netutil.NewHTTPClient("0.6.1", 15*time.Minute)
 	} else {
-		httpClient.Transport = netutil.NewTransport("0.6.0", httpClient.Transport)
+		httpClient.Transport = netutil.NewTransport("0.6.1", httpClient.Transport)
 	}
 	if client == nil {
 		client = NewAdoptiumClient(DefaultAdoptiumBaseURL, httpClient)

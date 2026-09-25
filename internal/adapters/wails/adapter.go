@@ -2142,7 +2142,7 @@ func (a *WailsAdapter) GetDiagnosticReport(instanceID string) (string, error) {
 	ver := a.version
 	a.mu.RUnlock()
 	if ver == "" {
-		ver = "0.6.0"
+		ver = "0.6.1"
 	}
 
 	var b strings.Builder

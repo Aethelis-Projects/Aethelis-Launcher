@@ -14,10 +14,10 @@ func TestFormatUserAgent(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"0.6.0", "NordLauncher/0.6.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
-		{"v0.6.0", "NordLauncher/0.6.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
-		{"", "NordLauncher/0.6.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
-		{"   ", "NordLauncher/0.6.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
+		{"0.6.1", "NordLauncher/0.6.1 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
+		{"v0.6.1", "NordLauncher/0.6.1 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
+		{"", "NordLauncher/0.6.1 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
+		{"   ", "NordLauncher/0.6.1 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"},
 	}
 
 	for _, tc := range tests {
@@ -39,14 +39,14 @@ func TestNewHTTPClient_HeadersInjected(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := netutil.NewHTTPClient("0.6.0", 5*time.Second)
+	client := netutil.NewHTTPClient("0.6.1", 5*time.Second)
 	resp, err := client.Get(ts.URL)
 	if err != nil {
 		t.Fatalf("client.Get failed: %v", err)
 	}
 	defer resp.Body.Close()
 
-	expectedUA := "NordLauncher/0.6.0 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"
+	expectedUA := "NordLauncher/0.6.1 (+https://github.com/Aethelis-Projects/Aethelis-Launcher)"
 	if capturedUA != expectedUA {
 		t.Errorf("captured User-Agent = %q; want %q", capturedUA, expectedUA)
 	}
@@ -66,7 +66,7 @@ func TestNewHTTPClient_PreservesExistingHeaders(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	client := netutil.NewHTTPClient("0.6.0", 5*time.Second)
+	client := netutil.NewHTTPClient("0.6.1", 5*time.Second)
 	req, err := http.NewRequest(http.MethodGet, ts.URL, nil)
 	if err != nil {
 		t.Fatalf("http.NewRequest failed: %v", err)
