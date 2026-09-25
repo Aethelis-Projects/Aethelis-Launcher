@@ -238,5 +238,25 @@ describe("InstanceSettingsModal (J2)", () => {
     const pathInput = screen.getByTestId("settings-java-path-input") as HTMLInputElement;
     expect(pathInput.value).toBe("C:\\Java\\jdk-17\\bin\\java.exe");
   });
+
+  it("calls openPath when instance folder button in General tab is clicked", async () => {
+    const openPathSpy = vi.spyOn(launcherAPI, "openPath").mockResolvedValue();
+
+    render(() => (
+      <InstanceSettingsModal
+        instance={mockInstance}
+        isOpen={true}
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />
+    ));
+
+    const openFolderBtn = await screen.findByTestId("settings-open-folder-btn");
+    expect(openFolderBtn).toBeTruthy();
+    fireEvent.click(openFolderBtn);
+
+    expect(openPathSpy).toHaveBeenCalledWith("inst-modal-1");
+  });
 });
+
 

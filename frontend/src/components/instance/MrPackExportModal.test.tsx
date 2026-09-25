@@ -89,6 +89,11 @@ describe("MrPackExportModal Component (M1.3, R2)", () => {
 
     expect(onExported).toHaveBeenCalledWith("C:\\Exports\\Speedrunner-Pro.mrpack");
     expect(screen.getByText("C:\\Exports\\Speedrunner-Pro.mrpack")).toBeTruthy();
+
+    const openPathSpy = vi.spyOn(launcherAPI, "openPath").mockResolvedValue();
+    const openFolderBtn = screen.getByTestId("open-export-folder-button");
+    fireEvent.click(openFolderBtn);
+    expect(openPathSpy).toHaveBeenCalledWith("C:\\Exports\\Speedrunner-Pro.mrpack");
   });
 
   it("renders error banner when export fails", async () => {

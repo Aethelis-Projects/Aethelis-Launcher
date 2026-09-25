@@ -401,10 +401,11 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"CheckJavaRuntimeUpdates",
 		"UpgradeJavaRuntime",
 		"UpdateMod",
+		"OpenPath",
 	}
 
-	if len(expectedMethods) != 39 {
-		t.Fatalf("expected exactly 39 Wails methods, got %d", len(expectedMethods))
+	if len(expectedMethods) != 40 {
+		t.Fatalf("expected exactly 40 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -2495,4 +2496,57 @@ func TestWailsAdapter_JavaRuntimeUpdates(t *testing.T) {
 		t.Fatal("expected non-nil download status")
 	}
 }
+
+func TestWailsAdapter_OpenPath(t *testing.T) {
+	tempDir := t.TempDir()
+	adapter := wails.NewWailsAdapter(nil)
+
+	var recordedPath string
+	var recordedIsDir bool
+	cleanup := wails.SetOpenPathExecForTesting(func(cleanPath string, isDir bool) error {
+		recordedPath = cleanPath
+		recordedIsDir = isDir
+		return nil
+	})
+	defer cleanup()
+
+	// 1. Existing directory
+	testSubDir := filepath.Join(tempDir, "instances", "inst-1")
+	if err := os.MkdirAll(testSubDir, 0755); err != nil {
+		t.Fatalf("mkdir failed: %v", err)
+	}
+	if err := adapter.OpenPath(testSubDir); err != nil {
+		t.Fatalf("OpenPath directory failed: %v", err)
+	}
+	if recordedPath != filepath.Clean(testSubDir) || !recordedIsDir {
+		t.Errorf("expected clean dir path %s, isDir=true; got %s, %v", testSubDir, recordedPath, recordedIsDir)
+	}
+
+	// 2. Existing file
+	testFile := filepath.Join(testSubDir, "instance.json")
+	if err := os.WriteFile(testFile, []byte("{}"), 0644); err != nil {
+		t.Fatalf("write file failed: %v", err)
+	}
+	if err := adapter.OpenPath(testFile); err != nil {
+		t.Fatalf("OpenPath file failed: %v", err)
+	}
+	if recordedPath != filepath.Clean(testFile) || recordedIsDir {
+		t.Errorf("expected clean file path %s, isDir=false; got %s, %v", testFile, recordedPath, recordedIsDir)
+	}
+
+	// 3. Empty path error
+	if err := adapter.OpenPath(""); err == nil {
+		t.Error("expected error on empty path, got nil")
+	}
+	if err := adapter.OpenPath("   "); err == nil {
+		t.Error("expected error on whitespace path, got nil")
+	}
+
+	// 4. Non-existent path error
+	nonExistent := filepath.Join(tempDir, "does-not-exist")
+	if err := adapter.OpenPath(nonExistent); err == nil {
+		t.Error("expected error on non-existent path, got nil")
+	}
+}
+
 

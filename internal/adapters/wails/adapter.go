@@ -2459,4 +2459,56 @@ func (a *WailsAdapter) UpgradeJavaRuntime(major int) (*JavaDownloadStatusDTO, er
 		Percentage: status.Percentage,
 		Error:      status.Error,
 	}, nil
-}
+}
+
+var openPathExec = func(cleanPath string, isDir bool) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		if isDir {
+			cmd = exec.Command("explorer", cleanPath)
+		} else {
+			cmd = exec.Command("explorer", fmt.Sprintf("/select,%s", cleanPath))
+		}
+	case "darwin":
+		if isDir {
+			cmd = exec.Command("open", cleanPath)
+		} else {
+			cmd = exec.Command("open", "-R", cleanPath)
+		}
+	default:
+		if isDir {
+			cmd = exec.Command("xdg-open", cleanPath)
+		} else {
+			cmd = exec.Command("xdg-open", filepath.Dir(cleanPath))
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to open path: %w", err)
+	}
+	return nil
+}
+
+// OpenPath opens a file or directory in the native file manager (explorer, open, xdg-open).
+// If targetPath is a file, it reveals the file in its containing folder.
+// If targetPath is an instance ID or relative path in instancesDir, it resolves to the instance folder.
+func (a *WailsAdapter) OpenPath(targetPath string) error {
+	trimmed := strings.TrimSpace(targetPath)
+	if trimmed == "" {
+		return errors.New("empty path provided")
+	}
+	cleanPath := filepath.Clean(trimmed)
+	fi, err := os.Stat(cleanPath)
+	if err != nil {
+		if a.instancesDir != "" {
+			instPath := filepath.Join(a.instancesDir, cleanPath)
+			_ = os.MkdirAll(instPath, 0755) // errcheck:ok ensure instance directory exists when opening
+			if ifi, ierr := os.Stat(instPath); ierr == nil {
+				return openPathExec(instPath, ifi.IsDir())
+			}
+		}
+		return fmt.Errorf("path not accessible: %w", err)
+	}
+	return openPathExec(cleanPath, fi.IsDir())
+}
+

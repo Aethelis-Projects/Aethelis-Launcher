@@ -1,5 +1,6 @@
 import { Component } from "solid-js";
-import { Box, Play, Clock, AlertCircle } from "lucide-solid";
+import { Box, Play, Clock, AlertCircle, FolderOpen } from "lucide-solid";
+import { launcherAPI } from "../../services/api";
 import { InstanceDTO } from "../../bindings/ipc_types";
 
 export interface InstanceCardProps {
@@ -90,22 +91,39 @@ export const InstanceCard: Component<InstanceCardProps> = (props) => {
         </div>
       </div>
 
-      <button
-        type="button"
-        tabIndex={-1}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!props.disabled) props.onLaunch?.(props.instance);
-        }}
-        class={`p-2 rounded-lg transition-all ${
-          props.selected
-            ? "bg-nord-cyan text-nord-dark hover:bg-nord-cyan-hover"
-            : "text-zinc-400 hover:text-white hover:bg-white/10"
-        }`}
-        aria-label={`Запустить ${props.instance.name}`}
-      >
-        <Play class="w-4 h-4 fill-current stroke-[2]" />
-      </button>
+      <div class="flex items-center gap-1.5">
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation();
+            launcherAPI.openPath(props.instance.id);
+          }}
+          class="p-2 rounded-lg text-zinc-400 hover:text-white hover:bg-white/10 transition-colors"
+          title="Открыть папку инстанса"
+          aria-label={`Открыть папку ${props.instance.name}`}
+          data-testid="instance-open-folder-btn"
+        >
+          <FolderOpen class="w-4 h-4 stroke-[1.5]" />
+        </button>
+
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (!props.disabled) props.onLaunch?.(props.instance);
+          }}
+          class={`p-2 rounded-lg transition-all ${
+            props.selected
+              ? "bg-nord-cyan text-nord-dark hover:bg-nord-cyan-hover"
+              : "text-zinc-400 hover:text-white hover:bg-white/10"
+          }`}
+          aria-label={`Запустить ${props.instance.name}`}
+        >
+          <Play class="w-4 h-4 fill-current stroke-[2]" />
+        </button>
+      </div>
     </div>
   );
 };

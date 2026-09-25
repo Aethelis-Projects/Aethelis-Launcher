@@ -73,6 +73,7 @@ interface WailsAdapterBindings {
   ExportMrPack?: (req: ExportMrPackRequest) => Promise<string>;
   CheckJavaRuntimeUpdates?: () => Promise<JavaRuntimeUpdateDTO[]>;
   UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
+  OpenPath?: (path: string) => Promise<void>;
   [key: string]: unknown;
 }
 
@@ -896,6 +897,14 @@ export const launcherAPI = {
         };
       },
       major
+    );
+  },
+
+  async openPath(path: string): Promise<void> {
+    return invokeWails<void>(
+      "OpenPath",
+      () => Promise.resolve(),
+      path
     );
   },
 
