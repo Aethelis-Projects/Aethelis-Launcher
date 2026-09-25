@@ -31,22 +31,6 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
 
   const normName = (fn: string) => fn.replace(/\.disabled$/, "");
 
-  const handleUndoDuplicateHeal = async () => {
-    const toast = duplicateToast();
-    if (!toast) return;
-    for (const f of toast.files) {
-      const disabledName = f.endsWith(".disabled") ? f : `${f}.disabled`;
-      await launcherAPI.toggleMod({
-        instance_id: props.instanceId,
-        file_name: disabledName,
-        enable: true,
-      });
-    }
-    setReconcileNoticeDismissed(true);
-    setDuplicateToast(null);
-    refetch();
-  };
-
   // Initialize baseline when mods are first loaded for an instance
   createEffect(() => {
     const list = mods();
@@ -332,14 +316,14 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
 
         <Show when={duplicateToast()?.visible}>
           <div
-            class="px-3 py-2 rounded border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs font-mono flex items-center justify-between gap-3"
+            class="px-3 py-2 rounded border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 text-xs font-mono flex items-center justify-between gap-3"
             data-testid="duplicate-heal-toast"
           >
             <div class="flex items-center gap-2">
-              <Package class="w-4 h-4 text-amber-400 shrink-0" />
+              <Package class="w-4 h-4 text-cyan-400 shrink-0" />
               <span>
-                Отключены устаревшие дубликаты ({duplicateToast()?.files.length}):{" "}
-                <span class="text-amber-200 font-semibold">
+                Удалены устаревшие версии ({duplicateToast()?.files.length}):{" "}
+                <span class="text-cyan-200 font-semibold">
                   {duplicateToast()?.files.join(", ")}
                 </span>
               </span>
@@ -347,19 +331,11 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
             <div class="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleUndoDuplicateHeal}
-                data-testid="undo-duplicate-heal-btn"
-                class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 text-xs font-sans font-medium transition-colors"
-              >
-                Отменить
-              </button>
-              <button
-                type="button"
                 onClick={() => {
                   setDuplicateToast(null);
                   setReconcileNoticeDismissed(true);
                 }}
-                class="text-amber-400 hover:text-amber-200 p-0.5"
+                class="text-cyan-400 hover:text-cyan-200 p-0.5"
                 title="Скрыть"
               >
                 <X class="w-3.5 h-3.5" />

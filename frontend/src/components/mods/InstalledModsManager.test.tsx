@@ -99,7 +99,7 @@ describe("InstalledModsManager Component", () => {
     });
   });
 
-  it("updates all available mods via updateMod and shows duplicate heal toast with undo (C1)", async () => {
+  it("updates all available mods via updateMod and shows deleted versions toast (C1)", async () => {
     vi.spyOn(launcherAPI, "checkModUpdates").mockResolvedValue([
       {
         file_name: "sodium-fabric-0.5.8.jar",
@@ -117,7 +117,6 @@ describe("InstalledModsManager Component", () => {
       message: "Mod updated",
       disabled_duplicates: ["sodium-fabric-0.5.8.jar"],
     });
-    const toggleSpy = vi.spyOn(launcherAPI, "toggleMod").mockResolvedValue();
 
     render(() => <InstalledModsManager instanceId="nord-opti-1" />);
     await screen.findByText("Sodium");
@@ -134,19 +133,15 @@ describe("InstalledModsManager Component", () => {
     });
 
     const toast = await screen.findByTestId("duplicate-heal-toast");
-    expect(toast.textContent).toContain("Отключены устаревшие дубликаты (1)");
+    expect(toast.textContent).toContain("Удалены устаревшие версии (1)");
     expect(toast.textContent).toContain("sodium-fabric-0.5.8.jar");
 
-    const undoBtn = screen.getByTestId("undo-duplicate-heal-btn");
-    expect(undoBtn).toBeTruthy();
-    fireEvent.click(undoBtn);
+    const closeBtn = toast.querySelector('button[title="Скрыть"]');
+    expect(closeBtn).toBeTruthy();
+    fireEvent.click(closeBtn!);
 
     await vi.waitFor(() => {
-      expect(toggleSpy).toHaveBeenCalledWith({
-        instance_id: "nord-opti-1",
-        file_name: "sodium-fabric-0.5.8.jar.disabled",
-        enable: true,
-      });
+      expect(screen.queryByTestId("duplicate-heal-toast")).toBeNull();
     });
   });
 
@@ -212,7 +207,7 @@ describe("InstalledModsManager Component", () => {
     render(() => <InstalledModsManager instanceId="nord-opti-1" />);
 
     const toast = await screen.findByTestId("duplicate-heal-toast");
-    expect(toast.textContent).toContain("Отключены устаревшие дубликаты (1)");
+    expect(toast.textContent).toContain("Удалены устаревшие версии (1)");
     expect(toast.textContent).toContain("sodium-fabric-0.5.8.jar");
 
     const closeBtn = toast.querySelector('button[title="Скрыть"]');

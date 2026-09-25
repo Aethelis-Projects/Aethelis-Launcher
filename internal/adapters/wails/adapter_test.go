@@ -1388,7 +1388,7 @@ func TestWailsAdapter_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
 		t.Fatalf("ListInstalledMods failed: %v", err)
 	}
 
-	// Should have self-healed: 1 enabled, 1 disabled
+	// Should have self-healed by deleting older duplicate: 1 enabled, 0 disabled
 	var enabledCount, disabledCount int
 	for _, mod := range mods {
 		if mod.Enabled {
@@ -1398,21 +1398,18 @@ func TestWailsAdapter_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
 			}
 		} else {
 			disabledCount++
-			if mod.FileName != "modmenu-11.0.4.jar.disabled" {
-				t.Errorf("expected modmenu-11.0.4.jar.disabled to be disabled, got %s", mod.FileName)
-			}
 		}
 	}
-	if enabledCount != 1 || disabledCount != 1 {
-		t.Errorf("expected 1 enabled and 1 disabled mod, got enabled=%d, disabled=%d", enabledCount, disabledCount)
+	if enabledCount != 1 || disabledCount != 0 {
+		t.Errorf("expected 1 enabled and 0 disabled mod, got enabled=%d, disabled=%d", enabledCount, disabledCount)
 	}
 
-	// Verify file system state
-	if _, err := os.Stat(oldPath); err == nil {
-		t.Errorf("expected active old jar to no longer exist on disk")
+	// Verify file system state: older duplicate is deleted, not renamed to .disabled
+	if _, err := os.Stat(oldPath); err == nil || !os.IsNotExist(err) {
+		t.Errorf("expected active old jar to be deleted from disk")
 	}
-	if _, err := os.Stat(filepath.Join(modsDir, "modmenu-11.0.4.jar.disabled")); err != nil {
-		t.Errorf("expected modmenu-11.0.4.jar.disabled to exist on disk: %v", err)
+	if _, err := os.Stat(filepath.Join(modsDir, "modmenu-11.0.4.jar.disabled")); err == nil || !os.IsNotExist(err) {
+		t.Errorf("expected old jar to not exist as .disabled on disk")
 	}
 	if _, err := os.Stat(newPath); err != nil {
 		t.Errorf("expected modmenu-11.0.5.jar to exist on disk: %v", err)
