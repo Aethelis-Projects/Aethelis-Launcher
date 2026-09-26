@@ -220,6 +220,31 @@ func main() {
 		seenAssets[filepath.Base(linuxTarball)] = true
 	}
 
+	// Scan for Windows portable zip in distDir (e.g. nord-launcher-*-windows-x64-portable.zip)
+	zipMatches, _ := filepath.Glob(filepath.Join(*distDirFlag, "*portable*.zip"))
+	if len(zipMatches) == 0 {
+		zipMatches, _ = filepath.Glob(filepath.Join(*distDirFlag, "*.zip"))
+	}
+	for _, zPath := range zipMatches {
+		base := filepath.Base(zPath)
+		if seenAssets[base] {
+			continue
+		}
+		seenAssets[base] = true
+		payload, err := os.ReadFile(zPath)
+		if err != nil {
+			continue
+		}
+		hashBytes := sha256.Sum256(payload)
+		extraAssets = append(extraAssets, PublishedArtifact{
+			Name:     base,
+			Platform: "Windows (x64 Portable Zip)",
+			Size:     int64(len(payload)),
+			SHA256:   hex.EncodeToString(hashBytes[:]),
+		})
+		fmt.Printf("[Manifest] Added extra artifact: %s (SHA256: %s, Size: %d)\n", base, hex.EncodeToString(hashBytes[:]), len(payload))
+	}
+
 	// Scan for update manifest files in distDir (e.g. manifest-stable.json, manifest-beta.json)
 	manifestMatches, _ := filepath.Glob(filepath.Join(*distDirFlag, "manifest-*.json"))
 	for _, mPath := range manifestMatches {
@@ -408,7 +433,7 @@ func BuildReleaseBody(version, channel, changelog string, platforms map[string]u
 	}
 
 	sb.WriteString("### Verification & Forensic Integrity\n\n")
-	sb.WriteString(fmt.Sprintf("- **Ed25519 Cryptographic Signatures**: All platform release payloads verified against production signing key.\n- **Public Key**: `%s`\n- **Sidecar Key Permissions**: `cf.key` delivered with `0644` permissions inside Linux release tarball and NSIS installer payload; binary executables verified 100%% clean of raw secrets and buildinfo symbol leaks.\n\n", updater.DefaultPublicKeyHex))
+	sb.WriteString(fmt.Sprintf("- **Ed25519 Cryptographic Signatures**: All platform release payloads verified against production signing key.\n- **Public Key**: `%s`\n- **Sidecar Key Permissions**: `cf.key` delivered with `0644` permissions inside Linux release tarball and NSIS installer payload; binary executables verified 100%% clean of raw secrets and buildinfo symbol leaks.\n- **Update Manifest Scope**: Update manifest delivers verified binary updates for Windows (portable executable & NSIS setup) and Linux; standalone Windows portable zip is distributed as an unbundled archive asset and is not an auto-updater target.\n\n", updater.DefaultPublicKeyHex))
 	sb.WriteString("---\n")
 	sb.WriteString(fmt.Sprintf("**Full Changelog**: https://github.com/Aethelis-Projects/Aethelis-Launcher/compare/v0.1.0...%s\n", tagVersion))
 
@@ -417,6 +442,8 @@ func BuildReleaseBody(version, channel, changelog string, platforms map[string]u
 
 func getReleaseOverview(cleanVer, tagVersion string) string {
 	switch {
+	case cleanVer == "0.7.0":
+		return "This release introduces rich instance content features: Modrinth resource pack and shader pack catalog browsing and 1-click installation, local screenshots gallery with native clipboard copy, real-time log streaming game console, 1-click instance migration from .minecraft and Prism/MultiMC, instance groups and favorites, curated avatar presets, and standalone Windows portable zip distribution."
 	case cleanVer == "0.6.1":
 		return "This release delivers atomic mod updates with automatic obsolete version cleanup, manifest-driven Java recommendation chip for modern Minecraft versions (up to Java 25 LTS), platform-native folder opener across instances and export modals, and prominent manual update checking with status badges."
 	case strings.HasPrefix(cleanVer, "0.6."):
