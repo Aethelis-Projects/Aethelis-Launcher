@@ -340,3 +340,14 @@ type GetScreenshotDataRequest struct {
 type GetScreenshotDataResponse struct {
 	DataURL string `json:"data_url"`
 }
+
+type SaveGameLogRequest struct {
+	InstanceID string `json:"instance_id"`
+	TargetPath string `json:"target_path,omitempty"`
+}
+
+type SaveGameLogResponse struct {
+	Success  bool   `json:"success"`
+	FilePath string `json:"file_path"`
+	Error    string `json:"error,omitempty"`
+}

@@ -10,6 +10,7 @@ import { MrPackExportModal } from "./components/instance/MrPackExportModal";
 import { JavaManager } from "./components/java/JavaManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
+import { GameConsoleModal } from "./components/console/GameConsoleModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
 import { StartupUpdateModal } from "./components/updater/StartupUpdateModal";
 import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
@@ -48,6 +49,7 @@ export const App: Component = () => {
   const [isImportModalOpen, setIsImportModalOpen] = createSignal(false);
   const [isExportModalOpen, setIsExportModalOpen] = createSignal(false);
   const [isScreenshotsOpen, setIsScreenshotsOpen] = createSignal(false);
+  const [isConsoleOpen, setIsConsoleOpen] = createSignal(false);
 
   const openSettingsWithTab = (tab: SettingsTab) => {
     setSettingsInitialTab(tab);
@@ -750,9 +752,20 @@ export const App: Component = () => {
                           <span class="w-2 h-2 rounded-full bg-nord-emerald animate-pulse" />
                         </Show>
                       </div>
-                      <span class="text-[10px] font-mono text-zinc-500">
-                        {logTail().length > 0 ? `${logTail().length} строк` : "Ожидание запуска"}
-                      </span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-mono text-zinc-500">
+                          {logTail().length > 0 ? `${logTail().length} строк` : "Ожидание запуска"}
+                        </span>
+                        <button
+                          type="button"
+                          data-testid="open-console-btn"
+                          onClick={() => setIsConsoleOpen(true)}
+                          class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-nord-cyan hover:text-white transition-colors"
+                          title="Развернуть полноэкранную консоль"
+                        >
+                          Развернуть
+                        </button>
+                      </div>
                     </div>
 
                     <div class="h-24 overflow-y-auto bg-black/60 rounded-lg p-2 font-mono text-[11px] text-zinc-400 select-text leading-relaxed border border-white/5">
@@ -933,6 +946,21 @@ export const App: Component = () => {
         instanceId={activeInstance().id}
         instanceName={activeInstance().name}
         onClose={() => setIsScreenshotsOpen(false)}
+      />
+
+      {/* Game Console Modal (v0.7.0) */}
+      <GameConsoleModal
+        isOpen={isConsoleOpen()}
+        instance={activeInstance()}
+        onClose={() => setIsConsoleOpen(false)}
+        onOpenCrash={() => {
+          setIsConsoleOpen(false);
+          if (!crashReport()) {
+            launcherAPI.getLastCrashReport(activeInstance().id).then((r) => {
+              if (r) setCrashReport(r);
+            });
+          }
+        }}
       />
     </div>
   );

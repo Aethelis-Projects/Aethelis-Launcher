@@ -481,7 +481,7 @@ func (s *InstanceService) LaunchWithSupervisor(
 		return nil, nil, fmt.Errorf("build launch args: %w", err)
 	}
 
-	supervisor := NewLogSupervisor(200)
+	supervisor := NewLogSupervisor(DefaultLogBufferSize)
 
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
@@ -556,4 +556,14 @@ func (s *InstanceService) GetLogTail(instanceID string, n int) ([]string, error)
 	}
 
 	return sup.GetTail(n), nil
+}
+
+// GetSupervisor returns the LogSupervisor for the instance, or nil if none exists.
+func (s *InstanceService) GetSupervisor(instanceID string) *LogSupervisor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.supervisors == nil {
+		return nil
+	}
+	return s.supervisors[instanceID]
 }

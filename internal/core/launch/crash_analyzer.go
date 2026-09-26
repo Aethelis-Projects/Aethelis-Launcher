@@ -30,6 +30,8 @@ type CrashReport struct {
 	ExitCode      int           `json:"exit_code"`
 }
 
+const DefaultLogBufferSize = 5000
+
 // LogSupervisor streams and monitors Minecraft output, retaining ring-buffer of recent lines
 // and automatically detecting fatal errors.
 type LogSupervisor struct {
@@ -39,17 +41,47 @@ type LogSupervisor struct {
 	detectedCat  CrashCategory
 	detectedMsg  string
 	offendingMod string
+	listenerMu   sync.RWMutex
+	listeners    []chan string
 }
 
 func NewLogSupervisor(bufferSize int) *LogSupervisor {
 	if bufferSize <= 0 {
-		bufferSize = 100
+		bufferSize = DefaultLogBufferSize
 	}
 	return &LogSupervisor{
 		recentLines: make([]string, 0, bufferSize),
 		maxLines:    bufferSize,
 		detectedCat: CrashCategoryNone,
+		listeners:   make([]chan string, 0),
 	}
+}
+
+// Subscribe registers a listener channel to receive real-time log lines.
+// It returns the receive-only channel and an unsubscribe cleanup function.
+// Channels use non-blocking send with drop policy so slow consumers never block execution.
+func (s *LogSupervisor) Subscribe(bufLen int) (<-chan string, func()) {
+	if bufLen <= 0 {
+		bufLen = 256
+	}
+	ch := make(chan string, bufLen)
+
+	s.listenerMu.Lock()
+	s.listeners = append(s.listeners, ch)
+	s.listenerMu.Unlock()
+
+	unsubscribe := func() {
+		s.listenerMu.Lock()
+		defer s.listenerMu.Unlock()
+		for i, l := range s.listeners {
+			if l == ch {
+				s.listeners = append(s.listeners[:i], s.listeners[i+1:]...)
+				close(ch)
+				break
+			}
+		}
+	}
+	return ch, unsubscribe
 }
 
 var (
@@ -63,7 +95,6 @@ var (
 
 func (s *LogSupervisor) ProcessLine(line string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	if len(s.recentLines) >= s.maxLines {
 		s.recentLines = s.recentLines[1:]
@@ -89,6 +120,24 @@ func (s *LogSupervisor) ProcessLine(line string) {
 			if match := fabricModRegex.FindStringSubmatch(line); len(match) > 1 {
 				s.offendingMod = match[1]
 			}
+		}
+	}
+	s.mu.Unlock()
+
+	// Non-blocking send with drop policy outside mu
+	s.listenerMu.RLock()
+	var targets []chan string
+	if len(s.listeners) > 0 {
+		targets = make([]chan string, len(s.listeners))
+		copy(targets, s.listeners)
+	}
+	s.listenerMu.RUnlock()
+
+	for _, ch := range targets {
+		select {
+		case ch <- line:
+		default:
+			// slow consumer drop policy
 		}
 	}
 }

@@ -98,3 +98,42 @@ func TestCrashAnalyzer_DefaultSizeAndUnknown(t *testing.T) {
 		t.Fatalf("expected CrashCategoryUnknown, got: %+v", report)
 	}
 }
+
+func TestCrashAnalyzer_SubscriptionAndNonBlockingDrop(t *testing.T) {
+	sup := launch.NewLogSupervisor(100)
+	ch, unsub := sup.Subscribe(2)
+	defer unsub()
+
+	// Push 10 lines
+	for i := 0; i < 10; i++ {
+		sup.ProcessLine(strings.Repeat("a", i+1))
+	}
+
+	// Should have received at least 2 lines without blocking
+	count := 0
+	for {
+		select {
+		case line, ok := <-ch:
+			if !ok {
+				t.Fatal("channel closed unexpectedly")
+			}
+			if len(line) == 0 {
+				t.Fatal("expected non-empty line")
+			}
+			count++
+		default:
+			goto done
+		}
+	}
+done:
+	if count != 2 {
+		t.Fatalf("expected exactly 2 buffered lines due to drop policy, got %d", count)
+	}
+
+	// Unsubscribe closes channel
+	unsub()
+	_, ok := <-ch
+	if ok {
+		t.Fatal("expected channel to be closed after unsubscribe")
+	}
+}
