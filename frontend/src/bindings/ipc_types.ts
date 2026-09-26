@@ -317,3 +317,28 @@ export interface ExportMrPackRequest {
   include_shaders?: boolean;
   include_resources?: boolean;
 }
+
+export interface ScreenshotDTO {
+  file_name: string;
+  path: string;
+  size: number;
+  created_at: string;
+}
+
+export interface ListScreenshotsRequest {
+  instance_id: string;
+}
+
+export interface DeleteScreenshotRequest {
+  instance_id: string;
+  file_name: string;
+}
+
+export interface GetScreenshotDataRequest {
+  instance_id: string;
+  file_name: string;
+}
+
+export interface GetScreenshotDataResponse {
+  data_url: string;
+}

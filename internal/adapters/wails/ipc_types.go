@@ -315,3 +315,28 @@ type ExportMrPackRequest struct {
 	IncludeShaders   bool   `json:"include_shaders,omitempty"`
 	IncludeResources bool   `json:"include_resources,omitempty"`
 }
+
+type ScreenshotDTO struct {
+	FileName  string    `json:"file_name"`
+	Path      string    `json:"path"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ListScreenshotsRequest struct {
+	InstanceID string `json:"instance_id"`
+}
+
+type DeleteScreenshotRequest struct {
+	InstanceID string `json:"instance_id"`
+	FileName   string `json:"file_name"`
+}
+
+type GetScreenshotDataRequest struct {
+	InstanceID string `json:"instance_id"`
+	FileName   string `json:"file_name"`
+}
+
+type GetScreenshotDataResponse struct {
+	DataURL string `json:"data_url"`
+}
