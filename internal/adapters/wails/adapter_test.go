@@ -2546,4 +2546,92 @@ func TestWailsAdapter_OpenPath(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_Screenshots(t *testing.T) {
+	tempDir := t.TempDir()
+	instancesDir := filepath.Join(tempDir, "instances")
+	instID := "test-shot-inst"
+	shotsDir := filepath.Join(instancesDir, instID, "screenshots")
+	if err := os.MkdirAll(shotsDir, 0755); err != nil {
+		t.Fatalf("failed to create screenshots dir: %v", err)
+	}
+
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(nil, instancesDir)
+
+	// 1. Initially empty directory
+	list, err := adapter.ListScreenshots(instID)
+	if err != nil {
+		t.Fatalf("ListScreenshots failed on empty dir: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("expected 0 screenshots, got %d", len(list))
+	}
+
+	// 2. Create sample files: shot1 (older), shot2 (newer), and ignore text file
+	shot1 := filepath.Join(shotsDir, "2026-09-01_12.00.00.png")
+	shot2 := filepath.Join(shotsDir, "2026-09-02_12.00.00.png")
+	txtFile := filepath.Join(shotsDir, "notes.txt")
+
+	_ = os.WriteFile(shot1, []byte("fake-png-1"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	_ = os.WriteFile(shot2, []byte("fake-png-2"), 0644)
+	_ = os.WriteFile(txtFile, []byte("ignore me"), 0644)
+
+	list, err = adapter.ListScreenshots(instID)
+	if err != nil {
+		t.Fatalf("ListScreenshots failed: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected exactly 2 PNG screenshots, got %d", len(list))
+	}
+	// Newest first: shot2 should be index 0
+	if list[0].FileName != "2026-09-02_12.00.00.png" {
+		t.Errorf("expected newest shot first, got %s", list[0].FileName)
+	}
+
+	// 3. GetScreenshotData
+	dataRes, err := adapter.GetScreenshotData(wails.GetScreenshotDataRequest{
+		InstanceID: instID,
+		FileName:   "2026-09-02_12.00.00.png",
+	})
+	if err != nil {
+		t.Fatalf("GetScreenshotData failed: %v", err)
+	}
+	if !strings.HasPrefix(dataRes.DataURL, "data:image/png;base64,") {
+		t.Errorf("expected data URL to start with data:image/png;base64,, got %s", dataRes.DataURL)
+	}
+
+	// Security: traversal check
+	_, err = adapter.GetScreenshotData(wails.GetScreenshotDataRequest{
+		InstanceID: instID,
+		FileName:   "../notes.txt",
+	})
+	if err == nil {
+		t.Errorf("expected error on path traversal in GetScreenshotData, got nil")
+	}
+
+	// 4. DeleteScreenshot
+	err = adapter.DeleteScreenshot(wails.DeleteScreenshotRequest{
+		InstanceID: instID,
+		FileName:   "2026-09-01_12.00.00.png",
+	})
+	if err != nil {
+		t.Fatalf("DeleteScreenshot failed: %v", err)
+	}
+
+	// Verify file is gone
+	if _, err := os.Stat(shot1); !os.IsNotExist(err) {
+		t.Errorf("expected file to be deleted from disk")
+	}
+
+	// Verify delete is idempotent
+	err = adapter.DeleteScreenshot(wails.DeleteScreenshotRequest{
+		InstanceID: instID,
+		FileName:   "2026-09-01_12.00.00.png",
+	})
+	if err != nil {
+		t.Errorf("expected idempotent DeleteScreenshot to return nil, got %v", err)
+	}
+}
+
 

@@ -33,6 +33,10 @@ import type {
   JavaRuntimeUpdateDTO,
   SetFavoriteRequest,
   SetGroupRequest,
+  ScreenshotDTO,
+  DeleteScreenshotRequest,
+  GetScreenshotDataRequest,
+  GetScreenshotDataResponse,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -47,6 +51,9 @@ interface WailsAdapterBindings {
   UpdateInstance?: (req: UpdateInstanceRequest) => Promise<InstanceDTO>;
   SetInstanceFavorite?: (req: SetFavoriteRequest) => Promise<InstanceDTO>;
   SetInstanceGroup?: (req: SetGroupRequest) => Promise<InstanceDTO>;
+  ListScreenshots?: (instanceId: string) => Promise<ScreenshotDTO[]>;
+  DeleteScreenshot?: (req: DeleteScreenshotRequest) => Promise<void>;
+  GetScreenshotData?: (req: GetScreenshotDataRequest) => Promise<GetScreenshotDataResponse>;
   LaunchInstance?: (id: string) => Promise<LaunchResponse>;
   ListAccounts?: () => Promise<AccountDTO[]>;
   SetActiveAccount?: (uuid: string) => Promise<void>;
@@ -217,6 +224,17 @@ let mockAccounts: AccountDTO[] = [
     is_active: false,
   },
 ];
+
+let mockScreenshots: Record<string, ScreenshotDTO[]> = {
+  "nord-opti-1": [
+    {
+      file_name: "2026-09-20_15.30.00.png",
+      path: "instances/nord-opti-1/screenshots/2026-09-20_15.30.00.png",
+      size: 1048576,
+      created_at: new Date().toISOString(),
+    },
+  ],
+};
 
 let mockInstalledMods: Record<string, InstalledModDTO[]> = {
   "nord-opti-1": [
@@ -949,6 +967,42 @@ export const launcherAPI = {
       () => Promise.resolve(),
       path
     );
+  },
+
+  async listScreenshots(instanceId: string): Promise<ScreenshotDTO[]> {
+    return invokeWails<ScreenshotDTO[]>(
+      "ListScreenshots",
+      () => [...(mockScreenshots[instanceId] || [])],
+      instanceId
+    );
+  },
+
+  async deleteScreenshot(req: DeleteScreenshotRequest): Promise<void> {
+    return invokeWails<void>(
+      "DeleteScreenshot",
+      () => {
+        if (mockScreenshots[req.instance_id]) {
+          mockScreenshots[req.instance_id] = mockScreenshots[req.instance_id].filter(
+            (s) => s.file_name !== req.file_name
+          );
+        }
+      },
+      req
+    );
+  },
+
+  async getScreenshotData(req: GetScreenshotDataRequest): Promise<GetScreenshotDataResponse> {
+    return invokeWails<GetScreenshotDataResponse>(
+      "GetScreenshotData",
+      () => ({
+        data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      }),
+      req
+    );
+  },
+
+  setMockScreenshots(instanceId: string, list: ScreenshotDTO[]): void {
+    mockScreenshots[instanceId] = [...list];
   },
 
   setMockMrPackPlan(plan: MrPackImportPlanDTO): void {

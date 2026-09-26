@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"crypto/sha512"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -2546,5 +2548,106 @@ func (a *WailsAdapter) OpenPath(targetPath string) error {
 		return fmt.Errorf("path not accessible: %w", err)
 	}
 	return openPathExec(cleanPath, fi.IsDir())
+}
+
+func (a *WailsAdapter) getScreenshotsDir(instanceID string) string {
+	base := a.instancesDir
+	if base == "" {
+		base = "instances"
+	}
+	return filepath.Join(base, instanceID, "screenshots")
+}
+
+func (a *WailsAdapter) ListScreenshots(instanceID string) ([]ScreenshotDTO, error) {
+	cleanID := strings.TrimSpace(instanceID)
+	if cleanID == "" || filepath.Base(cleanID) != cleanID || strings.Contains(cleanID, "..") {
+		return nil, errors.New("invalid instance ID")
+	}
+
+	dir := a.getScreenshotsDir(cleanID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []ScreenshotDTO{}, nil
+		}
+		return nil, fmt.Errorf("read screenshots dir: %w", err)
+	}
+
+	var results []ScreenshotDTO
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		ext := strings.ToLower(filepath.Ext(name))
+		if ext != ".png" && ext != ".jpg" && ext != ".jpeg" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		results = append(results, ScreenshotDTO{
+			FileName:  name,
+			Path:      filepath.Join(dir, name),
+			Size:      info.Size(),
+			CreatedAt: info.ModTime(),
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].CreatedAt.After(results[j].CreatedAt)
+	})
+
+	if results == nil {
+		results = []ScreenshotDTO{}
+	}
+	return results, nil
+}
+
+func (a *WailsAdapter) DeleteScreenshot(req DeleteScreenshotRequest) error {
+	cleanID := strings.TrimSpace(req.InstanceID)
+	cleanFile := strings.TrimSpace(req.FileName)
+	if cleanID == "" || filepath.Base(cleanID) != cleanID || strings.Contains(cleanID, "..") {
+		return errors.New("invalid instance ID")
+	}
+	if cleanFile == "" || filepath.Base(cleanFile) != cleanFile || strings.Contains(cleanFile, "..") {
+		return errors.New("invalid file name")
+	}
+
+	target := filepath.Join(a.getScreenshotsDir(cleanID), cleanFile)
+	if err := os.Remove(target); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("delete screenshot: %w", err)
+	}
+	return nil
+}
+
+func (a *WailsAdapter) GetScreenshotData(req GetScreenshotDataRequest) (*GetScreenshotDataResponse, error) {
+	cleanID := strings.TrimSpace(req.InstanceID)
+	cleanFile := strings.TrimSpace(req.FileName)
+	if cleanID == "" || filepath.Base(cleanID) != cleanID || strings.Contains(cleanID, "..") {
+		return nil, errors.New("invalid instance ID")
+	}
+	if cleanFile == "" || filepath.Base(cleanFile) != cleanFile || strings.Contains(cleanFile, "..") {
+		return nil, errors.New("invalid file name")
+	}
+
+	target := filepath.Join(a.getScreenshotsDir(cleanID), cleanFile)
+	data, err := os.ReadFile(target)
+	if err != nil {
+		return nil, fmt.Errorf("read screenshot: %w", err)
+	}
+
+	mimeType := "image/png"
+	ext := strings.ToLower(filepath.Ext(cleanFile))
+	if ext == ".jpg" || ext == ".jpeg" {
+		mimeType = "image/jpeg"
+	}
+
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
+	return &GetScreenshotDataResponse{DataURL: dataURL}, nil
 }
 

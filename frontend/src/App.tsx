@@ -1,9 +1,10 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload } from "lucide-solid";
+import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
 import { InstanceSettingsModal, SettingsTab } from "./components/instance/InstanceSettingsModal";
+import { ScreenshotGalleryModal } from "./components/instance/ScreenshotGalleryModal";
 import { MrPackImportModal } from "./components/instance/MrPackImportModal";
 import { MrPackExportModal } from "./components/instance/MrPackExportModal";
 import { JavaManager } from "./components/java/JavaManager";
@@ -46,6 +47,7 @@ export const App: Component = () => {
   const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
   const [isImportModalOpen, setIsImportModalOpen] = createSignal(false);
   const [isExportModalOpen, setIsExportModalOpen] = createSignal(false);
+  const [isScreenshotsOpen, setIsScreenshotsOpen] = createSignal(false);
 
   const openSettingsWithTab = (tab: SettingsTab) => {
     setSettingsInitialTab(tab);
@@ -584,6 +586,18 @@ export const App: Component = () => {
                     </div>
 
                     <div class="flex items-center gap-2">
+                      {/* Screenshots Button */}
+                      <button
+                        type="button"
+                        onClick={() => setIsScreenshotsOpen(true)}
+                        class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Галерея скриншотов сборки"
+                        data-testid="screenshots-btn"
+                      >
+                        <Image class="w-3.5 h-3.5 text-nord-cyan" />
+                        <span>Скриншоты</span>
+                      </button>
+
                       {/* Export MrPack Button */}
                       <button
                         type="button"
@@ -911,6 +925,14 @@ export const App: Component = () => {
         instance={activeInstance()}
         isOpen={isExportModalOpen()}
         onClose={() => setIsExportModalOpen(false)}
+      />
+
+      {/* Screenshot Gallery Modal (v0.7.0) */}
+      <ScreenshotGalleryModal
+        isOpen={isScreenshotsOpen()}
+        instanceId={activeInstance().id}
+        instanceName={activeInstance().name}
+        onClose={() => setIsScreenshotsOpen(false)}
       />
     </div>
   );
