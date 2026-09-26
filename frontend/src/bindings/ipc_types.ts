@@ -17,6 +17,8 @@ export interface InstanceDTO {
   max_ram_mb: number;
   jvm_args: string[];
   skip_java_check: boolean;
+  group?: string;
+  is_favorite: boolean;
   state: InstanceState;
   last_played_at?: string;
   total_play_seconds: number;
@@ -27,6 +29,7 @@ export interface CreateInstanceRequest {
   game_version: string;
   loader: LoaderType;
   java_path?: string;
+  group?: string;
 }
 
 export interface UpdateInstanceRequest {
@@ -38,6 +41,19 @@ export interface UpdateInstanceRequest {
   max_ram_mb?: number;
   jvm_args?: string[];
   skip_java_check?: boolean;
+  group?: string;
+  is_favorite?: boolean;
+  icon_path?: string;
+}
+
+export interface SetFavoriteRequest {
+  id: string;
+  is_favorite: boolean;
+}
+
+export interface SetGroupRequest {
+  id: string;
+  group: string;
 }
 
 export interface LaunchResponse {

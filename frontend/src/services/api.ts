@@ -31,6 +31,8 @@ import type {
   MrPackImportStatusDTO,
   ExportMrPackRequest,
   JavaRuntimeUpdateDTO,
+  SetFavoriteRequest,
+  SetGroupRequest,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -43,6 +45,8 @@ interface WailsAdapterBindings {
   ListInstances?: () => Promise<InstanceDTO[]>;
   CreateInstance?: (req: CreateInstanceRequest) => Promise<InstanceDTO>;
   UpdateInstance?: (req: UpdateInstanceRequest) => Promise<InstanceDTO>;
+  SetInstanceFavorite?: (req: SetFavoriteRequest) => Promise<InstanceDTO>;
+  SetInstanceGroup?: (req: SetGroupRequest) => Promise<InstanceDTO>;
   LaunchInstance?: (id: string) => Promise<LaunchResponse>;
   ListAccounts?: () => Promise<AccountDTO[]>;
   SetActiveAccount?: (uuid: string) => Promise<void>;
@@ -178,6 +182,8 @@ let mockInstances: InstanceDTO[] = [
     max_ram_mb: 4096,
     jvm_args: [],
     skip_java_check: false,
+    group: "",
+    is_favorite: false,
     state: "idle",
     total_play_seconds: 14200,
   },
@@ -190,6 +196,8 @@ let mockInstances: InstanceDTO[] = [
     max_ram_mb: 4096,
     jvm_args: [],
     skip_java_check: false,
+    group: "",
+    is_favorite: false,
     state: "idle",
     total_play_seconds: 3600,
   },
@@ -414,6 +422,8 @@ export const launcherAPI = {
           max_ram_mb: 4096,
           jvm_args: [],
           skip_java_check: false,
+          group: req.group || "",
+          is_favorite: false,
           state: "idle",
           total_play_seconds: 0,
         };
@@ -442,6 +452,39 @@ export const launcherAPI = {
         if (req.max_ram_mb !== undefined) inst.max_ram_mb = req.max_ram_mb;
         if (req.jvm_args !== undefined) inst.jvm_args = req.jvm_args;
         if (req.skip_java_check !== undefined) inst.skip_java_check = req.skip_java_check;
+        if (req.group !== undefined) inst.group = req.group;
+        if (req.is_favorite !== undefined) inst.is_favorite = req.is_favorite;
+        if (req.icon_path !== undefined) inst.icon_path = req.icon_path;
+        return { ...inst };
+      },
+      req
+    );
+  },
+
+  async setInstanceFavorite(req: SetFavoriteRequest): Promise<InstanceDTO> {
+    return invokeWails(
+      "SetInstanceFavorite",
+      () => {
+        const inst = mockInstances.find((i) => i.id === req.id);
+        if (!inst) {
+          throw new Error("Instance not found");
+        }
+        inst.is_favorite = req.is_favorite;
+        return { ...inst };
+      },
+      req
+    );
+  },
+
+  async setInstanceGroup(req: SetGroupRequest): Promise<InstanceDTO> {
+    return invokeWails(
+      "SetInstanceGroup",
+      () => {
+        const inst = mockInstances.find((i) => i.id === req.id);
+        if (!inst) {
+          throw new Error("Instance not found");
+        }
+        inst.group = req.group;
         return { ...inst };
       },
       req

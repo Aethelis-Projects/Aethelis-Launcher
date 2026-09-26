@@ -130,6 +130,7 @@ describe("InstanceSettingsModal (J2)", () => {
       expect(updateSpy).toHaveBeenCalledWith({
         id: "inst-modal-1",
         name: "Updated Survival",
+        group: "",
         java_path: undefined,
         clear_java_path: false,
         skip_java_check: true,

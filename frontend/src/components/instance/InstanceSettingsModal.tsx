@@ -58,6 +58,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const [activeTab, setActiveTab] = createSignal<SettingsTab>(props.initialTab || "general");
   const [modSubTab, setModSubTab] = createSignal<"installed" | "catalog">("installed");
   const [name, setName] = createSignal("");
+  const [group, setGroup] = createSignal("");
   const [javaPath, setJavaPath] = createSignal("");
   const [skipJavaCheck, setSkipJavaCheck] = createSignal(false);
   const [minMemoryMb, setMinMemoryMb] = createSignal(2048);
@@ -101,6 +102,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
     if (props.isOpen && props.instance) {
       setActiveTab(props.initialTab || "general");
       setName(props.instance.name || "");
+      setGroup(props.instance.group || "");
       setJavaPath(props.instance.java_path || "");
       setSkipJavaCheck(props.instance.skip_java_check || false);
       setMinMemoryMb(props.instance.min_ram_mb || 2048);
@@ -143,6 +145,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
       const req: UpdateInstanceRequest = {
         id: props.instance.id,
         name: name().trim(),
+        group: group().trim(),
         java_path: willHaveJavaPath ? javaPath().trim() : undefined,
         clear_java_path: hadJavaPath && !willHaveJavaPath,
         skip_java_check: skipJavaCheck(),
@@ -285,18 +288,33 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             {/* TAB 1: General */}
             <Show when={activeTab() === "general"}>
               <div class="space-y-4">
-                <div>
-                  <label class="block text-zinc-300 font-semibold mb-1.5">
-                    Название сборки
-                  </label>
-                  <input
-                    type="text"
-                    value={name()}
-                    onInput={(e) => setName(e.currentTarget.value)}
-                    placeholder="Например: Survival 1.21"
-                    class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-white font-medium focus:outline-none focus:border-nord-cyan"
-                    data-testid="settings-name-input"
-                  />
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-zinc-300 font-semibold mb-1.5">
+                      Название сборки
+                    </label>
+                    <input
+                      type="text"
+                      value={name()}
+                      onInput={(e) => setName(e.currentTarget.value)}
+                      placeholder="Например: Survival 1.21"
+                      class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-white font-medium focus:outline-none focus:border-nord-cyan"
+                      data-testid="settings-name-input"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-zinc-300 font-semibold mb-1.5">
+                      Группа
+                    </label>
+                    <input
+                      type="text"
+                      value={group()}
+                      onInput={(e) => setGroup(e.currentTarget.value)}
+                      placeholder="Например: SMP, Vanilla, Моды"
+                      class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-white font-medium focus:outline-none focus:border-nord-cyan"
+                      data-testid="settings-group-input"
+                    />
+                  </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4 pt-2">
