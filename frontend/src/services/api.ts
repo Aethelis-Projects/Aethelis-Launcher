@@ -96,6 +96,7 @@ interface WailsAdapterBindings {
   CheckJavaRuntimeUpdates?: () => Promise<JavaRuntimeUpdateDTO[]>;
   UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
   OpenPath?: (path: string) => Promise<void>;
+  EnsureInstanceDir?: (instanceId: string, dirType: string) => Promise<string>;
   ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
   ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
   ScanPrismInstance?: (req: ScanPrismInstanceRequest) => Promise<PrismImportSummaryDTO>;
@@ -1041,6 +1042,15 @@ export const launcherAPI = {
       "OpenPath",
       () => Promise.resolve(),
       path
+    );
+  },
+
+  async ensureInstanceDir(instanceId: string, dirType: string): Promise<string> {
+    return invokeWails<string>(
+      "EnsureInstanceDir",
+      () => `${instanceId}/${dirType}`,
+      instanceId,
+      dirType
     );
   },
 

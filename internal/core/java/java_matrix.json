@@ -21,12 +21,12 @@
       "min_version": "1.17",
       "max_version": "1.17.1",
       "java_major": 16,
-      "description": "Minecraft 1.17 through 1.17.1 requires Java 16"
+      "description": "Minecraft 1.17 through 1.17.1 requires Java 16 (требование 1.17–1.17.1)"
     },
     {
       "max_version": "1.16.5",
       "java_major": 8,
-      "description": "Minecraft 1.16.5 and older requires Java 8"
+      "description": "Minecraft 1.16.5 and older requires Java 8 (Java 11 compatible for modpacks)"
     }
   ]
 }

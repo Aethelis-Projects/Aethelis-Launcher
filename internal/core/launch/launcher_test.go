@@ -612,6 +612,42 @@ func TestInstanceService_Launch_FailClosed_IncompatibleJava(t *testing.T) {
 	}
 }
 
+func TestInstanceService_Launch_Java11_CompatibleWithLegacy(t *testing.T) {
+	now := time.Now()
+	clk := clock.NewMockClock(now)
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 2222, exitCode: 0}}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
+	svc.SetActiveAccount(&domain.Account{
+		UUID:        "uuid-alex",
+		Username:    "Alex",
+		Type:        domain.AccountOffline,
+		AccessToken: "mock-offline",
+	})
+
+	// Minecraft 1.16.5 instance (reqMajor = 8)
+	inst, _ := svc.CreateInstance("Legacy-1.16.5-Pack", "1.16.5", domain.LoaderVanilla)
+
+	// Detector provides Java 11
+	detector := &mockJavaDetector{
+		installs: []ports.JavaInstallation{
+			{Path: "/custom/java11/bin/java", MajorVersion: 11},
+		},
+	}
+	svc.SetJavaDetector(detector)
+
+	pid, err := svc.Launch(context.Background(), inst.ID)
+	if err != nil {
+		t.Fatalf("expected Launch with Java 11 on MC 1.16.5 to succeed, got: %v", err)
+	}
+	if pid != 2222 {
+		t.Fatalf("expected pid 2222, got %d", pid)
+	}
+}
+
+
 func TestInstanceService_Launch_FailClosed_NoJava(t *testing.T) {
 	now := time.Now()
 	clk := clock.NewMockClock(now)

@@ -2828,19 +2828,38 @@ func (a *WailsAdapter) OpenPath(targetPath string) error {
 			if ifi, ierr := os.Stat(instPath); ierr == nil {
 				return openPathExec(instPath, ifi.IsDir())
 			}
-			// If targetPath is within instancesDir (e.g. <instanceId>/screenshots)
-			// and doesn't exist yet on disk, create the directory and open it.
-			if strings.HasSuffix(cleanPath, filepath.FromSlash("/screenshots")) ||
-				strings.HasSuffix(trimmed, "/screenshots") ||
-				strings.HasSuffix(trimmed, "\\screenshots") {
-				if mkErr := os.MkdirAll(instPath, 0755); mkErr == nil {
-					return openPathExec(instPath, true)
-				}
-			}
 		}
 		return fmt.Errorf("path not accessible: %w", err)
 	}
 	return openPathExec(cleanPath, fi.IsDir())
+}
+
+// EnsureInstanceDir creates a designated directory under the specified instance in a secure manner.
+func (a *WailsAdapter) EnsureInstanceDir(instanceID string, dirType string) (string, error) {
+	trimmedInst := strings.TrimSpace(instanceID)
+	trimmedDir := strings.TrimSpace(dirType)
+	if trimmedInst == "" {
+		return "", errors.New("empty instance id provided")
+	}
+	if trimmedDir == "" {
+		return "", errors.New("empty directory type provided")
+	}
+	cleanDir := filepath.Clean(trimmedDir)
+	if strings.HasPrefix(cleanDir, "..") || filepath.IsAbs(cleanDir) {
+		return "", errors.New("invalid directory type path")
+	}
+	cleanInst := filepath.Clean(trimmedInst)
+	if strings.HasPrefix(cleanInst, "..") || filepath.IsAbs(cleanInst) {
+		return "", errors.New("invalid instance id")
+	}
+	if a.instancesDir == "" {
+		return "", errors.New("instances directory not configured")
+	}
+	target := filepath.Join(a.instancesDir, cleanInst, cleanDir)
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create instance directory: %w", err)
+	}
+	return target, nil
 }
 
 func (a *WailsAdapter) getScreenshotsDir(instanceID string) string {

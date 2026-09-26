@@ -2555,18 +2555,46 @@ func TestWailsAdapter_OpenPath(t *testing.T) {
 		t.Error("expected error on non-existent path, got nil")
 	}
 
-	// 5. Screenshots path under instancesDir that does not exist yet (should auto-create and open)
+	// 5. Screenshots path under instancesDir that does not exist yet fails with OpenPath
 	instancesDir := filepath.Join(tempDir, "instances")
 	adapter.SetFileSystem(nil, instancesDir)
-	if err := adapter.OpenPath("inst-new/screenshots"); err != nil {
-		t.Fatalf("OpenPath new screenshots dir failed: %v", err)
+	if err := adapter.OpenPath("inst-new/screenshots"); err == nil {
+		t.Error("expected error opening non-existent instance dir with OpenPath, got nil")
+	}
+
+	// 6. EnsureInstanceDir creates directory safely
+	createdPath, err := adapter.EnsureInstanceDir("inst-new", "screenshots")
+	if err != nil {
+		t.Fatalf("EnsureInstanceDir failed: %v", err)
 	}
 	expectedScreenshotsDir := filepath.Join(instancesDir, "inst-new", "screenshots")
-	if recordedPath != expectedScreenshotsDir || !recordedIsDir {
-		t.Errorf("expected clean dir path %s, isDir=true; got %s, %v", expectedScreenshotsDir, recordedPath, recordedIsDir)
+	if createdPath != expectedScreenshotsDir {
+		t.Errorf("expected clean dir path %s; got %s", expectedScreenshotsDir, createdPath)
 	}
 	if fi, err := os.Stat(expectedScreenshotsDir); err != nil || !fi.IsDir() {
 		t.Errorf("expected screenshots directory to be created on disk, got err: %v", err)
+	}
+
+	// 7. Now OpenPath succeeds
+	if err := adapter.OpenPath("inst-new/screenshots"); err != nil {
+		t.Fatalf("OpenPath new screenshots dir failed after EnsureInstanceDir: %v", err)
+	}
+	if recordedPath != expectedScreenshotsDir || !recordedIsDir {
+		t.Errorf("expected clean dir path %s, isDir=true; got %s, %v", expectedScreenshotsDir, recordedPath, recordedIsDir)
+	}
+
+	// 8. EnsureInstanceDir error cases
+	if _, err := adapter.EnsureInstanceDir("", "screenshots"); err == nil {
+		t.Error("expected error on empty instanceID, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("inst-new", ""); err == nil {
+		t.Error("expected error on empty dirType, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("../escape", "screenshots"); err == nil {
+		t.Error("expected error on traversal instanceID, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("inst-new", "../escape"); err == nil {
+		t.Error("expected error on traversal dirType, got nil")
 	}
 }
 

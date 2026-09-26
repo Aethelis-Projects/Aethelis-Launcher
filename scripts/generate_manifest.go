@@ -82,9 +82,6 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Error: cannot read changelog file %s: %v\n", *changelogFile, err)
 			os.Exit(1)
 		}
-	} else if *strictChangelog {
-		fmt.Fprintf(os.Stderr, "Error: strict-changelog enabled but no changelog file specified\n")
-		os.Exit(1)
 	}
 
 	manifest := updater.UpdateManifest{

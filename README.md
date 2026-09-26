@@ -119,6 +119,18 @@ Strict Hexagonal Architecture (Ports & Adapters):
 - **Linux**: Ubuntu 22.04 LTS or newer (x64) with GTK4 and WebKitGTK 6.0.
 - **macOS**: planned for a future milestone.
 
+## Java Runtime Matrix
+
+Nord Launcher resolves the required Java version automatically and provisions Temurin JDK runtimes on demand:
+
+| Minecraft Version | Required Java | Compatible / Recommended Runtimes | Notes |
+|:---|:---|:---|:---|
+| 26.1+ | Java 25 | Java 25 LTS | Modern Mojang annual release scheme |
+| 1.20.5 – 26.0 | Java 21 | Java 21 LTS | Modern default runtime |
+| 1.18 – 1.20.4 | Java 17 | Java 17 LTS | Caves & Cliffs Part II through 1.20.4 |
+| 1.17 – 1.17.1 | Java 16 | Java 16 (требование 1.17–1.17.1) | Non-LTS release specifically required for 1.17 |
+| ≤ 1.16.5 | Java 8 | Java 8 LTS, Java 11 LTS | Java 11 is supported for modern 1.12.2/1.16.5 modpacks |
+
 ## Building from Source
 
 Prerequisites: Go 1.26+, Node.js 22+, pnpm 12+ (plus the Linux GTK4/WebKitGTK packages above when building on Linux).

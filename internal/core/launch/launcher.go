@@ -332,7 +332,7 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 			}
 			return 0, fmt.Errorf("could not determine Java version for %s: %w", javaExec, parseErr)
 		}
-		if !inst.SkipJavaCheck && reqMajor > 0 && major != reqMajor {
+		if !inst.SkipJavaCheck && reqMajor > 0 && !java.IsCompatibleJavaMajor(reqMajor, major) {
 			return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d via Java Manager or set Java path in instance settings", reqMajor, inst.GameVersion, major, javaExec, reqMajor)
 		}
 	} else if s.java != nil {
@@ -345,6 +345,14 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 			if install.MajorVersion == reqMajor {
 				javaExec = install.Path
 				break
+			}
+		}
+		if javaExec == "" && reqMajor == 8 {
+			for _, install := range installs {
+				if install.MajorVersion == 11 {
+					javaExec = install.Path
+					break
+				}
 			}
 		}
 		if javaExec == "" {
