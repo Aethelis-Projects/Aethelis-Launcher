@@ -2848,6 +2848,20 @@ func (a *WailsAdapter) EnsureInstanceDir(instanceID string, dirType string) (str
 	if strings.HasPrefix(cleanDir, "..") || filepath.IsAbs(cleanDir) {
 		return "", errors.New("invalid directory type path")
 	}
+	allowedBaseDirs := map[string]bool{
+		"screenshots":        true,
+		"datapacks":          true,
+		"datapacks-disabled": true,
+		"resourcepacks":      true,
+		"shaderpacks":        true,
+		"mods":               true,
+		"saves":              true,
+		"config":             true,
+	}
+	parts := strings.Split(filepath.ToSlash(cleanDir), "/")
+	if len(parts) == 0 || !allowedBaseDirs[parts[0]] {
+		return "", fmt.Errorf("unsupported directory type: %s", cleanDir)
+	}
 	cleanInst := filepath.Clean(trimmedInst)
 	if strings.HasPrefix(cleanInst, "..") || filepath.IsAbs(cleanInst) {
 		return "", errors.New("invalid instance id")

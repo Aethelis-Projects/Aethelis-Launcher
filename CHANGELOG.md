@@ -17,7 +17,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 - Portable sidecar key resolution honoring executable-adjacent ./cf.key and user config directories.
-- Dynamic manifest Java version resolution supporting Java 16 (требование 1.17–1.17.1).
+- Dynamic manifest Java version resolution supporting Java 16 (non-LTS, required by 1.17–1.17.1).
 - Windows explorer file revealing with space handling in instance directory paths via SysProcAttr.CmdLine.
 - Screenshot gallery folder opener targeting the instance screenshots folder with auto-creation on demand.
 

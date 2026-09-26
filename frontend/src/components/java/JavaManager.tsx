@@ -311,12 +311,12 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
           >
             <div class="flex items-center justify-between mb-1">
               <span class="font-bold text-white text-xs group-hover:text-nord-cyan transition-colors">
-                Java 16 (требование 1.17–1.17.1)
+                Java 16
               </span>
               <Download class="w-4 h-4 text-zinc-500 group-hover:text-nord-cyan transition-colors" />
             </div>
             <p class="text-[11px] text-zinc-400">
-              Minecraft 1.17 – 1.17.1
+              Minecraft 1.17 – 1.17.1 (non-LTS)
             </p>
           </button>
 

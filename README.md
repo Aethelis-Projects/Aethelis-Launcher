@@ -128,7 +128,7 @@ Nord Launcher resolves the required Java version automatically and provisions Te
 | 26.1+ | Java 25 | Java 25 LTS | Modern Mojang annual release scheme |
 | 1.20.5 – 26.0 | Java 21 | Java 21 LTS | Modern default runtime |
 | 1.18 – 1.20.4 | Java 17 | Java 17 LTS | Caves & Cliffs Part II through 1.20.4 |
-| 1.17 – 1.17.1 | Java 16 | Java 16 (требование 1.17–1.17.1) | Non-LTS release specifically required for 1.17 |
+| 1.17 – 1.17.1 | Java 16 | Java 16 | Non-LTS release specifically required for 1.17 |
 | ≤ 1.16.5 | Java 8 | Java 8 LTS, Java 11 LTS | Java 11 is supported for modern 1.12.2/1.16.5 modpacks |
 
 ## Building from Source
@@ -162,7 +162,7 @@ Every push and pull request must pass the CI Quality Gate:
 - **Bundle budget** — frontend ≤ 250 KB gzip.
 - **Binary budget** — release binary ≤ 40 MB.
 - **Latency SLA** — in-process IPC dispatch p95 ≤ 5,000 ns.
-- **Wails binding registry** — forward registration parity enforced for all 45 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
+- **Wails binding registry** — forward registration parity enforced for all 46 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
 
 ---
 

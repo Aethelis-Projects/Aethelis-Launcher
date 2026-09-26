@@ -407,15 +407,16 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"GetScreenshotData",
 		"SetInstanceFavorite",
 		"SetInstanceGroup",
+		"EnsureInstanceDir",
 	}
 
 	// Architectural Decision (T-Gates Scope):
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (45 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 45 {
-		t.Fatalf("expected exactly 45 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (46 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 46 {
+		t.Fatalf("expected exactly 46 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -2595,6 +2596,9 @@ func TestWailsAdapter_OpenPath(t *testing.T) {
 	}
 	if _, err := adapter.EnsureInstanceDir("inst-new", "../escape"); err == nil {
 		t.Error("expected error on traversal dirType, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("inst-new", "unauthorized"); err == nil {
+		t.Error("expected error on unauthorized dirType, got nil")
 	}
 }
 
