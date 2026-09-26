@@ -402,10 +402,20 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"UpgradeJavaRuntime",
 		"UpdateMod",
 		"OpenPath",
+		"ListScreenshots",
+		"DeleteScreenshot",
+		"GetScreenshotData",
+		"SetInstanceFavorite",
+		"SetInstanceGroup",
 	}
 
-	if len(expectedMethods) != 40 {
-		t.Fatalf("expected exactly 40 Wails methods, got %d", len(expectedMethods))
+	// Architectural Decision (T-Gates Scope):
+	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
+	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
+	// registration reflects all exported receiver methods by design. Forward registration
+	// parity is strictly enforced via expectedMethods (45 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 45 {
+		t.Fatalf("expected exactly 45 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
