@@ -18,7 +18,7 @@ export interface InstanceDTO {
   jvm_args: string[];
   skip_java_check: boolean;
   group?: string;
-  is_favorite: boolean;
+  is_favorite?: boolean;
   state: InstanceState;
   last_played_at?: string;
   total_play_seconds: number;
@@ -341,4 +341,15 @@ export interface GetScreenshotDataRequest {
 
 export interface GetScreenshotDataResponse {
   data_url: string;
+}
+
+export interface SaveGameLogRequest {
+  instance_id: string;
+  target_path?: string;
+}
+
+export interface SaveGameLogResponse {
+  success: boolean;
+  file_path: string;
+  error?: string;
 }

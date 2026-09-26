@@ -1,6 +1,7 @@
 package wails
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha1"
 	"crypto/sha512"
@@ -67,6 +68,7 @@ type WailsAdapter struct {
 	mrpackExporter     *content.MrPackExporter
 	mrpackProgress     map[string]*MrPackImportStatusDTO
 	filePickerFn       func() (string, error)
+	onLogBatch         func(instanceID string, lines []string)
 	mu                 sync.RWMutex
 }
 
@@ -414,6 +416,11 @@ func (a *WailsAdapter) LaunchInstance(id string) (*LaunchResponse, error) {
 		}, nil
 	}
 
+	sup := a.svc.GetSupervisor(id)
+	if sup != nil {
+		go a.startLogStreamer(id, sup)
+	}
+
 	return &LaunchResponse{
 		Success: true,
 		PID:     pid,
@@ -426,6 +433,165 @@ func (a *WailsAdapter) GetLogTail(instanceID string, n int) ([]string, error) {
 	}
 	return a.svc.GetLogTail(instanceID, n)
 }
+
+func (a *WailsAdapter) GetGameLogs(instanceID string) ([]string, error) {
+	if a.svc == nil {
+		return []string{}, nil
+	}
+	lines, err := a.svc.GetLogTail(instanceID, launch.DefaultLogBufferSize)
+	if err == nil && len(lines) > 0 {
+		return lines, nil
+	}
+
+	// Fallback to latest.log on disk if supervisor has no lines or instance previously ran
+	logPath := filepath.Join(a.instancesDir, instanceID, "logs", "latest.log")
+	if f, err := os.Open(logPath); err == nil {
+		defer f.Close()
+		var diskLines []string
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			diskLines = append(diskLines, scanner.Text())
+			if len(diskLines) > launch.DefaultLogBufferSize {
+				diskLines = diskLines[1:]
+			}
+		}
+		if len(diskLines) > 0 {
+			return diskLines, nil
+		}
+	}
+	return lines, err
+}
+
+func (a *WailsAdapter) SaveGameLog(req SaveGameLogRequest) (*SaveGameLogResponse, error) {
+	if strings.TrimSpace(req.InstanceID) == "" {
+		return nil, errors.New("instance id cannot be empty")
+	}
+
+	lines, err := a.GetGameLogs(req.InstanceID)
+	if err != nil {
+		return &SaveGameLogResponse{
+			Success: false,
+			Error:   fmt.Sprintf("fetch game logs: %v", err),
+		}, nil
+	}
+
+	targetPath := req.TargetPath
+	if strings.TrimSpace(targetPath) == "" {
+		saveDir := filepath.Join(a.instancesDir, req.InstanceID, "logs")
+		if err := os.MkdirAll(saveDir, 0755); err != nil {
+			return &SaveGameLogResponse{
+				Success: false,
+				Error:   fmt.Sprintf("create logs dir: %v", err),
+			}, nil
+		}
+		filename := fmt.Sprintf("game_log_%s.txt", time.Now().Format("2006-01-02_15-04-05"))
+		targetPath = filepath.Join(saveDir, filename)
+	} else {
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			return &SaveGameLogResponse{
+				Success: false,
+				Error:   fmt.Sprintf("create target dir: %v", err),
+			}, nil
+		}
+	}
+
+	content := strings.Join(lines, "\n")
+	if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
+		return &SaveGameLogResponse{
+			Success: false,
+			Error:   fmt.Sprintf("write log file: %v", err),
+		}, nil
+	}
+
+	return &SaveGameLogResponse{
+		Success:  true,
+		FilePath: targetPath,
+	}, nil
+}
+
+func (a *WailsAdapter) startLogStreamer(id string, sup *launch.LogSupervisor) {
+	ch, unsubscribe := sup.Subscribe(512)
+	defer unsubscribe()
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	var batch []string
+	const batchCap = 200
+
+	for {
+		select {
+		case line, ok := <-ch:
+			if !ok {
+				if len(batch) > 0 {
+					a.emitLogBatch(id, batch)
+				}
+				return
+			}
+			batch = append(batch, line)
+			if len(batch) >= batchCap {
+				a.emitLogBatch(id, batch)
+				batch = nil
+			}
+		case <-ticker.C:
+			if len(batch) > 0 {
+				a.emitLogBatch(id, batch)
+				batch = nil
+			}
+			if a.svc != nil {
+				if inst, err := a.svc.GetInstance(id); err == nil && inst != nil {
+					if inst.State == domain.StateIdle || inst.State == domain.StateCrashed {
+						for {
+							select {
+							case line, ok := <-ch:
+								if ok {
+									batch = append(batch, line)
+								} else {
+									goto done
+								}
+							default:
+								goto done
+							}
+						}
+					done:
+						if len(batch) > 0 {
+							a.emitLogBatch(id, batch)
+						}
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+func (a *WailsAdapter) emitLogBatch(instanceID string, lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	a.mu.RLock()
+	hook := a.onLogBatch
+	a.mu.RUnlock()
+
+	if hook != nil {
+		hook(instanceID, lines)
+	}
+
+	app := application.Get()
+	if app != nil && app.Event != nil {
+		app.Event.Emit("game:log_batch", map[string]any{
+			"instance_id": instanceID,
+			"lines":       lines,
+		})
+	}
+}
+
+func (a *WailsAdapter) SetOnLogBatch(fn func(instanceID string, lines []string)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.onLogBatch = fn
+}
+
 
 func (a *WailsAdapter) ListAccounts() ([]AccountDTO, error) {
 	if a.accountRepo == nil {

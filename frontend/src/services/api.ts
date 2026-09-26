@@ -37,6 +37,8 @@ import type {
   DeleteScreenshotRequest,
   GetScreenshotDataRequest,
   GetScreenshotDataResponse,
+  SaveGameLogRequest,
+  SaveGameLogResponse,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -70,6 +72,8 @@ interface WailsAdapterBindings {
   UpdateMod?: (req: UpdateModRequest) => Promise<InstallModResponse>;
   HasBuiltinCurseForgeKey?: () => Promise<boolean>;
   GetLogTail?: (instanceId: string, n: number) => Promise<string[]>;
+  GetGameLogs?: (instanceId: string) => Promise<string[]>;
+  SaveGameLog?: (req: SaveGameLogRequest) => Promise<SaveGameLogResponse>;
   ListJavaRuntimes?: () => Promise<JavaInstallationDTO[]>;
   DownloadJavaRuntime?: (major: number) => Promise<void>;
   GetJavaDownloadStatus?: () => Promise<JavaDownloadStatusDTO>;
@@ -794,6 +798,29 @@ export const launcherAPI = {
 
   async getLogTail(instanceId: string, n = 100): Promise<string[]> {
     return invokeWails<string[]>("GetLogTail", () => [], instanceId, n);
+  },
+
+  async getGameLogs(instanceId: string): Promise<string[]> {
+    return invokeWails<string[]>(
+      "GetGameLogs",
+      () => [
+        `[${new Date().toISOString().slice(11, 19)}] [main/INFO]: Loading Minecraft for ${instanceId}...`,
+        `[${new Date().toISOString().slice(11, 19)}] [main/INFO]: Setting up window and rendering context`,
+        `[${new Date().toISOString().slice(11, 19)}] [main/WARN]: Sound engine pitch variance out of bounds, using default`,
+      ],
+      instanceId
+    );
+  },
+
+  async saveGameLog(req: SaveGameLogRequest): Promise<SaveGameLogResponse> {
+    return invokeWails<SaveGameLogResponse>(
+      "SaveGameLog",
+      () => ({
+        success: true,
+        file_path: req.target_path || `C:\\Nord\\instances\\${req.instance_id}\\logs\\game_log_saved.txt`,
+      }),
+      req
+    );
   },
 
   async listJavaRuntimes(): Promise<JavaInstallationDTO[]> {

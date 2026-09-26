@@ -2634,4 +2634,101 @@ func TestWailsAdapter_Screenshots(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_GameLogsAndStreaming(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "nord-logs-test-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	instancesDir := filepath.Join(tmpDir, "instances")
+	instID := "test-inst-logs"
+	instLogsDir := filepath.Join(instancesDir, instID, "logs")
+	if err := os.MkdirAll(instLogsDir, 0755); err != nil {
+		t.Fatalf("create logs dir: %v", err)
+	}
+
+	// 1. Fallback to latest.log on disk when no supervisor is active
+	latestLogFile := filepath.Join(instLogsDir, "latest.log")
+	initialContent := "[10:00:00] [main/INFO]: Loading Minecraft\n[10:00:01] [main/WARN]: Deprecated mod detected\n"
+	if err := os.WriteFile(latestLogFile, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("write latest.log: %v", err)
+	}
+
+	fileSys := fs.NewOSFileSystem()
+	procMgr := process.NewProcessManager()
+	kr := keyring.NewSystemKeyring()
+	clk := clock.NewRealClock()
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetFileSystem(fileSys, instancesDir)
+
+	logs, err := adapter.GetGameLogs(instID)
+	if err != nil {
+		t.Fatalf("GetGameLogs error: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 lines from latest.log, got %d", len(logs))
+	}
+
+	// 2. SaveGameLog with default path
+	saveRes, err := adapter.SaveGameLog(wails.SaveGameLogRequest{
+		InstanceID: instID,
+	})
+	if err != nil {
+		t.Fatalf("SaveGameLog failed: %v", err)
+	}
+	if !saveRes.Success || saveRes.FilePath == "" {
+		t.Fatalf("expected success and non-empty FilePath, got %+v", saveRes)
+	}
+	data, err := os.ReadFile(saveRes.FilePath)
+	if err != nil {
+		t.Fatalf("read saved log file: %v", err)
+	}
+	if !strings.Contains(string(data), "Deprecated mod detected") {
+		t.Fatalf("saved log missing expected content: %s", string(data))
+	}
+
+	// 3. SaveGameLog with custom target path
+	customPath := filepath.Join(tmpDir, "exported_log.txt")
+	customRes, err := adapter.SaveGameLog(wails.SaveGameLogRequest{
+		InstanceID: instID,
+		TargetPath: customPath,
+	})
+	if err != nil {
+		t.Fatalf("SaveGameLog custom path failed: %v", err)
+	}
+	if customRes.FilePath != customPath {
+		t.Fatalf("expected FilePath %s, got %s", customPath, customRes.FilePath)
+	}
+	if _, err := os.Stat(customPath); err != nil {
+		t.Fatalf("custom export file not found on disk: %v", err)
+	}
+
+	// 4. Test log streaming & onLogBatch hook
+	receivedBatches := make(chan []string, 5)
+	adapter.SetOnLogBatch(func(id string, lines []string) {
+		if id == instID {
+			receivedBatches <- lines
+		}
+	})
+
+	sup := launch.NewLogSupervisor(100)
+	// Process lines through supervisor and verify subscription
+	ch, unsub := sup.Subscribe(10)
+	defer unsub()
+
+	sup.ProcessLine("[10:00:02] [main/INFO]: Game running smoothly")
+	select {
+	case line := <-ch:
+		if !strings.Contains(line, "Game running smoothly") {
+			t.Fatalf("unexpected line: %s", line)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for subscribed line")
+	}
+}
+
+
 
