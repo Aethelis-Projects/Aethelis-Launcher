@@ -136,3 +136,92 @@ func TestBuildReleaseBody(t *testing.T) {
 	}
 }
 
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0 B"},
+		{365, "365 B"},
+		{2342, "2,342 B"},
+		{7169977, "7,169,977 B"},
+		{18119296, "18,119,296 B"},
+	}
+
+	for _, tt := range tests {
+		got := FormatBytes(tt.in)
+		if got != tt.want {
+			t.Errorf("FormatBytes(%d) = %s; want %s", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestBuildReleaseBodyWithExtraAssets(t *testing.T) {
+	platforms := map[string]updater.PlatformAsset{
+		"windows-amd64": {
+			URL:    "https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/v0.6.1/NordLauncher.exe",
+			SHA256: "eb6a3bd24bca5df6a8757407578a0979e9380961ee032b92c4d3ffaab65fa85e",
+			Size:   18119296,
+		},
+		"windows-setup": {
+			URL:    "https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/v0.6.1/NordLauncher-Setup.exe",
+			SHA256: "bb0029ef7b372974e82e04ce5e310600b39d8d365c517a542046c64e33ccfd51",
+			Size:   7281048,
+		},
+		"linux-amd64": {
+			URL:    "https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/v0.6.1/nord-launcher-v0.6.1-linux-amd64.tar.gz",
+			SHA256: "ae734a4888b94be665c18598a4e3f2869f1ff2bad2ac9ed12bcea1c44be046b9",
+			Size:   7169977,
+		},
+	}
+
+	extraAssets := []PublishedArtifact{
+		{
+			Name:     "manifest-stable.json",
+			Platform: "Update Manifest",
+			Size:     2342,
+			SHA256:   "975cc526a7041e01789e19bf0d5168c3489cd49998bb7b230377310437968c52",
+		},
+		{
+			Name:     "SHA256SUMS.txt",
+			Platform: "Checksums",
+			Size:     365,
+			SHA256:   "3ebba34201f2f2b9d0f80b027601f8f744dfdcd3d6b9a4d959a37b35cfb90402",
+		},
+	}
+
+	body := BuildReleaseBody("0.6.1", "stable", "### Added\n- Feature X", platforms, extraAssets...)
+
+	// Verify all 5 assets are in table
+	expectedAssets := []string{
+		"NordLauncher.exe",
+		"NordLauncher-Setup.exe",
+		"nord-launcher-v0.6.1-linux-amd64.tar.gz",
+		"manifest-stable.json",
+		"SHA256SUMS.txt",
+	}
+	for _, asset := range expectedAssets {
+		if !strings.Contains(body, asset) {
+			t.Errorf("expected body to contain %s, got:\n%s", asset, body)
+		}
+	}
+
+	// Verify data row count matching the release gate regex
+	lines := strings.Split(body, "\n")
+	matchedRows := 0
+	for _, line := range lines {
+		if strings.Contains(line, "| `") && strings.Contains(line, "` |") {
+			for _, asset := range expectedAssets {
+				if strings.Contains(line, "`"+asset+"`") {
+					matchedRows++
+					break
+				}
+			}
+		}
+	}
+	if matchedRows != 5 {
+		t.Fatalf("expected 5 matched asset rows, got %d", matchedRows)
+	}
+}
+
+

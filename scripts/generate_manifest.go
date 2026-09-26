@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,43 +22,47 @@ const DefaultStagingPrivateKeyHex = "88ec59f652844aded5ef72635fd0621042ffff0b75e
 
 func main() {
 	var (
-		versionFlag   = flag.String("version", "0.1.0", "Release version")
-		channelFlag   = flag.String("channel", "stable", "Release channel: stable or beta")
-		distDirFlag   = flag.String("dist", "dist", "Directory containing build distribution artifacts")
+		versionFlag         = flag.String("version", "0.1.0", "Release version")
+		channelFlag         = flag.String("channel", "stable", "Release channel: stable or beta")
+		distDirFlag         = flag.String("dist", "dist", "Directory containing build distribution artifacts")
 		outputFile          = flag.String("out", "", "Output manifest path (default: dist/manifest-{channel}.json)")
 		privKeyEnv          = flag.String("privkey-hex", "", "Hex-encoded Ed25519 private key (optional, falls back to ED25519_PRIVATE_KEY)")
 		allowInsecureDevKey = flag.Bool("allow-insecure-dev-key", false, "Allow fallback to insecure hardcoded staging private key for local development")
 		changelogFile       = flag.String("changelog-file", "CHANGELOG.md", "Path to CHANGELOG.md to extract release notes")
 		bodyFile            = flag.String("out-body", "", "Output release notes markdown path for GitHub Release body (optional)")
+		bodyOnlyFlag        = flag.Bool("body-only", false, "Only generate release body, do not sign or write update manifest")
 	)
 	flag.Parse()
 
-	privHex := *privKeyEnv
-	if privHex == "" {
-		privHex = os.Getenv("ED25519_PRIVATE_KEY")
-	}
-	if privHex == "" {
-		if !*allowInsecureDevKey {
-			fmt.Fprintf(os.Stderr, "Error: ED25519_PRIVATE_KEY environment variable or -privkey-hex flag is required to sign update manifests.\n")
-			fmt.Fprintf(os.Stderr, "For local development only, you must explicitly pass --allow-insecure-dev-key to use the staging key.\n")
-			os.Exit(1)
+	var privKey ed25519.PrivateKey
+	if !*bodyOnlyFlag {
+		privHex := *privKeyEnv
+		if privHex == "" {
+			privHex = os.Getenv("ED25519_PRIVATE_KEY")
 		}
-		privHex = DefaultStagingPrivateKeyHex
-		fmt.Println("[SECURITY WARNING] Manifest signed with INSECURE dev key! Do not deploy to production.")
-	} else if strings.EqualFold(privHex, DefaultStagingPrivateKeyHex) {
-		if !*allowInsecureDevKey {
-			fmt.Fprintf(os.Stderr, "Error: DefaultStagingPrivateKeyHex cannot be used for signing without --allow-insecure-dev-key.\n")
-			os.Exit(1)
+		if privHex == "" {
+			if !*allowInsecureDevKey {
+				fmt.Fprintf(os.Stderr, "Error: ED25519_PRIVATE_KEY environment variable or -privkey-hex flag is required to sign update manifests.\n")
+				fmt.Fprintf(os.Stderr, "For local development only, you must explicitly pass --allow-insecure-dev-key to use the staging key.\n")
+				os.Exit(1)
+			}
+			privHex = DefaultStagingPrivateKeyHex
+			fmt.Println("[SECURITY WARNING] Manifest signed with INSECURE dev key! Do not deploy to production.")
+		} else if strings.EqualFold(privHex, DefaultStagingPrivateKeyHex) {
+			if !*allowInsecureDevKey {
+				fmt.Fprintf(os.Stderr, "Error: DefaultStagingPrivateKeyHex cannot be used for signing without --allow-insecure-dev-key.\n")
+				os.Exit(1)
+			}
+			fmt.Println("[SECURITY WARNING] Manifest signed with INSECURE dev key! Do not deploy to production.")
 		}
-		fmt.Println("[SECURITY WARNING] Manifest signed with INSECURE dev key! Do not deploy to production.")
-	}
 
-	privSeed, err := hex.DecodeString(privHex)
-	if err != nil || len(privSeed) != ed25519.SeedSize {
-		fmt.Fprintf(os.Stderr, "Error: invalid ed25519 private key seed (must be 32 hex bytes): %v\n", err)
-		os.Exit(1)
+		privSeed, err := hex.DecodeString(privHex)
+		if err != nil || len(privSeed) != ed25519.SeedSize {
+			fmt.Fprintf(os.Stderr, "Error: invalid ed25519 private key seed (must be 32 hex bytes): %v\n", err)
+			os.Exit(1)
+		}
+		privKey = ed25519.NewKeyFromSeed(privSeed)
 	}
-	privKey := ed25519.NewKeyFromSeed(privSeed)
 
 	rawVersion := *versionFlag
 	cleanVersion := strings.TrimPrefix(rawVersion, "v")
@@ -102,11 +107,15 @@ func main() {
 		}
 		hashBytes := sha256.Sum256(payload)
 		hash := hex.EncodeToString(hashBytes[:])
-		sig := updater.SignPayload(privKey, payload)
+		var sigStr string
+		if len(privKey) > 0 {
+			sig := updater.SignPayload(privKey, payload)
+			sigStr = base64.StdEncoding.EncodeToString(sig)
+		}
 		manifest.Platforms["windows-amd64"] = updater.PlatformAsset{
 			URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winPortable)),
 			SHA256:    hash,
-			Signature: base64.StdEncoding.EncodeToString(sig),
+			Signature: sigStr,
 			Size:      int64(len(payload)),
 		}
 		fmt.Printf("[Manifest] Added windows-amd64: %s (SHA256: %s, Size: %d)\n", filepath.Base(winPortable), hash, len(payload))
@@ -135,11 +144,15 @@ func main() {
 		}
 		hashBytes := sha256.Sum256(payload)
 		hash := hex.EncodeToString(hashBytes[:])
-		sig := updater.SignPayload(privKey, payload)
+		var sigStr string
+		if len(privKey) > 0 {
+			sig := updater.SignPayload(privKey, payload)
+			sigStr = base64.StdEncoding.EncodeToString(sig)
+		}
 		manifest.Platforms["windows-setup"] = updater.PlatformAsset{
 			URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(winSetup)),
 			SHA256:    hash,
-			Signature: base64.StdEncoding.EncodeToString(sig),
+			Signature: sigStr,
 			Size:      int64(len(payload)),
 		}
 		fmt.Printf("[Manifest] Added windows-setup: %s (SHA256: %s, Size: %d)\n", filepath.Base(winSetup), hash, len(payload))
@@ -179,11 +192,15 @@ func main() {
 		}
 		hashBytes := sha256.Sum256(payload)
 		hash := hex.EncodeToString(hashBytes[:])
-		sig := updater.SignPayload(privKey, payload)
+		var sigStr string
+		if len(privKey) > 0 {
+			sig := updater.SignPayload(privKey, payload)
+			sigStr = base64.StdEncoding.EncodeToString(sig)
+		}
 		manifest.Platforms["linux-amd64"] = updater.PlatformAsset{
 			URL:       fmt.Sprintf("https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/%s/%s", tagVersion, filepath.Base(linuxTarball)),
 			SHA256:    hash,
-			Signature: base64.StdEncoding.EncodeToString(sig),
+			Signature: sigStr,
 			Size:      int64(len(payload)),
 		}
 		fmt.Printf("[Manifest] Added linux-amd64: %s (SHA256: %s, Size: %d)\n", filepath.Base(linuxTarball), hash, len(payload))
@@ -191,28 +208,80 @@ func main() {
 		fmt.Printf("[Manifest] Warning: Linux artifact not found in %s\n", *distDirFlag)
 	}
 
-	manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to serialize manifest: %v\n", err)
-		os.Exit(1)
+	var extraAssets []PublishedArtifact
+	seenAssets := make(map[string]bool)
+	if winPortable != "" {
+		seenAssets[filepath.Base(winPortable)] = true
+	}
+	if winSetup != "" {
+		seenAssets[filepath.Base(winSetup)] = true
+	}
+	if linuxTarball != "" {
+		seenAssets[filepath.Base(linuxTarball)] = true
 	}
 
-	outPath := *outputFile
-	if outPath == "" {
-		outPath = filepath.Join(*distDirFlag, fmt.Sprintf("manifest-%s.json", *channelFlag))
+	// Scan for update manifest files in distDir (e.g. manifest-stable.json, manifest-beta.json)
+	manifestMatches, _ := filepath.Glob(filepath.Join(*distDirFlag, "manifest-*.json"))
+	for _, mPath := range manifestMatches {
+		base := filepath.Base(mPath)
+		if seenAssets[base] {
+			continue
+		}
+		seenAssets[base] = true
+		payload, err := os.ReadFile(mPath)
+		if err != nil {
+			continue
+		}
+		hashBytes := sha256.Sum256(payload)
+		extraAssets = append(extraAssets, PublishedArtifact{
+			Name:     base,
+			Platform: "Update Manifest",
+			Size:     int64(len(payload)),
+			SHA256:   hex.EncodeToString(hashBytes[:]),
+		})
+		fmt.Printf("[Manifest] Added extra artifact: %s (SHA256: %s, Size: %d)\n", base, hex.EncodeToString(hashBytes[:]), len(payload))
 	}
 
-	_ = os.MkdirAll(filepath.Dir(outPath), 0755)
-	if err := os.WriteFile(outPath, manifestBytes, 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to write manifest to %s: %v\n", outPath, err)
-		os.Exit(1)
+	// Scan for SHA256SUMS.txt in distDir
+	sumsPath := filepath.Join(*distDirFlag, "SHA256SUMS.txt")
+	if !seenAssets["SHA256SUMS.txt"] {
+		if payload, err := os.ReadFile(sumsPath); err == nil {
+			seenAssets["SHA256SUMS.txt"] = true
+			hashBytes := sha256.Sum256(payload)
+			extraAssets = append(extraAssets, PublishedArtifact{
+				Name:     "SHA256SUMS.txt",
+				Platform: "Checksums",
+				Size:     int64(len(payload)),
+				SHA256:   hex.EncodeToString(hashBytes[:]),
+			})
+			fmt.Printf("[Manifest] Added extra artifact: SHA256SUMS.txt (SHA256: %s, Size: %d)\n", hex.EncodeToString(hashBytes[:]), len(payload))
+		}
 	}
 
-	fmt.Printf("[Manifest] Generated signed update manifest: %s\n", outPath)
+	if !*bodyOnlyFlag {
+		manifestBytes, err := json.MarshalIndent(manifest, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to serialize manifest: %v\n", err)
+			os.Exit(1)
+		}
+
+		outPath := *outputFile
+		if outPath == "" {
+			outPath = filepath.Join(*distDirFlag, fmt.Sprintf("manifest-%s.json", *channelFlag))
+		}
+
+		_ = os.MkdirAll(filepath.Dir(outPath), 0755) // errcheck:ok
+		if err := os.WriteFile(outPath, manifestBytes, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write manifest to %s: %v\n", outPath, err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("[Manifest] Generated signed update manifest: %s\n", outPath)
+	}
 
 	if *bodyFile != "" {
-		bodyContent := BuildReleaseBody(cleanVersion, *channelFlag, changelogText, manifest.Platforms)
-		_ = os.MkdirAll(filepath.Dir(*bodyFile), 0755)
+		bodyContent := BuildReleaseBody(cleanVersion, *channelFlag, changelogText, manifest.Platforms, extraAssets...)
+		_ = os.MkdirAll(filepath.Dir(*bodyFile), 0755) // errcheck:ok
 		if err := os.WriteFile(*bodyFile, []byte(bodyContent), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write release body to %s: %v\n", *bodyFile, err)
 			os.Exit(1)
@@ -255,13 +324,35 @@ func ExtractChangelog(content, version string, maxBytes int) string {
 	return result
 }
 
+// PublishedArtifact represents an asset published to GitHub Release.
+type PublishedArtifact struct {
+	Name     string
+	Platform string
+	Size     int64
+	SHA256   string
+}
+
+// FormatBytes formats byte counts with comma thousands separators (e.g. 18,119,296 B).
+func FormatBytes(n int64) string {
+	in := strconv.FormatInt(n, 10)
+	var out []byte
+	l := len(in)
+	for i, c := range in {
+		if i > 0 && (l-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, byte(c))
+	}
+	return string(out) + " B"
+}
+
 // BuildReleaseBody constructs the markdown release notes body for GitHub Releases.
 // It incorporates:
 // 1. ### Overview
 // 2. ### Changelog
 // 3. ### Published Artifacts (markdown table)
 // 4. ### Verification & Forensic Integrity
-func BuildReleaseBody(version, channel, changelog string, platforms map[string]updater.PlatformAsset) string {
+func BuildReleaseBody(version, channel, changelog string, platforms map[string]updater.PlatformAsset, extraAssets ...PublishedArtifact) string {
 	cleanVer := strings.TrimPrefix(version, "v")
 	tagVersion := "v" + cleanVer
 
@@ -275,7 +366,7 @@ func BuildReleaseBody(version, channel, changelog string, platforms map[string]u
 	sb.WriteString(changelog)
 	sb.WriteString("\n\n---\n\n")
 
-	if len(platforms) > 0 {
+	if len(platforms) > 0 || len(extraAssets) > 0 {
 		sb.WriteString("### Published Artifacts\n\n")
 		sb.WriteString("| Asset | Platform | Size | SHA-256 Checksum |\n")
 		sb.WriteString("|:---|:---|---:|:---|\n")
@@ -294,7 +385,7 @@ func BuildReleaseBody(version, channel, changelog string, platforms map[string]u
 				if label == "" {
 					label = pKey
 				}
-				sb.WriteString(fmt.Sprintf("| `%s` | %s | %d B | `%s` |\n", assetName, label, asset.Size, asset.SHA256))
+				sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | `%s` |\n", assetName, label, FormatBytes(asset.Size), asset.SHA256))
 			}
 		}
 		for pKey, asset := range platforms {
@@ -307,8 +398,11 @@ func BuildReleaseBody(version, channel, changelog string, platforms map[string]u
 			}
 			if !isOrdered {
 				assetName := filepath.Base(asset.URL)
-				sb.WriteString(fmt.Sprintf("| `%s` | %s | %d B | `%s` |\n", assetName, pKey, asset.Size, asset.SHA256))
+				sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | `%s` |\n", assetName, pKey, FormatBytes(asset.Size), asset.SHA256))
 			}
+		}
+		for _, extra := range extraAssets {
+			sb.WriteString(fmt.Sprintf("| `%s` | %s | %s | `%s` |\n", extra.Name, extra.Platform, FormatBytes(extra.Size), extra.SHA256))
 		}
 		sb.WriteString("\n")
 	}
@@ -323,6 +417,8 @@ func BuildReleaseBody(version, channel, changelog string, platforms map[string]u
 
 func getReleaseOverview(cleanVer, tagVersion string) string {
 	switch {
+	case cleanVer == "0.6.1":
+		return "This release delivers atomic mod updates with automatic obsolete version cleanup, manifest-driven Java recommendation chip for modern Minecraft versions (up to Java 25 LTS), platform-native folder opener across instances and export modals, and prominent manual update checking with status badges."
 	case strings.HasPrefix(cleanVer, "0.6."):
 		return "This release introduces full modpack round-trip support for Modrinth (.mrpack format), deep mod version history browsing with safe markdown changelog viewing, Adoptium Temurin Java runtime update detection and bulk cleanup, and safeguards against deleting Java runtimes while instances are active."
 	case strings.HasPrefix(cleanVer, "0.5."):

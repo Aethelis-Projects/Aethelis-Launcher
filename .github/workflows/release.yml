@@ -277,7 +277,7 @@ jobs:
           fi
         shell: bash
 
-      - name: Generate Signed Ed25519 Update Manifest & Release Body
+      - name: Generate Signed Ed25519 Update Manifest
         env:
           ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
         run: |
@@ -285,8 +285,21 @@ jobs:
             -version "${{ github.ref_name }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
             -dist release-assets \
-            -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json" \
-            -out-body "release-body.md"
+            -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json"
+
+      - name: Generate Checksums
+        working-directory: release-assets
+        run: |
+          sha256sum * > SHA256SUMS.txt
+
+      - name: Generate Release Body with Complete 5-Row Artifact Table (DEFECT-2 Fix)
+        run: |
+          go run scripts/generate_manifest.go \
+            -version "${{ github.ref_name }}" \
+            -channel "${{ steps.meta.outputs.channel }}" \
+            -dist release-assets \
+            -out-body "release-body.md" \
+            -body-only
 
       - name: Verify Release Body Length & Content
         run: |
@@ -308,19 +321,14 @@ jobs:
             echo "ERROR: Release body missing '### Verification & Forensic Integrity' section!"
             exit 1
           fi
-          TABLE_ROWS=$(grep -c "^|" release-body.md || true)
-          echo "Release body table rows: $TABLE_ROWS"
-          if [ "$TABLE_ROWS" -lt 4 ]; then
-            echo "ERROR: Release body table too short ($TABLE_ROWS rows < 4 rows threshold)!"
+          TABLE_DATA_ROWS=$(grep -Ec '\| `?[A-Za-z0-9._-]+\.(exe|tar\.gz|json|txt)`? .*[0-9a-f]{64}' release-body.md || true)
+          echo "Release body table data rows: $TABLE_DATA_ROWS"
+          if [ "$TABLE_DATA_ROWS" -lt 4 ]; then
+            echo "ERROR: Release body table too short ($TABLE_DATA_ROWS data rows < 4 rows threshold)!"
             exit 1
           fi
-          echo "PASS: Release body verified ($BODY_LEN bytes, $TABLE_ROWS table rows)."
+          echo "PASS: Release body verified ($BODY_LEN bytes, $TABLE_DATA_ROWS data rows)."
         shell: bash
-
-      - name: Generate Checksums
-        working-directory: release-assets
-        run: |
-          sha256sum * > SHA256SUMS.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -330,6 +338,14 @@ jobs:
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           name: ${{ github.ref_name }}
           body_path: release-body.md
+
+      - name: Ensure GitHub Release Body Matches (DEFECT-2 Sync)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ github.ref_name }}" --notes-file release-body.md
+          echo "PASS: GitHub release notes synced from release-body.md."
+        shell: bash
 
       - name: Verify Published Release Assets (N2 Assert 4)
         env:
