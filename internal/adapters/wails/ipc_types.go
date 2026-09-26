@@ -15,6 +15,8 @@ type InstanceDTO struct {
 	MaxRAMMB         int        `json:"max_ram_mb"`
 	JVMArgs          []string   `json:"jvm_args"`
 	SkipJavaCheck    bool       `json:"skip_java_check"`
+	Group            string     `json:"group,omitempty"`
+	IsFavorite       bool       `json:"is_favorite"`
 	State            string     `json:"state"`
 	LastPlayedAt     *time.Time `json:"last_played_at,omitempty"`
 	TotalPlaySeconds int64      `json:"total_play_seconds"`
@@ -25,6 +27,7 @@ type CreateInstanceRequest struct {
 	GameVersion string `json:"game_version"`
 	Loader      string `json:"loader"`
 	JavaPath    string `json:"java_path,omitempty"`
+	Group       string `json:"group,omitempty"`
 }
 
 type UpdateInstanceRequest struct {
@@ -36,6 +39,19 @@ type UpdateInstanceRequest struct {
 	MaxRAMMB      int      `json:"max_ram_mb,omitempty"`
 	JVMArgs       []string `json:"jvm_args,omitempty"`
 	SkipJavaCheck *bool    `json:"skip_java_check,omitempty"`
+	Group         *string  `json:"group,omitempty"`
+	IsFavorite    *bool    `json:"is_favorite,omitempty"`
+	IconPath      *string  `json:"icon_path,omitempty"`
+}
+
+type SetFavoriteRequest struct {
+	ID         string `json:"id"`
+	IsFavorite bool   `json:"is_favorite"`
+}
+
+type SetGroupRequest struct {
+	ID    string `json:"id"`
+	Group string `json:"group"`
 }
 
 type LaunchResponse struct {

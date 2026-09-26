@@ -311,6 +311,8 @@ func toInstanceDTO(inst *domain.Instance) InstanceDTO {
 		MaxRAMMB:         inst.MaxRAMMB,
 		JVMArgs:          jvmArgs,
 		SkipJavaCheck:    inst.SkipJavaCheck,
+		Group:            inst.Group,
+		IsFavorite:       inst.IsFavorite,
 		State:            string(inst.State),
 		LastPlayedAt:     inst.LastPlayedAt,
 		TotalPlaySeconds: inst.TotalPlaySec,
@@ -339,6 +341,14 @@ func (a *WailsAdapter) CreateInstance(req CreateInstanceRequest) (*InstanceDTO, 
 			inst = updated
 		}
 	}
+	if req.Group != "" {
+		if updated, err := a.svc.UpdateInstance(context.Background(), launch.UpdateInstanceParams{
+			ID:    inst.ID,
+			Group: &req.Group,
+		}); err == nil {
+			inst = updated
+		}
+	}
 
 	dto := toInstanceDTO(inst)
 	return &dto, nil
@@ -357,11 +367,38 @@ func (a *WailsAdapter) UpdateInstance(req UpdateInstanceRequest) (*InstanceDTO, 
 		MaxRAMMB:      req.MaxRAMMB,
 		JVMArgs:       req.JVMArgs,
 		SkipJavaCheck: req.SkipJavaCheck,
+		Group:         req.Group,
+		IsFavorite:    req.IsFavorite,
+		IconPath:      req.IconPath,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("update instance: %w", err)
 	}
 
+	dto := toInstanceDTO(inst)
+	return &dto, nil
+}
+
+func (a *WailsAdapter) SetInstanceFavorite(req SetFavoriteRequest) (*InstanceDTO, error) {
+	if req.ID == "" {
+		return nil, fmt.Errorf("instance ID cannot be empty")
+	}
+	inst, err := a.svc.SetInstanceFavorite(context.Background(), req.ID, req.IsFavorite)
+	if err != nil {
+		return nil, fmt.Errorf("set instance favorite: %w", err)
+	}
+	dto := toInstanceDTO(inst)
+	return &dto, nil
+}
+
+func (a *WailsAdapter) SetInstanceGroup(req SetGroupRequest) (*InstanceDTO, error) {
+	if req.ID == "" {
+		return nil, fmt.Errorf("instance ID cannot be empty")
+	}
+	inst, err := a.svc.SetInstanceGroup(context.Background(), req.ID, req.Group)
+	if err != nil {
+		return nil, fmt.Errorf("set instance group: %w", err)
+	}
 	dto := toInstanceDTO(inst)
 	return &dto, nil
 }

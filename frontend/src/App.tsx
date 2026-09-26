@@ -231,15 +231,55 @@ export const App: Component = () => {
     return list.find((i) => i.id === selectedInstanceId()) || list[0];
   };
 
+  const [selectedGroup, setSelectedGroup] = createSignal<string>("all");
+
+  const availableGroups = () => {
+    const set = new Set<string>();
+    for (const inst of instances()) {
+      if (inst.group && inst.group.trim()) {
+        set.add(inst.group.trim());
+      }
+    }
+    return Array.from(set);
+  };
+
   const filteredInstances = () => {
+    let list = instances();
+    const g = selectedGroup();
+    if (g !== "all") {
+      list = list.filter((i) => (i.group || "").trim() === g);
+    }
     const q = searchQuery().toLowerCase().trim();
-    if (!q) return instances();
-    return instances().filter(
-      (i) =>
-        i.name.toLowerCase().includes(q) ||
-        i.game_version.toLowerCase().includes(q) ||
-        i.loader.toLowerCase().includes(q)
-    );
+    if (q) {
+      list = list.filter(
+        (i) =>
+          i.name.toLowerCase().includes(q) ||
+          i.game_version.toLowerCase().includes(q) ||
+          i.loader.toLowerCase().includes(q) ||
+          (i.group && i.group.toLowerCase().includes(q))
+      );
+    }
+    return [...list].sort((a, b) => {
+      if (a.is_favorite && !b.is_favorite) return -1;
+      if (!a.is_favorite && b.is_favorite) return 1;
+      const timeA = a.last_played_at ? new Date(a.last_played_at).getTime() : 0;
+      const timeB = b.last_played_at ? new Date(b.last_played_at).getTime() : 0;
+      return timeB - timeA;
+    });
+  };
+
+  const handleToggleFavorite = async (inst: InstanceDTO) => {
+    try {
+      const updated = await launcherAPI.setInstanceFavorite({
+        id: inst.id,
+        is_favorite: !inst.is_favorite,
+      });
+      setInstances((prev) =>
+        prev.map((i) => (i.id === updated.id ? updated : i))
+      );
+    } catch (err: unknown) {
+      console.error("Failed to toggle favorite:", err);
+    }
   };
 
   const [customJavaPath, setCustomJavaPath] = createSignal("");
@@ -754,6 +794,37 @@ export const App: Component = () => {
                   <span class="text-[11px] text-zinc-500 font-mono">Nord Engine</span>
                 </div>
 
+                <Show when={availableGroups().length > 0}>
+                  <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs" data-testid="group-filter-bar">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGroup("all")}
+                      class={`px-2.5 py-1 rounded-md transition-colors text-[11px] font-medium cursor-pointer ${
+                        selectedGroup() === "all"
+                          ? "bg-nord-cyan/15 text-nord-cyan border border-nord-cyan/30"
+                          : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 border border-white/5"
+                      }`}
+                      data-testid="group-filter-all"
+                    >
+                      Все
+                    </button>
+                    {availableGroups().map((g) => (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedGroup(g)}
+                        class={`px-2.5 py-1 rounded-md transition-colors text-[11px] font-medium whitespace-nowrap cursor-pointer ${
+                          selectedGroup() === g
+                            ? "bg-nord-cyan/15 text-nord-cyan border border-nord-cyan/30"
+                            : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 border border-white/5"
+                        }`}
+                        data-testid={`group-filter-${g}`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </Show>
+
                 <div class="flex flex-col gap-2.5">
                   {filteredInstances().map((inst) => (
                     <InstanceCard
@@ -764,6 +835,7 @@ export const App: Component = () => {
                         setSelectedInstanceId(inst.id);
                         handleLaunch();
                       }}
+                      onToggleFavorite={handleToggleFavorite}
                     />
                   ))}
                 </div>

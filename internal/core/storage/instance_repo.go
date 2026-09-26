@@ -30,12 +30,17 @@ func (r *InstanceRepository) Save(ctx context.Context, inst *domain.Instance) er
 		skipCheckInt = 1
 	}
 
+	favInt := 0
+	if inst.IsFavorite {
+		favInt = 1
+	}
+
 	query := `
 	INSERT INTO instances (
 		id, name, game_version, loader, loader_version, icon_path, java_path,
-		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, state, last_played_at, total_play_seconds,
+		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, group_name, is_favorite, state, last_played_at, total_play_seconds,
 		created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		name = excluded.name,
 		game_version = excluded.game_version,
@@ -47,6 +52,8 @@ func (r *InstanceRepository) Save(ctx context.Context, inst *domain.Instance) er
 		max_ram_mb = excluded.max_ram_mb,
 		jvm_args = excluded.jvm_args,
 		skip_java_check = excluded.skip_java_check,
+		group_name = excluded.group_name,
+		is_favorite = excluded.is_favorite,
 		state = excluded.state,
 		last_played_at = excluded.last_played_at,
 		total_play_seconds = excluded.total_play_seconds,
@@ -71,6 +78,8 @@ func (r *InstanceRepository) Save(ctx context.Context, inst *domain.Instance) er
 		inst.MaxRAMMB,
 		string(jvmArgsJSON),
 		skipCheckInt,
+		inst.Group,
+		favInt,
 		string(inst.State),
 		lastPlayed,
 		inst.TotalPlaySec,
@@ -87,7 +96,7 @@ func (r *InstanceRepository) GetByID(ctx context.Context, id string) (*domain.In
 	query := `
 	SELECT
 		id, name, game_version, loader, loader_version, icon_path, java_path,
-		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, state, last_played_at, total_play_seconds,
+		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, group_name, is_favorite, state, last_played_at, total_play_seconds,
 		created_at, updated_at
 	FROM instances WHERE id = ?;
 	`
@@ -100,7 +109,7 @@ func (r *InstanceRepository) ListAll(ctx context.Context) ([]*domain.Instance, e
 	query := `
 	SELECT
 		id, name, game_version, loader, loader_version, icon_path, java_path,
-		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, state, last_played_at, total_play_seconds,
+		min_ram_mb, max_ram_mb, jvm_args, skip_java_check, group_name, is_favorite, state, last_played_at, total_play_seconds,
 		created_at, updated_at
 	FROM instances ORDER BY created_at DESC;
 	`
@@ -138,6 +147,28 @@ func (r *InstanceRepository) UpdateState(ctx context.Context, id string, state d
 		string(state), time.Now().Format(time.RFC3339), id)
 	if err != nil {
 		return fmt.Errorf("update instance state: %w", err)
+	}
+	return nil
+}
+
+func (r *InstanceRepository) SetFavorite(ctx context.Context, id string, isFavorite bool) error {
+	favInt := 0
+	if isFavorite {
+		favInt = 1
+	}
+	_, err := r.db.ExecContext(ctx, "UPDATE instances SET is_favorite = ?, updated_at = ? WHERE id = ?;",
+		favInt, time.Now().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("update instance favorite: %w", err)
+	}
+	return nil
+}
+
+func (r *InstanceRepository) SetGroup(ctx context.Context, id string, group string) error {
+	_, err := r.db.ExecContext(ctx, "UPDATE instances SET group_name = ?, updated_at = ? WHERE id = ?;",
+		group, time.Now().Format(time.RFC3339), id)
+	if err != nil {
+		return fmt.Errorf("update instance group: %w", err)
 	}
 	return nil
 }
@@ -183,7 +214,8 @@ type rowScanner interface {
 func (r *InstanceRepository) scanInstance(s rowScanner) (*domain.Instance, error) {
 	var (
 		id, name, gameVersion, loader, loaderVer, iconPath, javaPath, jvmArgsStr, stateStr string
-		minRAM, maxRAM, skipCheckInt                                                        int
+		minRAM, maxRAM, skipCheckInt, favInt                                                int
+		groupName                                                                           string
 		totalPlaySec                                                                        int64
 		lastPlayedStr                                                                       sql.NullString
 		createdAtStr, updatedAtStr                                                          string
@@ -191,7 +223,7 @@ func (r *InstanceRepository) scanInstance(s rowScanner) (*domain.Instance, error
 
 	err := s.Scan(
 		&id, &name, &gameVersion, &loader, &loaderVer, &iconPath, &javaPath,
-		&minRAM, &maxRAM, &jvmArgsStr, &skipCheckInt, &stateStr, &lastPlayedStr, &totalPlaySec,
+		&minRAM, &maxRAM, &jvmArgsStr, &skipCheckInt, &groupName, &favInt, &stateStr, &lastPlayedStr, &totalPlaySec,
 		&createdAtStr, &updatedAtStr,
 	)
 	if err != nil {
@@ -229,6 +261,8 @@ func (r *InstanceRepository) scanInstance(s rowScanner) (*domain.Instance, error
 		MaxRAMMB:      maxRAM,
 		JVMArgs:       jvmArgs,
 		SkipJavaCheck: skipCheckInt != 0,
+		Group:         groupName,
+		IsFavorite:    favInt != 0,
 		State:         domain.InstanceState(stateStr),
 		LastPlayedAt:  lastPlayed,
 		TotalPlaySec:  totalPlaySec,

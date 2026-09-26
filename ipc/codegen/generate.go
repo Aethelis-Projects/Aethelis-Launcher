@@ -23,6 +23,8 @@ type InstanceDTO struct {
 	MaxRAMMB         int        ` + "`" + `json:"max_ram_mb"` + "`" + `
 	JVMArgs          []string   ` + "`" + `json:"jvm_args"` + "`" + `
 	SkipJavaCheck    bool       ` + "`" + `json:"skip_java_check"` + "`" + `
+	Group            string     ` + "`" + `json:"group,omitempty"` + "`" + `
+	IsFavorite       bool       ` + "`" + `json:"is_favorite"` + "`" + `
 	State            string     ` + "`" + `json:"state"` + "`" + `
 	LastPlayedAt     *time.Time ` + "`" + `json:"last_played_at,omitempty"` + "`" + `
 	TotalPlaySeconds int64      ` + "`" + `json:"total_play_seconds"` + "`" + `
@@ -33,6 +35,7 @@ type CreateInstanceRequest struct {
 	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
 	Loader      string ` + "`" + `json:"loader"` + "`" + `
 	JavaPath    string ` + "`" + `json:"java_path,omitempty"` + "`" + `
+	Group       string ` + "`" + `json:"group,omitempty"` + "`" + `
 }
 
 type UpdateInstanceRequest struct {
@@ -44,6 +47,19 @@ type UpdateInstanceRequest struct {
 	MaxRAMMB      int      ` + "`" + `json:"max_ram_mb,omitempty"` + "`" + `
 	JVMArgs       []string ` + "`" + `json:"jvm_args,omitempty"` + "`" + `
 	SkipJavaCheck *bool    ` + "`" + `json:"skip_java_check,omitempty"` + "`" + `
+	Group         *string  ` + "`" + `json:"group,omitempty"` + "`" + `
+	IsFavorite    *bool    ` + "`" + `json:"is_favorite,omitempty"` + "`" + `
+	IconPath      *string  ` + "`" + `json:"icon_path,omitempty"` + "`" + `
+}
+
+type SetFavoriteRequest struct {
+	ID         string ` + "`" + `json:"id"` + "`" + `
+	IsFavorite bool   ` + "`" + `json:"is_favorite"` + "`" + `
+}
+
+type SetGroupRequest struct {
+	ID    string ` + "`" + `json:"id"` + "`" + `
+	Group string ` + "`" + `json:"group"` + "`" + `
 }
 
 type LaunchResponse struct {
@@ -328,6 +344,8 @@ export interface InstanceDTO {
   max_ram_mb: number;
   jvm_args: string[];
   skip_java_check: boolean;
+  group?: string;
+  is_favorite: boolean;
   state: InstanceState;
   last_played_at?: string;
   total_play_seconds: number;
@@ -338,6 +356,7 @@ export interface CreateInstanceRequest {
   game_version: string;
   loader: LoaderType;
   java_path?: string;
+  group?: string;
 }
 
 export interface UpdateInstanceRequest {
@@ -349,6 +368,19 @@ export interface UpdateInstanceRequest {
   max_ram_mb?: number;
   jvm_args?: string[];
   skip_java_check?: boolean;
+  group?: string;
+  is_favorite?: boolean;
+  icon_path?: string;
+}
+
+export interface SetFavoriteRequest {
+  id: string;
+  is_favorite: boolean;
+}
+
+export interface SetGroupRequest {
+  id: string;
+  group: string;
 }
 
 export interface LaunchResponse {

@@ -1,5 +1,5 @@
 import { Component } from "solid-js";
-import { Box, Play, Clock, AlertCircle, FolderOpen } from "lucide-solid";
+import { Box, Play, Clock, AlertCircle, FolderOpen, Star } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import { InstanceDTO } from "../../bindings/ipc_types";
 
@@ -9,6 +9,7 @@ export interface InstanceCardProps {
   disabled?: boolean;
   onSelect?: (instance: InstanceDTO) => void;
   onLaunch?: (instance: InstanceDTO) => void;
+  onToggleFavorite?: (instance: InstanceDTO) => void;
   class?: string;
 }
 
@@ -53,7 +54,11 @@ export const InstanceCard: Component<InstanceCardProps> = (props) => {
               : "bg-zinc-800/80 border-white/5 text-zinc-400 group-hover:text-zinc-200"
           }`}
         >
-          <Box class="w-5 h-5 stroke-[1.5]" aria-hidden="true" />
+          {props.instance.icon_path ? (
+            <img src={props.instance.icon_path} alt="" class="w-7 h-7 object-contain" />
+          ) : (
+            <Box class="w-5 h-5 stroke-[1.5]" aria-hidden="true" />
+          )}
         </div>
 
         <div class="flex flex-col gap-1">
@@ -61,6 +66,11 @@ export const InstanceCard: Component<InstanceCardProps> = (props) => {
             <span class="font-medium text-sm text-zinc-100 group-hover:text-white tracking-tight">
               {props.instance.name}
             </span>
+            {props.instance.group && (
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-zinc-800 text-zinc-300 border border-white/10" data-testid="instance-group-badge">
+                {props.instance.group}
+              </span>
+            )}
             {isRunning() && (
               <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-nord-emerald/15 text-nord-emerald border border-nord-emerald/30">
                 <span class="w-1.5 h-1.5 rounded-full bg-nord-emerald animate-pulse" />
@@ -92,6 +102,25 @@ export const InstanceCard: Component<InstanceCardProps> = (props) => {
       </div>
 
       <div class="flex items-center gap-1.5">
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onToggleFavorite?.(props.instance);
+          }}
+          class={`p-2 rounded-lg transition-colors ${
+            props.instance.is_favorite
+              ? "text-amber-400 fill-amber-400 hover:text-amber-300"
+              : "text-zinc-500 hover:text-amber-400 hover:bg-white/10"
+          }`}
+          title={props.instance.is_favorite ? "Убрать из избранного" : "В избранное"}
+          aria-label={props.instance.is_favorite ? `Убрать ${props.instance.name} из избранного` : `Добавить ${props.instance.name} в избранное`}
+          data-testid="instance-favorite-btn"
+        >
+          <Star class={`w-4 h-4 ${props.instance.is_favorite ? "fill-amber-400 text-amber-400" : ""}`} />
+        </button>
+
         <button
           type="button"
           tabIndex={-1}
