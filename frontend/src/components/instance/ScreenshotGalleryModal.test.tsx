@@ -147,6 +147,6 @@ describe("ScreenshotGalleryModal", () => {
     const folderBtn = await screen.findByTestId("gallery-open-folder-btn");
     fireEvent.click(folderBtn);
 
-    expect(openPathSpy).toHaveBeenCalledWith("test-inst");
+    expect(openPathSpy).toHaveBeenCalledWith("instances/test-inst/screenshots");
   });
 });

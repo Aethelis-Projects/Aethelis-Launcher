@@ -125,7 +125,15 @@ export const ScreenshotGalleryModal: Component<ScreenshotGalleryModalProps> = (p
   };
 
   const handleOpenFolder = () => {
-    launcherAPI.openPath(props.instanceId);
+    if (screenshots().length > 0 && screenshots()[0].path) {
+      const firstShot = screenshots()[0];
+      const sepIdx = Math.max(firstShot.path.lastIndexOf("/"), firstShot.path.lastIndexOf("\\"));
+      if (sepIdx > 0) {
+        launcherAPI.openPath(firstShot.path.substring(0, sepIdx));
+        return;
+      }
+    }
+    launcherAPI.openPath(`${props.instanceId}/screenshots`);
   };
 
   const formatSize = (bytes: number): string => {
@@ -284,7 +292,7 @@ export const ScreenshotGalleryModal: Component<ScreenshotGalleryModalProps> = (p
                             type="button"
                             onClick={() => launcherAPI.openPath(shot.path)}
                             class="p-2 rounded-lg bg-zinc-800 text-white hover:bg-zinc-700 transition-colors cursor-pointer"
-                            title="Открыть файл"
+                            title="Показать в папке"
                             data-testid={`open-btn-${shot.file_name}`}
                           >
                             <FolderOpen class="w-4 h-4" />

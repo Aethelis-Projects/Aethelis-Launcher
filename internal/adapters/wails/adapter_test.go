@@ -2554,6 +2554,20 @@ func TestWailsAdapter_OpenPath(t *testing.T) {
 	if err := adapter.OpenPath(nonExistent); err == nil {
 		t.Error("expected error on non-existent path, got nil")
 	}
+
+	// 5. Screenshots path under instancesDir that does not exist yet (should auto-create and open)
+	instancesDir := filepath.Join(tempDir, "instances")
+	adapter.SetFileSystem(nil, instancesDir)
+	if err := adapter.OpenPath("inst-new/screenshots"); err != nil {
+		t.Fatalf("OpenPath new screenshots dir failed: %v", err)
+	}
+	expectedScreenshotsDir := filepath.Join(instancesDir, "inst-new", "screenshots")
+	if recordedPath != expectedScreenshotsDir || !recordedIsDir {
+		t.Errorf("expected clean dir path %s, isDir=true; got %s, %v", expectedScreenshotsDir, recordedPath, recordedIsDir)
+	}
+	if fi, err := os.Stat(expectedScreenshotsDir); err != nil || !fi.IsDir() {
+		t.Errorf("expected screenshots directory to be created on disk, got err: %v", err)
+	}
 }
 
 func TestWailsAdapter_Screenshots(t *testing.T) {

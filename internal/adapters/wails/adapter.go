@@ -2809,31 +2809,7 @@ func (a *WailsAdapter) UpgradeJavaRuntime(major int) (*JavaDownloadStatusDTO, er
 }
 
 var openPathExec = func(cleanPath string, isDir bool) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		if isDir {
-			cmd = exec.Command("explorer", cleanPath)
-		} else {
-			cmd = exec.Command("explorer", fmt.Sprintf("/select,%s", cleanPath))
-		}
-	case "darwin":
-		if isDir {
-			cmd = exec.Command("open", cleanPath)
-		} else {
-			cmd = exec.Command("open", "-R", cleanPath)
-		}
-	default:
-		if isDir {
-			cmd = exec.Command("xdg-open", cleanPath)
-		} else {
-			cmd = exec.Command("xdg-open", filepath.Dir(cleanPath))
-		}
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to open path: %w", err)
-	}
-	return nil
+	return openPathExecOS(cleanPath, isDir)
 }
 
 // OpenPath opens a file or directory in the native file manager (explorer, open, xdg-open).
@@ -2851,6 +2827,15 @@ func (a *WailsAdapter) OpenPath(targetPath string) error {
 			instPath := filepath.Join(a.instancesDir, cleanPath)
 			if ifi, ierr := os.Stat(instPath); ierr == nil {
 				return openPathExec(instPath, ifi.IsDir())
+			}
+			// If targetPath is within instancesDir (e.g. <instanceId>/screenshots)
+			// and doesn't exist yet on disk, create the directory and open it.
+			if strings.HasSuffix(cleanPath, filepath.FromSlash("/screenshots")) ||
+				strings.HasSuffix(trimmed, "/screenshots") ||
+				strings.HasSuffix(trimmed, "\\screenshots") {
+				if mkErr := os.MkdirAll(instPath, 0755); mkErr == nil {
+					return openPathExec(instPath, true)
+				}
 			}
 		}
 		return fmt.Errorf("path not accessible: %w", err)
