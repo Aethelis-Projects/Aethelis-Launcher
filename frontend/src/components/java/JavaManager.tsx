@@ -247,7 +247,7 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
         </div>
 
         {/* Action Buttons */}
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
           <button
             type="button"
             onClick={() => startDownload(25)}
@@ -298,7 +298,25 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
               <Download class="w-4 h-4 text-zinc-500 group-hover:text-nord-cyan transition-colors" />
             </div>
             <p class="text-[11px] text-zinc-400">
-              Minecraft 1.17 - 1.20.4 (Temurin 17)
+              Minecraft 1.18 - 1.20.4 (Temurin 17)
+            </p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => startDownload(16)}
+            disabled={isDownloading()}
+            class="p-3.5 rounded-xl bg-zinc-900 border border-white/10 hover:border-nord-cyan/40 text-left transition-all cursor-pointer disabled:opacity-50 group"
+            data-testid="download-java-16-button"
+          >
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-white text-xs group-hover:text-nord-cyan transition-colors">
+                Java 16
+              </span>
+              <Download class="w-4 h-4 text-zinc-500 group-hover:text-nord-cyan transition-colors" />
+            </div>
+            <p class="text-[11px] text-zinc-400">
+              Minecraft 1.17 - 1.17.1 (Temurin 16)
             </p>
           </button>
 

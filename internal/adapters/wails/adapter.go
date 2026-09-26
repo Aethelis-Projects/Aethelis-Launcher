@@ -1838,9 +1838,9 @@ func (a *WailsAdapter) UpdateMod(req UpdateModRequest) (*InstallModResponse, err
 			})
 		}
 
-		var disabledDuplicates []string
-		if recRes != nil && len(recRes.DisabledDuplicates) > 0 {
-			disabledDuplicates = recRes.DisabledDuplicates
+		var removedDuplicates []string
+		if recRes != nil && len(recRes.RemovedDuplicates) > 0 {
+			removedDuplicates = recRes.RemovedDuplicates
 		}
 
 		a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
@@ -1853,10 +1853,10 @@ func (a *WailsAdapter) UpdateMod(req UpdateModRequest) (*InstallModResponse, err
 		})
 
 		return &InstallModResponse{
-			Success:            true,
-			FileName:           fileName,
-			Message:            fmt.Sprintf("Mod %s updated successfully", fileName),
-			DisabledDuplicates: disabledDuplicates,
+			Success:           true,
+			FileName:          fileName,
+			Message:           fmt.Sprintf("Mod %s updated successfully", fileName),
+			RemovedDuplicates: removedDuplicates,
 		}, nil
 	}
 

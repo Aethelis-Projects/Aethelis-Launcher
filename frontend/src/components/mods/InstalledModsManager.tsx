@@ -140,9 +140,9 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
         source: update.source,
         target_version_id: update.latest_version_id,
       });
-      if (res.disabled_duplicates && res.disabled_duplicates.length > 0) {
+      if (res.removed_duplicates && res.removed_duplicates.length > 0) {
         setDuplicateToast({
-          files: res.disabled_duplicates,
+          files: res.removed_duplicates,
           visible: true,
         });
       }
@@ -164,7 +164,7 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
     if (list.length === 0) return;
     setUpdatingAll(true);
     setUpdateError(null);
-    const allDisabled: string[] = [];
+    const allRemoved: string[] = [];
     try {
       for (const u of list) {
         const res = await launcherAPI.updateMod({
@@ -174,13 +174,13 @@ export const InstalledModsManager: Component<InstalledModsManagerProps> = (props
           source: u.source,
           target_version_id: u.latest_version_id,
         });
-        if (res.disabled_duplicates && res.disabled_duplicates.length > 0) {
-          allDisabled.push(...res.disabled_duplicates);
+        if (res.removed_duplicates && res.removed_duplicates.length > 0) {
+          allRemoved.push(...res.removed_duplicates);
         }
       }
-      if (allDisabled.length > 0) {
+      if (allRemoved.length > 0) {
         setDuplicateToast({
-          files: Array.from(new Set(allDisabled)),
+          files: Array.from(new Set(allRemoved)),
           visible: true,
         });
       }

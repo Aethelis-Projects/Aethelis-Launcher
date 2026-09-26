@@ -85,8 +85,14 @@ func compareVersion(a, b string) int {
 	return 0
 }
 
-// ResolveJavaMajor determines the required Java major version (e.g., 8, 17, 21) for a given Minecraft version.
-func ResolveJavaMajor(mcVersion string) (int, error) {
+// ResolveJavaMajor determines the required Java major version (e.g., 8, 16, 17, 21, 25) for a given Minecraft version.
+// If manifestJavaMajor > 0 is provided, it prioritizes the dynamic value from the official Mojang version manifest.
+// Otherwise, it falls back to the embedded java_matrix.json rules.
+func ResolveJavaMajor(mcVersion string, manifestJavaMajor ...int) (int, error) {
+	if len(manifestJavaMajor) > 0 && manifestJavaMajor[0] > 0 {
+		return manifestJavaMajor[0], nil
+	}
+
 	if mcVersion == "" {
 		return 21, fmt.Errorf("empty minecraft version provided")
 	}

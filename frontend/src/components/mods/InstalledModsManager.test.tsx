@@ -115,7 +115,7 @@ describe("InstalledModsManager Component", () => {
       success: true,
       file_name: "sodium-fabric-0.5.9.jar",
       message: "Mod updated",
-      disabled_duplicates: ["sodium-fabric-0.5.8.jar"],
+      removed_duplicates: ["sodium-fabric-0.5.8.jar"],
     });
 
     render(() => <InstalledModsManager instanceId="nord-opti-1" />);
