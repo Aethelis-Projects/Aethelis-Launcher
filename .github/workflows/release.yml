@@ -298,6 +298,19 @@ jobs:
           echo "PASS: CI status verified on release commit."
         shell: bash
 
+      - name: Verify Changelog Entry Exists for Version (DEFECT-3 Gate)
+        run: |
+          TAG="${{ github.ref_name }}"
+          CLEAN_VER="${TAG#v}"
+          echo "Checking CHANGELOG.md for version $CLEAN_VER..."
+          if ! grep -q "^## \[$CLEAN_VER\]" CHANGELOG.md; then
+            echo "CRITICAL ERROR: Missing '## [$CLEAN_VER]' section in CHANGELOG.md!"
+            echo "Silent generic fallback is permanently banned. Every release must have complete release notes."
+            exit 1
+          fi
+          echo "PASS: CHANGELOG.md contains entry for $CLEAN_VER."
+        shell: bash
+
       - name: Validate Ed25519 Secret Guard
         run: |
           if [ -z "${{ secrets.ED25519_PRIVATE_KEY }}" ]; then
@@ -315,6 +328,7 @@ jobs:
             -version "${{ github.ref_name }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
             -dist release-assets \
+            -strict-changelog \
             -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json"
 
       - name: Generate Checksums
@@ -328,6 +342,7 @@ jobs:
             -version "${{ github.ref_name }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
             -dist release-assets \
+            -strict-changelog \
             -out-body "release-body.md" \
             -body-only
 
@@ -349,6 +364,10 @@ jobs:
           fi
           if ! grep -q "### Verification & Forensic Integrity" release-body.md; then
             echo "ERROR: Release body missing '### Verification & Forensic Integrity' section!"
+            exit 1
+          fi
+          if grep -qi "channel) release\." release-body.md; then
+            echo "CRITICAL ERROR: Release body contains generic fallback changelog! Extraction failed."
             exit 1
           fi
           TABLE_DATA_ROWS=$(grep -Ec '\| `?[A-Za-z0-9._-]+\.(exe|tar\.gz|json|txt|zip)`? .*[0-9a-f]{64}' release-body.md || true)

@@ -305,5 +305,24 @@ func TestBuildReleaseBody_SixAssets_v070(t *testing.T) {
 	}
 }
 
+func TestExtractChangelog_StrictValidation(t *testing.T) {
+	sample := `# Changelog
+## [0.7.0] - 2026-09-26
+### Added
+- Item 1
+`
+	// Match found
+	extracted := ExtractChangelog(sample, "0.7.0", 2800)
+	if extracted == "" || !strings.Contains(extracted, "Item 1") {
+		t.Fatalf("expected valid extracted changelog, got: %q", extracted)
+	}
+
+	// Missing version returns empty
+	missing := ExtractChangelog(sample, "0.8.0", 2800)
+	if missing != "" {
+		t.Fatalf("expected empty string for missing version, got: %q", missing)
+	}
+}
+
 
 

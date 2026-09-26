@@ -31,6 +31,7 @@ func main() {
 		changelogFile       = flag.String("changelog-file", "CHANGELOG.md", "Path to CHANGELOG.md to extract release notes")
 		bodyFile            = flag.String("out-body", "", "Output release notes markdown path for GitHub Release body (optional)")
 		bodyOnlyFlag        = flag.Bool("body-only", false, "Only generate release body, do not sign or write update manifest")
+		strictChangelog     = flag.Bool("strict-changelog", false, "Fail if changelog extraction returns empty")
 	)
 	flag.Parse()
 
@@ -73,8 +74,17 @@ func main() {
 		if data, err := os.ReadFile(*changelogFile); err == nil {
 			if extracted := ExtractChangelog(string(data), cleanVersion, 2800); extracted != "" {
 				changelogText = extracted
+			} else if *strictChangelog {
+				fmt.Fprintf(os.Stderr, "Error: missing or empty changelog entry for version %s in %s (strict-changelog enabled)\n", cleanVersion, *changelogFile)
+				os.Exit(1)
 			}
+		} else if *strictChangelog {
+			fmt.Fprintf(os.Stderr, "Error: cannot read changelog file %s: %v\n", *changelogFile, err)
+			os.Exit(1)
 		}
+	} else if *strictChangelog {
+		fmt.Fprintf(os.Stderr, "Error: strict-changelog enabled but no changelog file specified\n")
+		os.Exit(1)
 	}
 
 	manifest := updater.UpdateManifest{

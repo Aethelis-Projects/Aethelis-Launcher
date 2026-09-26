@@ -3,6 +3,24 @@
 All notable changes to Nord Launcher are documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.7.0] - 2026-09-26
+
+### Added
+- Modrinth resource pack and shader pack catalog browsing and 1-click installation to instance folders with .zip and .jar detection (Feature A).
+- Instance screenshot gallery with local thumbnail rendering, native clipboard copy via ClipboardItem with PNG blob, and folder opener fallback (Feature C).
+- Real-time game console modal featuring non-blocking 5000-line ring buffer streaming, ANSI color support, log level filtering, search, and save-to-file (Feature D'1).
+- Instance groups and favorites: star toggle pinning favorites to top, group filter bar, and persistent SQLite schema migration 00007 (Feature D'3).
+- 1-click instance migration scanner and importer from official .minecraft and Prism/MultiMC directories with strict credential stripping (Feature D'4a).
+- 8 curated procedural SVG avatar presets with random dice picker for local offline profiles (UX1).
+- Standalone Windows portable distribution package (nord-launcher-v0.7.0-windows-x64-portable.zip) including adjacent cf.key sidecar.
+- Documentation covering security, legal integrity, official APIs, and Wails binding reflection policies in README.md.
+
+### Fixed
+- Portable sidecar key resolution honoring executable-adjacent ./cf.key and user config directories.
+- Dynamic manifest Java version resolution supporting Java 16 LTS for Minecraft 1.17–1.17.1.
+- Windows explorer file revealing with space handling in instance directory paths via SysProcAttr.CmdLine.
+- Screenshot gallery folder opener targeting the instance screenshots folder with auto-creation on demand.
+
 ## [0.6.1] - 2026-09-25
 
 ### Added
