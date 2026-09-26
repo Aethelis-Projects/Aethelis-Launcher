@@ -186,9 +186,12 @@ type UpdateInstanceParams struct {
 	MaxRAMMB      int
 	JVMArgs       []string
 	SkipJavaCheck *bool
+	Group         *string
+	IsFavorite    *bool
+	IconPath      *string
 }
 
-// UpdateInstance updates mutable properties (Name, JavaPath, RAM, JVMArgs, SkipJavaCheck) of an existing instance.
+// UpdateInstance updates mutable properties (Name, JavaPath, RAM, JVMArgs, SkipJavaCheck, Group, IsFavorite, IconPath) of an existing instance.
 // It loads the instance first to preserve all other fields, then persists the updated instance.
 func (s *InstanceService) UpdateInstance(ctx context.Context, p UpdateInstanceParams) (*domain.Instance, error) {
 	if p.ID == "" {
@@ -233,6 +236,15 @@ func (s *InstanceService) UpdateInstance(ctx context.Context, p UpdateInstancePa
 	if p.SkipJavaCheck != nil {
 		inst.SkipJavaCheck = *p.SkipJavaCheck
 	}
+	if p.Group != nil {
+		inst.Group = *p.Group
+	}
+	if p.IsFavorite != nil {
+		inst.IsFavorite = *p.IsFavorite
+	}
+	if p.IconPath != nil {
+		inst.IconPath = *p.IconPath
+	}
 	inst.UpdatedAt = s.clock.Now()
 
 	s.instances[p.ID] = inst
@@ -245,6 +257,20 @@ func (s *InstanceService) UpdateInstance(ctx context.Context, p UpdateInstancePa
 
 	copyInst := *inst
 	return &copyInst, nil
+}
+
+func (s *InstanceService) SetInstanceFavorite(ctx context.Context, id string, isFavorite bool) (*domain.Instance, error) {
+	return s.UpdateInstance(ctx, UpdateInstanceParams{
+		ID:         id,
+		IsFavorite: &isFavorite,
+	})
+}
+
+func (s *InstanceService) SetInstanceGroup(ctx context.Context, id string, group string) (*domain.Instance, error) {
+	return s.UpdateInstance(ctx, UpdateInstanceParams{
+		ID:    id,
+		Group: &group,
+	})
 }
 
 func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
@@ -455,7 +481,7 @@ func (s *InstanceService) LaunchWithSupervisor(
 		return nil, nil, fmt.Errorf("build launch args: %w", err)
 	}
 
-	supervisor := NewLogSupervisor(200)
+	supervisor := NewLogSupervisor(DefaultLogBufferSize)
 
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
@@ -530,4 +556,14 @@ func (s *InstanceService) GetLogTail(instanceID string, n int) ([]string, error)
 	}
 
 	return sup.GetTail(n), nil
+}
+
+// GetSupervisor returns the LogSupervisor for the instance, or nil if none exists.
+func (s *InstanceService) GetSupervisor(instanceID string) *LogSupervisor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.supervisors == nil {
+		return nil
+	}
+	return s.supervisors[instanceID]
 }

@@ -18,22 +18,31 @@ const (
 	DepEmbedded     DependencyType = "embedded"
 )
 
+type ProjectType string
+
+const (
+	ProjectTypeMod          ProjectType = "mod"
+	ProjectTypeResourcePack ProjectType = "resourcepack"
+	ProjectTypeShader       ProjectType = "shader"
+)
+
 // ModItem is the unified metadata model across Modrinth and CurseForge.
 type ModItem struct {
-	ID          string    `json:"id"`
-	Slug        string    `json:"slug"`
-	Source      ModSource `json:"source"`
-	Name        string    `json:"name"`
-	Author      string    `json:"author"`
-	Summary     string    `json:"summary"`
-	Description string    `json:"description,omitempty"`
-	IconURL     string    `json:"icon_url,omitempty"`
-	Downloads   int64     `json:"downloads"`
-	Follows     int64     `json:"follows"`
-	Categories  []string  `json:"categories"`
-	Loaders     []string  `json:"loaders"`
-	GameVers    []string  `json:"game_versions"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          string      `json:"id"`
+	Slug        string      `json:"slug"`
+	Source      ModSource   `json:"source"`
+	Name        string      `json:"name"`
+	Author      string      `json:"author"`
+	Summary     string      `json:"summary"`
+	Description string      `json:"description,omitempty"`
+	IconURL     string      `json:"icon_url,omitempty"`
+	Downloads   int64       `json:"downloads"`
+	Follows     int64       `json:"follows"`
+	Categories  []string    `json:"categories"`
+	Loaders     []string    `json:"loaders"`
+	GameVers    []string    `json:"game_versions"`
+	ProjectType ProjectType `json:"project_type,omitempty"`
+	UpdatedAt   time.Time   `json:"updated_at"`
 }
 
 // Standard release type identifiers.

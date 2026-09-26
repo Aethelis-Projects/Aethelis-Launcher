@@ -1,11 +1,15 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
 import { ModCatalog } from "../mods/ModCatalog";
+import { PRESET_AVATARS, getRandomAvatar } from "../../assets/avatars";
 
-export function getRecommendedJavaMajor(version: string): number {
+export function getRecommendedJavaMajor(version: string, manifestMajor?: number): number {
+  if (manifestMajor && manifestMajor > 0) {
+    return manifestMajor;
+  }
   if (!version) return 21;
   const clean = version.replace(/^v/, "");
   const parts = clean.split(".").map((p) => {
@@ -26,8 +30,11 @@ export function getRecommendedJavaMajor(version: string): number {
     if (minor > 20 || (minor === 20 && (parts[2] || 0) >= 5)) {
       return 21;
     }
-    if (minor >= 17) {
+    if (minor >= 18) {
       return 17;
+    }
+    if (minor === 17) {
+      return 16;
     }
     return 8;
   }
@@ -52,6 +59,8 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const [activeTab, setActiveTab] = createSignal<SettingsTab>(props.initialTab || "general");
   const [modSubTab, setModSubTab] = createSignal<"installed" | "catalog">("installed");
   const [name, setName] = createSignal("");
+  const [group, setGroup] = createSignal("");
+  const [iconPath, setIconPath] = createSignal("");
   const [javaPath, setJavaPath] = createSignal("");
   const [skipJavaCheck, setSkipJavaCheck] = createSignal(false);
   const [minMemoryMb, setMinMemoryMb] = createSignal(2048);
@@ -95,6 +104,8 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
     if (props.isOpen && props.instance) {
       setActiveTab(props.initialTab || "general");
       setName(props.instance.name || "");
+      setGroup(props.instance.group || "");
+      setIconPath(props.instance.icon_path || "");
       setJavaPath(props.instance.java_path || "");
       setSkipJavaCheck(props.instance.skip_java_check || false);
       setMinMemoryMb(props.instance.min_ram_mb || 2048);
@@ -137,6 +148,8 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
       const req: UpdateInstanceRequest = {
         id: props.instance.id,
         name: name().trim(),
+        group: group().trim(),
+        icon_path: iconPath().trim() || undefined,
         java_path: willHaveJavaPath ? javaPath().trim() : undefined,
         clear_java_path: hadJavaPath && !willHaveJavaPath,
         skip_java_check: skipJavaCheck(),
@@ -279,18 +292,85 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             {/* TAB 1: General */}
             <Show when={activeTab() === "general"}>
               <div class="space-y-4">
-                <div>
-                  <label class="block text-zinc-300 font-semibold mb-1.5">
-                    Название сборки
-                  </label>
-                  <input
-                    type="text"
-                    value={name()}
-                    onInput={(e) => setName(e.currentTarget.value)}
-                    placeholder="Например: Survival 1.21"
-                    class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-white font-medium focus:outline-none focus:border-nord-cyan"
-                    data-testid="settings-name-input"
-                  />
+                <div class="grid grid-cols-2 gap-4">
+                  <div>
+                    <label class="block text-zinc-300 font-semibold mb-1.5">
+                      Название сборки
+                    </label>
+                    <input
+                      type="text"
+                      value={name()}
+                      onInput={(e) => setName(e.currentTarget.value)}
+                      placeholder="Например: Survival 1.21"
+                      class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-white font-medium focus:outline-none focus:border-nord-cyan"
+                      data-testid="settings-name-input"
+                    />
+                  </div>
+                  <div>
+                    <label class="block text-zinc-300 font-semibold mb-1.5">
+                      Группа
+                    </label>
+                    <input
+                      type="text"
+                      value={group()}
+                      onInput={(e) => setGroup(e.currentTarget.value)}
+                      placeholder="Например: SMP, Vanilla, Моды"
+                      class="w-full px-3 py-2 rounded-lg bg-zinc-900 border border-white/10 text-white font-medium focus:outline-none focus:border-nord-cyan"
+                      data-testid="settings-group-input"
+                    />
+                  </div>
+                </div>
+
+                {/* Avatar Picker & Randomizer (UX1) */}
+                <div class="p-3.5 rounded-xl bg-zinc-900/60 border border-white/5 space-y-3" data-testid="avatar-picker-section">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <label class="block text-zinc-300 font-semibold text-xs">
+                        Иконка сборки
+                      </label>
+                      <p class="text-[11px] text-zinc-400">
+                        Выберите аватар или бросьте кости для случайного выбора
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const random = getRandomAvatar();
+                        setIconPath(random.dataUrl);
+                      }}
+                      class="px-2.5 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-nord-cyan border border-white/10 text-xs font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Случайная иконка"
+                      data-testid="random-avatar-btn"
+                    >
+                      <Dices class="w-3.5 h-3.5" />
+                      <span>Случайно</span>
+                    </button>
+                  </div>
+
+                  {/* Preset Avatar Grid */}
+                  <div class="grid grid-cols-4 sm:grid-cols-8 gap-2" data-testid="avatar-grid">
+                    <For each={PRESET_AVATARS}>
+                      {(avatar) => (
+                        <button
+                          type="button"
+                          onClick={() => setIconPath(avatar.dataUrl)}
+                          class={`p-1.5 rounded-lg border transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                            iconPath() === avatar.dataUrl
+                              ? "bg-nord-cyan/15 border-[#00D4B2] ring-1 ring-[#00D4B2]"
+                              : "bg-zinc-800/60 border-white/5 hover:border-white/20"
+                          }`}
+                          title={avatar.name}
+                          data-testid={`avatar-preset-${avatar.id}`}
+                        >
+                          <img src={avatar.dataUrl} alt={avatar.name} class="w-6 h-6 object-contain" />
+                          <span class="text-[9px] font-mono text-zinc-400 truncate max-w-full">
+                            {avatar.name}
+                          </span>
+                        </button>
+                      )}
+                    </For>
+                  </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-4 pt-2">

@@ -24,8 +24,8 @@ var (
 )
 
 type ReconcileResult struct {
-	Changed            bool     `json:"changed"`
-	DisabledDuplicates []string `json:"disabled_duplicates"`
+	Changed           bool     `json:"changed"`
+	RemovedDuplicates []string `json:"removed_duplicates"`
 }
 
 type ModRecord struct {
@@ -36,6 +36,7 @@ type ModRecord struct {
 	Source      string    `json:"source"`
 	VersionID   string    `json:"version_id,omitempty"`
 	ReleaseType string    `json:"release_type,omitempty"`
+	Type        string    `json:"type,omitempty"`
 	InstalledAt time.Time `json:"installed_at"`
 }
 
@@ -52,16 +53,17 @@ func NewManifest() *InstallsManifest {
 	}
 }
 
-// CleanModKey produces a normalized canonical lookup key by stripping .disabled and .jar extensions.
+// CleanModKey produces a normalized canonical lookup key by stripping .disabled, .jar, and .zip extensions.
 func CleanModKey(fileName string) string {
 	name := strings.TrimSuffix(fileName, ".disabled")
 	name = strings.TrimSuffix(name, ".jar")
+	name = strings.TrimSuffix(name, ".zip")
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // CanonicalModBase extracts a normalized mod identity base from a filename by stripping version segments.
 func CanonicalModBase(fileName string) string {
-	clean := strings.TrimSuffix(strings.TrimSuffix(fileName, ".disabled"), ".jar")
+	clean := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(fileName, ".disabled"), ".jar"), ".zip")
 	clean = strings.TrimSpace(clean)
 	if match := modBaseRegex.FindStringSubmatch(clean); len(match) > 1 {
 		return strings.ToLower(match[1])
@@ -222,7 +224,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 	entries, err := os.ReadDir(modsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return &ReconcileResult{Changed: false, DisabledDuplicates: []string{}}, nil
+			return &ReconcileResult{Changed: false, RemovedDuplicates: []string{}}, nil
 		}
 		return nil, fmt.Errorf("read mods directory for reconcile: %w", err)
 	}
@@ -232,7 +234,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 	}
 
 	changed := false
-	var disabledDuplicates []string
+	var removedDuplicates []string
 	deletedSet := make(map[string]bool)
 
 	// 1. Detect duplicate active .jar files and self-heal
@@ -292,7 +294,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 			if err := os.Remove(oldPath); err == nil || os.IsNotExist(err) {
 				if !deletedSet[oldName] {
 					deletedSet[oldName] = true
-					disabledDuplicates = append(disabledDuplicates, oldName)
+					removedDuplicates = append(removedDuplicates, oldName)
 				}
 				changed = true
 				cleanOld := CleanModKey(oldName)
@@ -321,7 +323,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 					cleanName := strings.TrimSuffix(name, ".disabled")
 					if !deletedSet[cleanName] {
 						deletedSet[cleanName] = true
-						disabledDuplicates = append(disabledDuplicates, cleanName)
+						removedDuplicates = append(removedDuplicates, cleanName)
 					}
 					changed = true
 					delete(m.Mods, cleanOld)
@@ -331,7 +333,7 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 	}
 
 	// 2. Re-read directory entries after deletions
-	if len(disabledDuplicates) > 0 {
+	if len(removedDuplicates) > 0 {
 		if updatedEntries, err := os.ReadDir(modsDir); err == nil {
 			entries = updatedEntries
 		}
@@ -386,12 +388,12 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 		}
 	}
 
-	if disabledDuplicates == nil {
-		disabledDuplicates = []string{}
+	if removedDuplicates == nil {
+		removedDuplicates = []string{}
 	}
 
 	return &ReconcileResult{
-		Changed:            changed,
-		DisabledDuplicates: disabledDuplicates,
+		Changed:           changed,
+		RemovedDuplicates: removedDuplicates,
 	}, nil
 }

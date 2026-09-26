@@ -6,6 +6,7 @@ import type {
   LaunchResponse,
   AccountDTO,
   ModSource,
+  ProjectType,
   ModItemDTO,
   InstalledModDTO,
   CrashReportDTO,
@@ -31,6 +32,20 @@ import type {
   MrPackImportStatusDTO,
   ExportMrPackRequest,
   JavaRuntimeUpdateDTO,
+  SetFavoriteRequest,
+  SetGroupRequest,
+  ScreenshotDTO,
+  DeleteScreenshotRequest,
+  GetScreenshotDataRequest,
+  GetScreenshotDataResponse,
+  SaveGameLogRequest,
+  SaveGameLogResponse,
+  MinecraftImportSummaryDTO,
+  ScanOfficialMinecraftRequest,
+  ImportOfficialMinecraftRequest,
+  PrismImportSummaryDTO,
+  ScanPrismInstanceRequest,
+  ImportPrismInstanceRequest,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -43,6 +58,11 @@ interface WailsAdapterBindings {
   ListInstances?: () => Promise<InstanceDTO[]>;
   CreateInstance?: (req: CreateInstanceRequest) => Promise<InstanceDTO>;
   UpdateInstance?: (req: UpdateInstanceRequest) => Promise<InstanceDTO>;
+  SetInstanceFavorite?: (req: SetFavoriteRequest) => Promise<InstanceDTO>;
+  SetInstanceGroup?: (req: SetGroupRequest) => Promise<InstanceDTO>;
+  ListScreenshots?: (instanceId: string) => Promise<ScreenshotDTO[]>;
+  DeleteScreenshot?: (req: DeleteScreenshotRequest) => Promise<void>;
+  GetScreenshotData?: (req: GetScreenshotDataRequest) => Promise<GetScreenshotDataResponse>;
   LaunchInstance?: (id: string) => Promise<LaunchResponse>;
   ListAccounts?: () => Promise<AccountDTO[]>;
   SetActiveAccount?: (uuid: string) => Promise<void>;
@@ -59,6 +79,8 @@ interface WailsAdapterBindings {
   UpdateMod?: (req: UpdateModRequest) => Promise<InstallModResponse>;
   HasBuiltinCurseForgeKey?: () => Promise<boolean>;
   GetLogTail?: (instanceId: string, n: number) => Promise<string[]>;
+  GetGameLogs?: (instanceId: string) => Promise<string[]>;
+  SaveGameLog?: (req: SaveGameLogRequest) => Promise<SaveGameLogResponse>;
   ListJavaRuntimes?: () => Promise<JavaInstallationDTO[]>;
   DownloadJavaRuntime?: (major: number) => Promise<void>;
   GetJavaDownloadStatus?: () => Promise<JavaDownloadStatusDTO>;
@@ -74,6 +96,10 @@ interface WailsAdapterBindings {
   CheckJavaRuntimeUpdates?: () => Promise<JavaRuntimeUpdateDTO[]>;
   UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
   OpenPath?: (path: string) => Promise<void>;
+  ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
+  ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
+  ScanPrismInstance?: (req: ScanPrismInstanceRequest) => Promise<PrismImportSummaryDTO>;
+  ImportPrismInstance?: (req: ImportPrismInstanceRequest) => Promise<InstanceDTO>;
   [key: string]: unknown;
 }
 
@@ -178,6 +204,8 @@ let mockInstances: InstanceDTO[] = [
     max_ram_mb: 4096,
     jvm_args: [],
     skip_java_check: false,
+    group: "",
+    is_favorite: false,
     state: "idle",
     total_play_seconds: 14200,
   },
@@ -190,6 +218,8 @@ let mockInstances: InstanceDTO[] = [
     max_ram_mb: 4096,
     jvm_args: [],
     skip_java_check: false,
+    group: "",
+    is_favorite: false,
     state: "idle",
     total_play_seconds: 3600,
   },
@@ -209,6 +239,17 @@ let mockAccounts: AccountDTO[] = [
     is_active: false,
   },
 ];
+
+let mockScreenshots: Record<string, ScreenshotDTO[]> = {
+  "nord-opti-1": [
+    {
+      file_name: "2026-09-20_15.30.00.png",
+      path: "instances/nord-opti-1/screenshots/2026-09-20_15.30.00.png",
+      size: 1048576,
+      created_at: new Date().toISOString(),
+    },
+  ],
+};
 
 let mockInstalledMods: Record<string, InstalledModDTO[]> = {
   "nord-opti-1": [
@@ -250,6 +291,7 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://cdn.modrinth.com/sodium.png",
     downloads: 18500000,
     categories: ["fabric", "optimization"],
+    project_type: "mod",
   },
   {
     id: "YL57xq9U",
@@ -261,6 +303,7 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://cdn.modrinth.com/iris.png",
     downloads: 12400000,
     categories: ["fabric", "shaders"],
+    project_type: "mod",
   },
   {
     id: "P7dR8mSH",
@@ -272,6 +315,7 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://cdn.modrinth.com/fabric-api.png",
     downloads: 45000000,
     categories: ["fabric", "library"],
+    project_type: "mod",
   },
   {
     id: "238222",
@@ -283,6 +327,31 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://edge.forgecdn.net/jei.png",
     downloads: 150000000,
     categories: ["fabric", "utility"],
+    project_type: "mod",
+  },
+  {
+    id: "faithful32",
+    slug: "faithful-32x",
+    source: "modrinth",
+    name: "Faithful 32x",
+    author: "FaithfulTeam",
+    summary: "Classic high-resolution texture pack maintaining original Minecraft aesthetic",
+    icon_url: "https://cdn.modrinth.com/faithful.png",
+    downloads: 3200000,
+    categories: ["textures"],
+    project_type: "resourcepack",
+  },
+  {
+    id: "complementary",
+    slug: "complementary-reimagined",
+    source: "modrinth",
+    name: "Complementary Reimagined",
+    author: "EminGT",
+    summary: "Exceptional shaderpack with tailored performance and stunning lighting",
+    icon_url: "https://cdn.modrinth.com/complementary.png",
+    downloads: 8900000,
+    categories: ["shaders"],
+    project_type: "shader",
   },
 ];
 
@@ -414,6 +483,8 @@ export const launcherAPI = {
           max_ram_mb: 4096,
           jvm_args: [],
           skip_java_check: false,
+          group: req.group || "",
+          is_favorite: false,
           state: "idle",
           total_play_seconds: 0,
         };
@@ -442,6 +513,39 @@ export const launcherAPI = {
         if (req.max_ram_mb !== undefined) inst.max_ram_mb = req.max_ram_mb;
         if (req.jvm_args !== undefined) inst.jvm_args = req.jvm_args;
         if (req.skip_java_check !== undefined) inst.skip_java_check = req.skip_java_check;
+        if (req.group !== undefined) inst.group = req.group;
+        if (req.is_favorite !== undefined) inst.is_favorite = req.is_favorite;
+        if (req.icon_path !== undefined) inst.icon_path = req.icon_path;
+        return { ...inst };
+      },
+      req
+    );
+  },
+
+  async setInstanceFavorite(req: SetFavoriteRequest): Promise<InstanceDTO> {
+    return invokeWails(
+      "SetInstanceFavorite",
+      () => {
+        const inst = mockInstances.find((i) => i.id === req.id);
+        if (!inst) {
+          throw new Error("Instance not found");
+        }
+        inst.is_favorite = req.is_favorite;
+        return { ...inst };
+      },
+      req
+    );
+  },
+
+  async setInstanceGroup(req: SetGroupRequest): Promise<InstanceDTO> {
+    return invokeWails(
+      "SetInstanceGroup",
+      () => {
+        const inst = mockInstances.find((i) => i.id === req.id);
+        if (!inst) {
+          throw new Error("Instance not found");
+        }
+        inst.group = req.group;
         return { ...inst };
       },
       req
@@ -518,7 +622,9 @@ export const launcherAPI = {
       () => {
         const q = req.query.toLowerCase().trim();
         const cat = req.category ? req.category.toLowerCase().trim() : "";
+        const targetType = req.project_type || "mod";
         const filtered = mockModCatalog.filter((m) => {
+          if ((m.project_type || "mod") !== targetType) return false;
           if (req.source && m.source !== req.source) return false;
           if (cat && !m.categories.some((c) => c.toLowerCase().includes(cat))) return false;
           if (!q) return true;
@@ -617,18 +723,21 @@ export const launcherAPI = {
 
   async installMod(
     instanceId: string,
-    mod: ModItemDTO | { id: string; source: ModSource; name?: string; slug?: string },
-    versionId?: string
+    mod: ModItemDTO | { id: string; source: ModSource; name?: string; slug?: string; project_type?: ProjectType | string },
+    versionId?: string,
+    overrideProjectType?: ProjectType
   ): Promise<InstallModResponse> {
     const modSlug = ("slug" in mod && mod.slug) ? mod.slug : mod.id;
     const modName = ("name" in mod && mod.name) ? mod.name : mod.id;
+    const projectType = overrideProjectType || (("project_type" in mod && mod.project_type) ? (mod.project_type as ProjectType) : undefined);
     const res = await invokeWails<InstallModResponse>(
       "InstallMod",
       () => {
         if (!mockInstalledMods[instanceId]) {
           mockInstalledMods[instanceId] = [];
         }
-        const fileName = `${modSlug}-1.0.0.jar`;
+        const ext = (projectType === "resourcepack" || projectType === "shader") ? "zip" : "jar";
+        const fileName = `${modSlug}-1.0.0.${ext}`;
         mockInstalledMods[instanceId].push({
           file_name: fileName,
           mod_id: modSlug,
@@ -636,18 +745,22 @@ export const launcherAPI = {
           version: versionId || "1.0.0",
           enabled: true,
           size_bytes: 1572864,
+          type: projectType,
         });
         return {
           success: true,
           file_name: fileName,
-          message: `Mod ${fileName} installed successfully`,
+          message: `Content ${fileName} installed successfully`,
         };
       },
       {
         instance_id: instanceId,
         mod_id: mod.id,
+        mod_slug: modSlug,
+        mod_name: modName,
         source: mod.source,
         version_id: versionId,
+        project_type: projectType,
       } as InstallModRequest
     );
     if (!res.success) {
@@ -733,6 +846,29 @@ export const launcherAPI = {
 
   async getLogTail(instanceId: string, n = 100): Promise<string[]> {
     return invokeWails<string[]>("GetLogTail", () => [], instanceId, n);
+  },
+
+  async getGameLogs(instanceId: string): Promise<string[]> {
+    return invokeWails<string[]>(
+      "GetGameLogs",
+      () => [
+        `[${new Date().toISOString().slice(11, 19)}] [main/INFO]: Loading Minecraft for ${instanceId}...`,
+        `[${new Date().toISOString().slice(11, 19)}] [main/INFO]: Setting up window and rendering context`,
+        `[${new Date().toISOString().slice(11, 19)}] [main/WARN]: Sound engine pitch variance out of bounds, using default`,
+      ],
+      instanceId
+    );
+  },
+
+  async saveGameLog(req: SaveGameLogRequest): Promise<SaveGameLogResponse> {
+    return invokeWails<SaveGameLogResponse>(
+      "SaveGameLog",
+      () => ({
+        success: true,
+        file_path: req.target_path || `C:\\Nord\\instances\\${req.instance_id}\\logs\\game_log_saved.txt`,
+      }),
+      req
+    );
   },
 
   async listJavaRuntimes(): Promise<JavaInstallationDTO[]> {
@@ -906,6 +1042,131 @@ export const launcherAPI = {
       () => Promise.resolve(),
       path
     );
+  },
+
+  async listScreenshots(instanceId: string): Promise<ScreenshotDTO[]> {
+    return invokeWails<ScreenshotDTO[]>(
+      "ListScreenshots",
+      () => [...(mockScreenshots[instanceId] || [])],
+      instanceId
+    );
+  },
+
+  async deleteScreenshot(req: DeleteScreenshotRequest): Promise<void> {
+    return invokeWails<void>(
+      "DeleteScreenshot",
+      () => {
+        if (mockScreenshots[req.instance_id]) {
+          mockScreenshots[req.instance_id] = mockScreenshots[req.instance_id].filter(
+            (s) => s.file_name !== req.file_name
+          );
+        }
+      },
+      req
+    );
+  },
+
+  async getScreenshotData(req: GetScreenshotDataRequest): Promise<GetScreenshotDataResponse> {
+    return invokeWails<GetScreenshotDataResponse>(
+      "GetScreenshotData",
+      () => ({
+        data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      }),
+      req
+    );
+  },
+
+  async scanOfficialMinecraft(req: ScanOfficialMinecraftRequest = {}): Promise<MinecraftImportSummaryDTO> {
+    return invokeWails<MinecraftImportSummaryDTO>(
+      "ScanOfficialMinecraft",
+      () => ({
+        path: req.dir_path || "C:\\Users\\Home\\AppData\\Roaming\\.minecraft",
+        versions: ["1.21.1", "1.20.4", "1.19.2"],
+        default_version: "1.21.1",
+        world_count: 3,
+        resource_packs: 2,
+        screenshots: 5,
+        mod_count: 0,
+        has_options: true,
+        has_servers: true,
+      }),
+      req
+    );
+  },
+
+  async importOfficialMinecraft(req: ImportOfficialMinecraftRequest): Promise<InstanceDTO> {
+    return invokeWails<InstanceDTO>(
+      "ImportOfficialMinecraft",
+      () => {
+        const newInst: InstanceDTO = {
+          id: `imported-mc-${Date.now()}`,
+          name: req.instance_name || "Official Minecraft",
+          game_version: req.game_version || "1.21.1",
+          loader: (req.loader as LoaderType) || "vanilla",
+          min_ram_mb: 2048,
+          max_ram_mb: 4096,
+          jvm_args: [],
+          skip_java_check: false,
+          group: "",
+          is_favorite: false,
+          state: "idle",
+          total_play_seconds: 0,
+        };
+        mockInstances.push(newInst);
+        return newInst;
+      },
+      req
+    );
+  },
+
+  async scanPrismInstance(req: ScanPrismInstanceRequest): Promise<PrismImportSummaryDTO> {
+    return invokeWails<PrismImportSummaryDTO>(
+      "ScanPrismInstance",
+      () => ({
+        path: req.dir_path,
+        instance_name: "Prism Modpack",
+        game_version: "1.20.1",
+        loader: "fabric",
+        loader_version: "0.15.11",
+        world_count: 1,
+        resource_packs: 1,
+        screenshots: 2,
+        mod_count: 14,
+        has_options: true,
+        has_servers: true,
+      }),
+      req
+    );
+  },
+
+  async importPrismInstance(req: ImportPrismInstanceRequest): Promise<InstanceDTO> {
+    return invokeWails<InstanceDTO>(
+      "ImportPrismInstance",
+      () => {
+        const newInst: InstanceDTO = {
+          id: `imported-prism-${Date.now()}`,
+          name: req.instance_name || "Imported Prism",
+          game_version: "1.20.1",
+          loader: "fabric",
+          loader_version: "0.15.11",
+          min_ram_mb: 2048,
+          max_ram_mb: 4096,
+          jvm_args: [],
+          skip_java_check: false,
+          group: "",
+          is_favorite: false,
+          state: "idle",
+          total_play_seconds: 0,
+        };
+        mockInstances.push(newInst);
+        return newInst;
+      },
+      req
+    );
+  },
+
+  setMockScreenshots(instanceId: string, list: ScreenshotDTO[]): void {
+    mockScreenshots[instanceId] = [...list];
   },
 
   setMockMrPackPlan(plan: MrPackImportPlanDTO): void {

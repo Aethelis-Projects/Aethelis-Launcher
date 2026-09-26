@@ -15,6 +15,8 @@ type InstanceDTO struct {
 	MaxRAMMB         int        `json:"max_ram_mb"`
 	JVMArgs          []string   `json:"jvm_args"`
 	SkipJavaCheck    bool       `json:"skip_java_check"`
+	Group            string     `json:"group,omitempty"`
+	IsFavorite       bool       `json:"is_favorite"`
 	State            string     `json:"state"`
 	LastPlayedAt     *time.Time `json:"last_played_at,omitempty"`
 	TotalPlaySeconds int64      `json:"total_play_seconds"`
@@ -25,6 +27,7 @@ type CreateInstanceRequest struct {
 	GameVersion string `json:"game_version"`
 	Loader      string `json:"loader"`
 	JavaPath    string `json:"java_path,omitempty"`
+	Group       string `json:"group,omitempty"`
 }
 
 type UpdateInstanceRequest struct {
@@ -36,6 +39,19 @@ type UpdateInstanceRequest struct {
 	MaxRAMMB      int      `json:"max_ram_mb,omitempty"`
 	JVMArgs       []string `json:"jvm_args,omitempty"`
 	SkipJavaCheck *bool    `json:"skip_java_check,omitempty"`
+	Group         *string  `json:"group,omitempty"`
+	IsFavorite    *bool    `json:"is_favorite,omitempty"`
+	IconPath      *string  `json:"icon_path,omitempty"`
+}
+
+type SetFavoriteRequest struct {
+	ID         string `json:"id"`
+	IsFavorite bool   `json:"is_favorite"`
+}
+
+type SetGroupRequest struct {
+	ID    string `json:"id"`
+	Group string `json:"group"`
 }
 
 type LaunchResponse struct {
@@ -52,15 +68,16 @@ type AccountDTO struct {
 }
 
 type ModItemDTO struct {
-	ID         string   `json:"id"`
-	Slug       string   `json:"slug"`
-	Source     string   `json:"source"`
-	Name       string   `json:"name"`
-	Author     string   `json:"author"`
-	Summary    string   `json:"summary"`
-	IconURL    string   `json:"icon_url,omitempty"`
-	Downloads  int64    `json:"downloads"`
-	Categories []string `json:"categories"`
+	ID          string   `json:"id"`
+	Slug        string   `json:"slug"`
+	Source      string   `json:"source"`
+	Name        string   `json:"name"`
+	Author      string   `json:"author"`
+	Summary     string   `json:"summary"`
+	IconURL     string   `json:"icon_url,omitempty"`
+	Downloads   int64    `json:"downloads"`
+	Categories  []string `json:"categories"`
+	ProjectType string   `json:"project_type,omitempty"`
 }
 
 type InstalledModDTO struct {
@@ -72,6 +89,7 @@ type InstalledModDTO struct {
 	ReleaseType string `json:"release_type,omitempty"`
 	Enabled     bool   `json:"enabled"`
 	SizeBytes   int64  `json:"size_bytes"`
+	Type        string `json:"type,omitempty"`
 }
 
 type CrashReportDTO struct {
@@ -92,6 +110,7 @@ type SearchModsRequest struct {
 	Offset      int    `json:"offset"`
 	Sort        string `json:"sort,omitempty"`
 	Category    string `json:"category,omitempty"`
+	ProjectType string `json:"project_type,omitempty"`
 }
 
 type SearchModsResultDTO struct {
@@ -201,6 +220,7 @@ type InstallModRequest struct {
 	GameVersion string `json:"game_version"`
 	Loader      string `json:"loader"`
 	VersionID   string `json:"version_id,omitempty"`
+	ProjectType string `json:"project_type,omitempty"`
 }
 
 type UpdateModRequest struct {
@@ -214,15 +234,15 @@ type UpdateModRequest struct {
 }
 
 type InstallModResponse struct {
-	Success            bool     `json:"success"`
-	FileName           string   `json:"file_name"`
-	Message            string   `json:"message"`
-	DisabledDuplicates []string `json:"disabled_duplicates,omitempty"`
+	Success           bool     `json:"success"`
+	FileName          string   `json:"file_name"`
+	Message           string   `json:"message"`
+	RemovedDuplicates []string `json:"removed_duplicates,omitempty"`
 }
 
 type ReconcileNoticeDTO struct {
-	InstanceID         string   `json:"instance_id"`
-	DisabledDuplicates []string `json:"disabled_duplicates"`
+	InstanceID        string   `json:"instance_id"`
+	RemovedDuplicates []string `json:"removed_duplicates"`
 }
 
 type SetSettingRequest struct {
@@ -298,4 +318,98 @@ type ExportMrPackRequest struct {
 	OutputPath       string `json:"output_path,omitempty"`
 	IncludeShaders   bool   `json:"include_shaders,omitempty"`
 	IncludeResources bool   `json:"include_resources,omitempty"`
+}
+
+type ScreenshotDTO struct {
+	FileName  string    `json:"file_name"`
+	Path      string    `json:"path"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type ListScreenshotsRequest struct {
+	InstanceID string `json:"instance_id"`
+}
+
+type DeleteScreenshotRequest struct {
+	InstanceID string `json:"instance_id"`
+	FileName   string `json:"file_name"`
+}
+
+type GetScreenshotDataRequest struct {
+	InstanceID string `json:"instance_id"`
+	FileName   string `json:"file_name"`
+}
+
+type GetScreenshotDataResponse struct {
+	DataURL string `json:"data_url"`
+}
+
+type SaveGameLogRequest struct {
+	InstanceID string `json:"instance_id"`
+	TargetPath string `json:"target_path,omitempty"`
+}
+
+type SaveGameLogResponse struct {
+	Success  bool   `json:"success"`
+	FilePath string `json:"file_path"`
+	Error    string `json:"error,omitempty"`
+}
+
+type MinecraftImportSummaryDTO struct {
+	Path           string   `json:"path"`
+	Versions       []string `json:"versions"`
+	DefaultVersion string   `json:"default_version"`
+	WorldCount     int      `json:"world_count"`
+	ResourcePacks  int      `json:"resource_packs"`
+	Screenshots    int      `json:"screenshots"`
+	ModCount       int      `json:"mod_count"`
+	HasOptions     bool     `json:"has_options"`
+	HasServers     bool     `json:"has_servers"`
+}
+
+type ScanOfficialMinecraftRequest struct {
+	DirPath string `json:"dir_path,omitempty"`
+}
+
+type ImportOfficialMinecraftRequest struct {
+	SourceDir         string `json:"source_dir"`
+	InstanceName      string `json:"instance_name"`
+	GameVersion       string `json:"game_version"`
+	Loader            string `json:"loader"`
+	CopySaves         bool   `json:"copy_saves"`
+	CopyResourcePacks bool   `json:"copy_resource_packs"`
+	CopyScreenshots   bool   `json:"copy_screenshots"`
+	CopyMods          bool   `json:"copy_mods"`
+	CopyOptions       bool   `json:"copy_options"`
+	CopyServers       bool   `json:"copy_servers"`
+}
+
+type PrismImportSummaryDTO struct {
+	Path          string `json:"path"`
+	InstanceName  string `json:"instance_name"`
+	GameVersion   string `json:"game_version"`
+	Loader        string `json:"loader"`
+	LoaderVersion string `json:"loader_version,omitempty"`
+	WorldCount    int    `json:"world_count"`
+	ResourcePacks int    `json:"resource_packs"`
+	Screenshots   int    `json:"screenshots"`
+	ModCount      int    `json:"mod_count"`
+	HasOptions    bool   `json:"has_options"`
+	HasServers    bool   `json:"has_servers"`
+}
+
+type ScanPrismInstanceRequest struct {
+	DirPath string `json:"dir_path"`
+}
+
+type ImportPrismInstanceRequest struct {
+	SourceDir         string `json:"source_dir"`
+	InstanceName      string `json:"instance_name"`
+	CopySaves         bool   `json:"copy_saves"`
+	CopyResourcePacks bool   `json:"copy_resource_packs"`
+	CopyScreenshots   bool   `json:"copy_screenshots"`
+	CopyMods          bool   `json:"copy_mods"`
+	CopyOptions       bool   `json:"copy_options"`
+	CopyServers       bool   `json:"copy_servers"`
 }

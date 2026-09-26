@@ -130,6 +130,7 @@ describe("InstanceSettingsModal (J2)", () => {
       expect(updateSpy).toHaveBeenCalledWith({
         id: "inst-modal-1",
         name: "Updated Survival",
+        group: "",
         java_path: undefined,
         clear_java_path: false,
         skip_java_check: true,
@@ -256,6 +257,74 @@ describe("InstanceSettingsModal (J2)", () => {
     fireEvent.click(openFolderBtn);
 
     expect(openPathSpy).toHaveBeenCalledWith("inst-modal-1");
+  });
+
+  it("renders preset avatars and saves selected avatar (UX1)", async () => {
+    const onSaved = vi.fn();
+    const updateSpy = vi.spyOn(launcherAPI, "updateInstance").mockResolvedValue({
+      ...mockInstance,
+      icon_path: "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" rx=\"4\" fill=\"%2385552B\"/><rect width=\"32\" height=\"12\" rx=\"4\" fill=\"%235B8731\"/><path d=\"M4 12 L8 16 L12 12 L16 17 L20 12 L24 16 L28 12 L32 12 L32 8 L0 8 L0 12 Z\" fill=\"%235B8731\"/></svg>",
+    });
+
+    render(() => (
+      <InstanceSettingsModal
+        instance={mockInstance}
+        isOpen={true}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />
+    ));
+
+    expect(screen.getByTestId("avatar-picker-section")).toBeTruthy();
+    expect(screen.getByTestId("avatar-grid")).toBeTruthy();
+
+    const grassPreset = screen.getByTestId("avatar-preset-grass");
+    expect(grassPreset).toBeTruthy();
+    fireEvent.click(grassPreset);
+
+    const saveBtn = screen.getByTestId("settings-save-button");
+    fireEvent.click(saveBtn);
+
+    await vi.waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "inst-modal-1",
+          icon_path: expect.stringContaining("data:image/svg+xml"),
+        })
+      );
+    });
+  });
+
+  it("picks random avatar when dice button is clicked (UX1)", async () => {
+    const onSaved = vi.fn();
+    const updateSpy = vi.spyOn(launcherAPI, "updateInstance").mockResolvedValue({
+      ...mockInstance,
+    });
+
+    render(() => (
+      <InstanceSettingsModal
+        instance={mockInstance}
+        isOpen={true}
+        onClose={vi.fn()}
+        onSaved={onSaved}
+      />
+    ));
+
+    const randomBtn = screen.getByTestId("random-avatar-btn");
+    expect(randomBtn).toBeTruthy();
+    fireEvent.click(randomBtn);
+
+    const saveBtn = screen.getByTestId("settings-save-button");
+    fireEvent.click(saveBtn);
+
+    await vi.waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "inst-modal-1",
+          icon_path: expect.stringMatching(/^data:image\/svg\+xml/),
+        })
+      );
+    });
   });
 });
 

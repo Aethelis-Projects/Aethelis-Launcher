@@ -4,6 +4,8 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
+export type ProjectType = "mod" | "resourcepack" | "shader";
+
 
 export interface InstanceDTO {
   id: string;
@@ -17,6 +19,8 @@ export interface InstanceDTO {
   max_ram_mb: number;
   jvm_args: string[];
   skip_java_check: boolean;
+  group?: string;
+  is_favorite?: boolean;
   state: InstanceState;
   last_played_at?: string;
   total_play_seconds: number;
@@ -27,6 +31,7 @@ export interface CreateInstanceRequest {
   game_version: string;
   loader: LoaderType;
   java_path?: string;
+  group?: string;
 }
 
 export interface UpdateInstanceRequest {
@@ -38,6 +43,19 @@ export interface UpdateInstanceRequest {
   max_ram_mb?: number;
   jvm_args?: string[];
   skip_java_check?: boolean;
+  group?: string;
+  is_favorite?: boolean;
+  icon_path?: string;
+}
+
+export interface SetFavoriteRequest {
+  id: string;
+  is_favorite: boolean;
+}
+
+export interface SetGroupRequest {
+  id: string;
+  group: string;
 }
 
 export interface LaunchResponse {
@@ -63,6 +81,7 @@ export interface ModItemDTO {
   icon_url?: string;
   downloads: number;
   categories: string[];
+  project_type?: ProjectType;
 }
 
 export interface InstalledModDTO {
@@ -74,6 +93,7 @@ export interface InstalledModDTO {
   release_type?: string;
   enabled: boolean;
   size_bytes: number;
+  type?: ProjectType | string;
 }
 
 export interface CrashReportDTO {
@@ -94,6 +114,7 @@ export interface SearchModsRequest {
   offset: number;
   sort?: string;
   category?: string;
+  project_type?: ProjectType;
 }
 
 export interface SearchModsResultDTO {
@@ -203,6 +224,7 @@ export interface InstallModRequest {
   game_version: string;
   loader: string;
   version_id?: string;
+  project_type?: ProjectType;
 }
 
 export interface UpdateModRequest {
@@ -219,12 +241,12 @@ export interface InstallModResponse {
   success: boolean;
   file_name: string;
   message: string;
-  disabled_duplicates?: string[];
+  removed_duplicates?: string[];
 }
 
 export interface ReconcileNoticeDTO {
   instance_id: string;
-  disabled_duplicates: string[];
+  removed_duplicates: string[];
 }
 
 export interface SetSettingRequest {
@@ -300,4 +322,98 @@ export interface ExportMrPackRequest {
   output_path?: string;
   include_shaders?: boolean;
   include_resources?: boolean;
+}
+
+export interface ScreenshotDTO {
+  file_name: string;
+  path: string;
+  size: number;
+  created_at: string;
+}
+
+export interface ListScreenshotsRequest {
+  instance_id: string;
+}
+
+export interface DeleteScreenshotRequest {
+  instance_id: string;
+  file_name: string;
+}
+
+export interface GetScreenshotDataRequest {
+  instance_id: string;
+  file_name: string;
+}
+
+export interface GetScreenshotDataResponse {
+  data_url: string;
+}
+
+export interface SaveGameLogRequest {
+  instance_id: string;
+  target_path?: string;
+}
+
+export interface SaveGameLogResponse {
+  success: boolean;
+  file_path: string;
+  error?: string;
+}
+
+export interface MinecraftImportSummaryDTO {
+  path: string;
+  versions: string[];
+  default_version: string;
+  world_count: number;
+  resource_packs: number;
+  screenshots: number;
+  mod_count: number;
+  has_options: boolean;
+  has_servers: boolean;
+}
+
+export interface ScanOfficialMinecraftRequest {
+  dir_path?: string;
+}
+
+export interface ImportOfficialMinecraftRequest {
+  source_dir: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  copy_saves: boolean;
+  copy_resource_packs: boolean;
+  copy_screenshots: boolean;
+  copy_mods: boolean;
+  copy_options: boolean;
+  copy_servers: boolean;
+}
+
+export interface PrismImportSummaryDTO {
+  path: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+  world_count: number;
+  resource_packs: number;
+  screenshots: number;
+  mod_count: number;
+  has_options: boolean;
+  has_servers: boolean;
+}
+
+export interface ScanPrismInstanceRequest {
+  dir_path: string;
+}
+
+export interface ImportPrismInstanceRequest {
+  source_dir: string;
+  instance_name: string;
+  copy_saves: boolean;
+  copy_resource_packs: boolean;
+  copy_screenshots: boolean;
+  copy_mods: boolean;
+  copy_options: boolean;
+  copy_servers: boolean;
 }

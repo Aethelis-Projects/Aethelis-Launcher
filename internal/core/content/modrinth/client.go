@@ -55,16 +55,17 @@ type searchResponse struct {
 }
 
 type searchHit struct {
-	ProjectID   string    `json:"project_id"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Author      string    `json:"author"`
-	IconURL     string    `json:"icon_url"`
-	Downloads   int64     `json:"downloads"`
-	Follows     int64     `json:"follows"`
-	Categories  []string  `json:"categories"`
-	GameVersions []string `json:"versions"`
+	ProjectID    string    `json:"project_id"`
+	Slug         string    `json:"slug"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	Author       string    `json:"author"`
+	IconURL      string    `json:"icon_url"`
+	Downloads    int64     `json:"downloads"`
+	Follows      int64     `json:"follows"`
+	Categories   []string  `json:"categories"`
+	GameVersions []string  `json:"versions"`
+	ProjectType  string    `json:"project_type"`
 	DateModified time.Time `json:"date_modified"`
 }
 
@@ -82,12 +83,30 @@ func (c *Client) SearchMods(
 		return nil, 0, err
 	}
 
-	var sort, category string
+	var sort, category, projectType string
 	if len(opts) > 0 {
 		sort = opts[0]
 	}
 	if len(opts) > 1 {
 		category = opts[1]
+	}
+	if len(opts) > 2 {
+		projectType = opts[2]
+	}
+
+	if projectType == "" {
+		if category == "resourcepack" || category == "shader" {
+			projectType = category
+			category = ""
+		} else if strings.HasPrefix(category, "project_type:") {
+			projectType = strings.TrimPrefix(category, "project_type:")
+			category = ""
+		}
+	}
+
+	projectType = strings.ToLower(strings.TrimSpace(projectType))
+	if projectType == "" {
+		projectType = "mod"
 	}
 
 	q := u.Query()
@@ -96,8 +115,8 @@ func (c *Client) SearchMods(
 	}
 
 	var facets [][]string
-	facets = append(facets, []string{"project_type:mod"})
-	if loader != "" {
+	facets = append(facets, []string{"project_type:" + projectType})
+	if loader != "" && projectType == "mod" {
 		facets = append(facets, []string{"categories:" + loader})
 	}
 	if gameVersion != "" {
@@ -164,19 +183,24 @@ func (c *Client) SearchMods(
 
 	items := make([]content.ModItem, 0, len(searchRes.Hits))
 	for _, hit := range searchRes.Hits {
+		pt := hit.ProjectType
+		if pt == "" {
+			pt = projectType
+		}
 		items = append(items, content.ModItem{
-			ID:         hit.ProjectID,
-			Slug:       hit.Slug,
-			Source:     content.SourceModrinth,
-			Name:       hit.Title,
-			Author:     hit.Author,
-			Summary:    hit.Description,
-			IconURL:    hit.IconURL,
-			Downloads:  hit.Downloads,
-			Follows:    hit.Follows,
-			Categories: hit.Categories,
-			GameVers:   hit.GameVersions,
-			UpdatedAt:  hit.DateModified,
+			ID:          hit.ProjectID,
+			Slug:        hit.Slug,
+			Source:      content.SourceModrinth,
+			Name:        hit.Title,
+			Author:      hit.Author,
+			Summary:     hit.Description,
+			IconURL:     hit.IconURL,
+			Downloads:   hit.Downloads,
+			Follows:     hit.Follows,
+			Categories:  hit.Categories,
+			GameVers:    hit.GameVersions,
+			ProjectType: content.ProjectType(pt),
+			UpdatedAt:   hit.DateModified,
 		})
 	}
 

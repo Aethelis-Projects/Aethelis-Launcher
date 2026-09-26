@@ -37,7 +37,18 @@ func ResolveSidecarKey(exePath string) (string, error) {
 		}
 	}
 
-	// 3. Current working directory
+	// 3. User configuration directory (e.g. %APPDATA%/nord-launcher/cf.key or ~/.config/nord-launcher/cf.key)
+	if configDir, err := os.UserConfigDir(); err == nil && configDir != "" {
+		cfgSidecar := filepath.Join(configDir, "nord-launcher", "cf.key")
+		if data, err := os.ReadFile(cfgSidecar); err == nil {
+			k := strings.TrimSpace(string(data))
+			if k != "" {
+				return k, nil
+			}
+		}
+	}
+
+	// 4. Current working directory
 	if data, err := os.ReadFile("cf.key"); err == nil {
 		k := strings.TrimSpace(string(data))
 		if k != "" {

@@ -224,4 +224,86 @@ func TestBuildReleaseBodyWithExtraAssets(t *testing.T) {
 	}
 }
 
+func TestBuildReleaseBody_SixAssets_v070(t *testing.T) {
+	platforms := map[string]updater.PlatformAsset{
+		"windows-amd64": {
+			URL:    "https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/v0.7.0/NordLauncher.exe",
+			SHA256: "1111111111111111111111111111111111111111111111111111111111111111",
+			Size:   18200000,
+		},
+		"windows-setup": {
+			URL:    "https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/v0.7.0/NordLauncher-Setup.exe",
+			SHA256: "2222222222222222222222222222222222222222222222222222222222222222",
+			Size:   7300000,
+		},
+		"linux-amd64": {
+			URL:    "https://github.com/Aethelis-Projects/Aethelis-Launcher/releases/download/v0.7.0/nord-launcher-v0.7.0-linux-amd64.tar.gz",
+			SHA256: "3333333333333333333333333333333333333333333333333333333333333333",
+			Size:   7200000,
+		},
+	}
+
+	extraAssets := []PublishedArtifact{
+		{
+			Name:     "nord-launcher-v0.7.0-windows-x64-portable.zip",
+			Platform: "Windows (x64 Portable Zip)",
+			Size:     18300000,
+			SHA256:   "4444444444444444444444444444444444444444444444444444444444444444",
+		},
+		{
+			Name:     "manifest-stable.json",
+			Platform: "Update Manifest",
+			Size:     2400,
+			SHA256:   "5555555555555555555555555555555555555555555555555555555555555555",
+		},
+		{
+			Name:     "SHA256SUMS.txt",
+			Platform: "Checksums",
+			Size:     450,
+			SHA256:   "6666666666666666666666666666666666666666666666666666666666666666",
+		},
+	}
+
+	body := BuildReleaseBody("0.7.0", "stable", "### Added\n- Feature v0.7.0", platforms, extraAssets...)
+
+	expectedAssets := []string{
+		"NordLauncher.exe",
+		"NordLauncher-Setup.exe",
+		"nord-launcher-v0.7.0-linux-amd64.tar.gz",
+		"nord-launcher-v0.7.0-windows-x64-portable.zip",
+		"manifest-stable.json",
+		"SHA256SUMS.txt",
+	}
+
+	for _, asset := range expectedAssets {
+		if !strings.Contains(body, asset) {
+			t.Errorf("expected body to contain %s, got:\n%s", asset, body)
+		}
+	}
+
+	lines := strings.Split(body, "\n")
+	matchedRows := 0
+	for _, line := range lines {
+		if strings.Contains(line, "| `") && strings.Contains(line, "` |") {
+			for _, asset := range expectedAssets {
+				if strings.Contains(line, "`"+asset+"`") {
+					matchedRows++
+					break
+				}
+			}
+		}
+	}
+	if matchedRows != 6 {
+		t.Fatalf("expected 6 matched asset rows for v0.7.0 delivery, got %d", matchedRows)
+	}
+
+	if !strings.Contains(body, "rich instance content features") {
+		t.Errorf("expected body to contain v0.7.0 specific overview, got:\n%s", body)
+	}
+	if !strings.Contains(body, "Update Manifest Scope") {
+		t.Errorf("expected body to contain Update Manifest Scope note, got:\n%s", body)
+	}
+}
+
+
 

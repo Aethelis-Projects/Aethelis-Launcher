@@ -329,3 +329,65 @@ func TestInstanceRepository_Migration00004_Upgrade(t *testing.T) {
 		t.Errorf("expected SkipJavaCheck to be true after update, got false")
 	}
 }
+
+func TestInstanceRepository_GroupsAndFavorites(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "fav_test.db")
+
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("failed to open database: %v", err)
+	}
+	defer db.Close()
+
+	repo := storage.NewInstanceRepository(db)
+
+	inst := &domain.Instance{
+		ID:          "inst-fav-1",
+		Name:        "Favorite Instance",
+		GameVersion: "1.21.1",
+		Loader:      domain.LoaderFabric,
+		Group:       "SMP",
+		IsFavorite:  true,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	if err := repo.Save(ctx, inst); err != nil {
+		t.Fatalf("save instance failed: %v", err)
+	}
+
+	fetched, err := repo.GetByID(ctx, "inst-fav-1")
+	if err != nil {
+		t.Fatalf("get by id failed: %v", err)
+	}
+	if !fetched.IsFavorite {
+		t.Errorf("expected IsFavorite to be true, got false")
+	}
+	if fetched.Group != "SMP" {
+		t.Errorf("expected Group to be SMP, got %q", fetched.Group)
+	}
+
+	if err := repo.SetFavorite(ctx, "inst-fav-1", false); err != nil {
+		t.Fatalf("set favorite failed: %v", err)
+	}
+	fetched, err = repo.GetByID(ctx, "inst-fav-1")
+	if err != nil {
+		t.Fatalf("get by id after set favorite failed: %v", err)
+	}
+	if fetched.IsFavorite {
+		t.Errorf("expected IsFavorite to be false, got true")
+	}
+
+	if err := repo.SetGroup(ctx, "inst-fav-1", "Hardcore"); err != nil {
+		t.Fatalf("set group failed: %v", err)
+	}
+	fetched, err = repo.GetByID(ctx, "inst-fav-1")
+	if err != nil {
+		t.Fatalf("get by id after set group failed: %v", err)
+	}
+	if fetched.Group != "Hardcore" {
+		t.Errorf("expected Group to be Hardcore, got %q", fetched.Group)
+	}
+}

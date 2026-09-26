@@ -51,4 +51,33 @@ describe("InstanceCard", () => {
     expect(openPathSpy).toHaveBeenCalledWith("test-inst-1");
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  it("calls onToggleFavorite when star button is clicked without selecting card", () => {
+    const onSelect = vi.fn();
+    const onToggleFavorite = vi.fn();
+
+    render(() => (
+      <InstanceCard
+        instance={{ ...mockInstance, is_favorite: false }}
+        onSelect={onSelect}
+        onToggleFavorite={onToggleFavorite}
+      />
+    ));
+
+    const starBtn = screen.getByTestId("instance-favorite-btn");
+    fireEvent.click(starBtn);
+
+    expect(onToggleFavorite).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("renders group badge when group is set", () => {
+    render(() => (
+      <InstanceCard
+        instance={{ ...mockInstance, group: "SMP" }}
+      />
+    ));
+
+    expect(screen.getByTestId("instance-group-badge").textContent).toBe("SMP");
+  });
 });

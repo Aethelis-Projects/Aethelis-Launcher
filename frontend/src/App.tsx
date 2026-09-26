@@ -1,14 +1,17 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload } from "lucide-solid";
+import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image, FolderDown } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
 import { InstanceSettingsModal, SettingsTab } from "./components/instance/InstanceSettingsModal";
+import { ScreenshotGalleryModal } from "./components/instance/ScreenshotGalleryModal";
 import { MrPackImportModal } from "./components/instance/MrPackImportModal";
 import { MrPackExportModal } from "./components/instance/MrPackExportModal";
+import { ImportInstanceModal } from "./components/instance/ImportInstanceModal";
 import { JavaManager } from "./components/java/JavaManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
+import { GameConsoleModal } from "./components/console/GameConsoleModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
 import { StartupUpdateModal } from "./components/updater/StartupUpdateModal";
 import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
@@ -45,7 +48,10 @@ export const App: Component = () => {
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
   const [isImportModalOpen, setIsImportModalOpen] = createSignal(false);
+  const [isInstanceImportOpen, setIsInstanceImportOpen] = createSignal(false);
   const [isExportModalOpen, setIsExportModalOpen] = createSignal(false);
+  const [isScreenshotsOpen, setIsScreenshotsOpen] = createSignal(false);
+  const [isConsoleOpen, setIsConsoleOpen] = createSignal(false);
 
   const openSettingsWithTab = (tab: SettingsTab) => {
     setSettingsInitialTab(tab);
@@ -231,15 +237,55 @@ export const App: Component = () => {
     return list.find((i) => i.id === selectedInstanceId()) || list[0];
   };
 
+  const [selectedGroup, setSelectedGroup] = createSignal<string>("all");
+
+  const availableGroups = () => {
+    const set = new Set<string>();
+    for (const inst of instances()) {
+      if (inst.group && inst.group.trim()) {
+        set.add(inst.group.trim());
+      }
+    }
+    return Array.from(set);
+  };
+
   const filteredInstances = () => {
+    let list = instances();
+    const g = selectedGroup();
+    if (g !== "all") {
+      list = list.filter((i) => (i.group || "").trim() === g);
+    }
     const q = searchQuery().toLowerCase().trim();
-    if (!q) return instances();
-    return instances().filter(
-      (i) =>
-        i.name.toLowerCase().includes(q) ||
-        i.game_version.toLowerCase().includes(q) ||
-        i.loader.toLowerCase().includes(q)
-    );
+    if (q) {
+      list = list.filter(
+        (i) =>
+          i.name.toLowerCase().includes(q) ||
+          i.game_version.toLowerCase().includes(q) ||
+          i.loader.toLowerCase().includes(q) ||
+          (i.group && i.group.toLowerCase().includes(q))
+      );
+    }
+    return [...list].sort((a, b) => {
+      if (a.is_favorite && !b.is_favorite) return -1;
+      if (!a.is_favorite && b.is_favorite) return 1;
+      const timeA = a.last_played_at ? new Date(a.last_played_at).getTime() : 0;
+      const timeB = b.last_played_at ? new Date(b.last_played_at).getTime() : 0;
+      return timeB - timeA;
+    });
+  };
+
+  const handleToggleFavorite = async (inst: InstanceDTO) => {
+    try {
+      const updated = await launcherAPI.setInstanceFavorite({
+        id: inst.id,
+        is_favorite: !inst.is_favorite,
+      });
+      setInstances((prev) =>
+        prev.map((i) => (i.id === updated.id ? updated : i))
+      );
+    } catch (err: unknown) {
+      console.error("Failed to toggle favorite:", err);
+    }
   };
 
   const [customJavaPath, setCustomJavaPath] = createSignal("");
@@ -494,6 +540,17 @@ export const App: Component = () => {
               <Download class="w-3.5 h-3.5 text-nord-cyan" />
               <span>Импорт .mrpack</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setIsInstanceImportOpen(true)}
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium transition-colors cursor-pointer"
+              title="Импортировать из .minecraft или Prism / MultiMC"
+              data-testid="import-instance-btn"
+            >
+              <FolderDown class="w-3.5 h-3.5 text-nord-cyan" />
+              <span>Импорт</span>
+            </button>
           </div>
 
           {/* System Status Indicator */}
@@ -544,6 +601,18 @@ export const App: Component = () => {
                     </div>
 
                     <div class="flex items-center gap-2">
+                      {/* Screenshots Button */}
+                      <button
+                        type="button"
+                        onClick={() => setIsScreenshotsOpen(true)}
+                        class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                        title="Галерея скриншотов сборки"
+                        data-testid="screenshots-btn"
+                      >
+                        <Image class="w-3.5 h-3.5 text-nord-cyan" />
+                        <span>Скриншоты</span>
+                      </button>
+
                       {/* Export MrPack Button */}
                       <button
                         type="button"
@@ -696,9 +765,20 @@ export const App: Component = () => {
                           <span class="w-2 h-2 rounded-full bg-nord-emerald animate-pulse" />
                         </Show>
                       </div>
-                      <span class="text-[10px] font-mono text-zinc-500">
-                        {logTail().length > 0 ? `${logTail().length} строк` : "Ожидание запуска"}
-                      </span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-mono text-zinc-500">
+                          {logTail().length > 0 ? `${logTail().length} строк` : "Ожидание запуска"}
+                        </span>
+                        <button
+                          type="button"
+                          data-testid="open-console-btn"
+                          onClick={() => setIsConsoleOpen(true)}
+                          class="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-nord-cyan hover:text-white transition-colors"
+                          title="Развернуть полноэкранную консоль"
+                        >
+                          Развернуть
+                        </button>
+                      </div>
                     </div>
 
                     <div class="h-24 overflow-y-auto bg-black/60 rounded-lg p-2 font-mono text-[11px] text-zinc-400 select-text leading-relaxed border border-white/5">
@@ -754,6 +834,37 @@ export const App: Component = () => {
                   <span class="text-[11px] text-zinc-500 font-mono">Nord Engine</span>
                 </div>
 
+                <Show when={availableGroups().length > 0}>
+                  <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs" data-testid="group-filter-bar">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGroup("all")}
+                      class={`px-2.5 py-1 rounded-md transition-colors text-[11px] font-medium cursor-pointer ${
+                        selectedGroup() === "all"
+                          ? "bg-nord-cyan/15 text-nord-cyan border border-nord-cyan/30"
+                          : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 border border-white/5"
+                      }`}
+                      data-testid="group-filter-all"
+                    >
+                      Все
+                    </button>
+                    {availableGroups().map((g) => (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedGroup(g)}
+                        class={`px-2.5 py-1 rounded-md transition-colors text-[11px] font-medium whitespace-nowrap cursor-pointer ${
+                          selectedGroup() === g
+                            ? "bg-nord-cyan/15 text-nord-cyan border border-nord-cyan/30"
+                            : "bg-zinc-800/60 text-zinc-400 hover:text-zinc-200 border border-white/5"
+                        }`}
+                        data-testid={`group-filter-${g}`}
+                      >
+                        {g}
+                      </button>
+                    ))}
+                  </div>
+                </Show>
+
                 <div class="flex flex-col gap-2.5">
                   {filteredInstances().map((inst) => (
                     <InstanceCard
@@ -764,6 +875,7 @@ export const App: Component = () => {
                         setSelectedInstanceId(inst.id);
                         handleLaunch();
                       }}
+                      onToggleFavorite={handleToggleFavorite}
                     />
                   ))}
                 </div>
@@ -834,11 +946,50 @@ export const App: Component = () => {
         }}
       />
 
+      {/* 1-Click Instance Import Modal (v0.7.0 Feature D'4a) */}
+      <ImportInstanceModal
+        isOpen={isInstanceImportOpen()}
+        onClose={() => setIsInstanceImportOpen(false)}
+        onImported={async (newInst) => {
+          setIsInstanceImportOpen(false);
+          try {
+            const list = await launcherAPI.listInstances();
+            setInstances(list);
+            setSelectedInstanceId(newInst.id);
+          } catch (_err) {
+            void _err;
+          }
+        }}
+      />
+
       {/* MrPack Export Modal (v0.6.0) */}
       <MrPackExportModal
         instance={activeInstance()}
         isOpen={isExportModalOpen()}
         onClose={() => setIsExportModalOpen(false)}
+      />
+
+      {/* Screenshot Gallery Modal (v0.7.0) */}
+      <ScreenshotGalleryModal
+        isOpen={isScreenshotsOpen()}
+        instanceId={activeInstance().id}
+        instanceName={activeInstance().name}
+        onClose={() => setIsScreenshotsOpen(false)}
+      />
+
+      {/* Game Console Modal (v0.7.0) */}
+      <GameConsoleModal
+        isOpen={isConsoleOpen()}
+        instance={activeInstance()}
+        onClose={() => setIsConsoleOpen(false)}
+        onOpenCrash={() => {
+          setIsConsoleOpen(false);
+          if (!crashReport()) {
+            launcherAPI.getLastCrashReport(activeInstance().id).then((r) => {
+              if (r) setCrashReport(r);
+            });
+          }
+        }}
       />
     </div>
   );

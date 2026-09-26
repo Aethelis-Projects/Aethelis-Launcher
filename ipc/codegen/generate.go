@@ -23,6 +23,8 @@ type InstanceDTO struct {
 	MaxRAMMB         int        ` + "`" + `json:"max_ram_mb"` + "`" + `
 	JVMArgs          []string   ` + "`" + `json:"jvm_args"` + "`" + `
 	SkipJavaCheck    bool       ` + "`" + `json:"skip_java_check"` + "`" + `
+	Group            string     ` + "`" + `json:"group,omitempty"` + "`" + `
+	IsFavorite       bool       ` + "`" + `json:"is_favorite"` + "`" + `
 	State            string     ` + "`" + `json:"state"` + "`" + `
 	LastPlayedAt     *time.Time ` + "`" + `json:"last_played_at,omitempty"` + "`" + `
 	TotalPlaySeconds int64      ` + "`" + `json:"total_play_seconds"` + "`" + `
@@ -33,6 +35,7 @@ type CreateInstanceRequest struct {
 	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
 	Loader      string ` + "`" + `json:"loader"` + "`" + `
 	JavaPath    string ` + "`" + `json:"java_path,omitempty"` + "`" + `
+	Group       string ` + "`" + `json:"group,omitempty"` + "`" + `
 }
 
 type UpdateInstanceRequest struct {
@@ -44,6 +47,19 @@ type UpdateInstanceRequest struct {
 	MaxRAMMB      int      ` + "`" + `json:"max_ram_mb,omitempty"` + "`" + `
 	JVMArgs       []string ` + "`" + `json:"jvm_args,omitempty"` + "`" + `
 	SkipJavaCheck *bool    ` + "`" + `json:"skip_java_check,omitempty"` + "`" + `
+	Group         *string  ` + "`" + `json:"group,omitempty"` + "`" + `
+	IsFavorite    *bool    ` + "`" + `json:"is_favorite,omitempty"` + "`" + `
+	IconPath      *string  ` + "`" + `json:"icon_path,omitempty"` + "`" + `
+}
+
+type SetFavoriteRequest struct {
+	ID         string ` + "`" + `json:"id"` + "`" + `
+	IsFavorite bool   ` + "`" + `json:"is_favorite"` + "`" + `
+}
+
+type SetGroupRequest struct {
+	ID    string ` + "`" + `json:"id"` + "`" + `
+	Group string ` + "`" + `json:"group"` + "`" + `
 }
 
 type LaunchResponse struct {
@@ -60,15 +76,16 @@ type AccountDTO struct {
 }
 
 type ModItemDTO struct {
-	ID         string   ` + "`" + `json:"id"` + "`" + `
-	Slug       string   ` + "`" + `json:"slug"` + "`" + `
-	Source     string   ` + "`" + `json:"source"` + "`" + `
-	Name       string   ` + "`" + `json:"name"` + "`" + `
-	Author     string   ` + "`" + `json:"author"` + "`" + `
-	Summary    string   ` + "`" + `json:"summary"` + "`" + `
-	IconURL    string   ` + "`" + `json:"icon_url,omitempty"` + "`" + `
-	Downloads  int64    ` + "`" + `json:"downloads"` + "`" + `
-	Categories []string ` + "`" + `json:"categories"` + "`" + `
+	ID          string   ` + "`" + `json:"id"` + "`" + `
+	Slug        string   ` + "`" + `json:"slug"` + "`" + `
+	Source      string   ` + "`" + `json:"source"` + "`" + `
+	Name        string   ` + "`" + `json:"name"` + "`" + `
+	Author      string   ` + "`" + `json:"author"` + "`" + `
+	Summary     string   ` + "`" + `json:"summary"` + "`" + `
+	IconURL     string   ` + "`" + `json:"icon_url,omitempty"` + "`" + `
+	Downloads   int64    ` + "`" + `json:"downloads"` + "`" + `
+	Categories  []string ` + "`" + `json:"categories"` + "`" + `
+	ProjectType string   ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
 type InstalledModDTO struct {
@@ -80,6 +97,7 @@ type InstalledModDTO struct {
 	ReleaseType string ` + "`" + `json:"release_type,omitempty"` + "`" + `
 	Enabled     bool   ` + "`" + `json:"enabled"` + "`" + `
 	SizeBytes   int64  ` + "`" + `json:"size_bytes"` + "`" + `
+	Type        string ` + "`" + `json:"type,omitempty"` + "`" + `
 }
 
 type CrashReportDTO struct {
@@ -100,6 +118,7 @@ type SearchModsRequest struct {
 	Offset      int    ` + "`" + `json:"offset"` + "`" + `
 	Sort        string ` + "`" + `json:"sort,omitempty"` + "`" + `
 	Category    string ` + "`" + `json:"category,omitempty"` + "`" + `
+	ProjectType string ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
 type SearchModsResultDTO struct {
@@ -209,6 +228,7 @@ type InstallModRequest struct {
 	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
 	Loader      string ` + "`" + `json:"loader"` + "`" + `
 	VersionID   string ` + "`" + `json:"version_id,omitempty"` + "`" + `
+	ProjectType string ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
 type UpdateModRequest struct {
@@ -222,15 +242,15 @@ type UpdateModRequest struct {
 }
 
 type InstallModResponse struct {
-	Success            bool     ` + "`" + `json:"success"` + "`" + `
-	FileName           string   ` + "`" + `json:"file_name"` + "`" + `
-	Message            string   ` + "`" + `json:"message"` + "`" + `
-	DisabledDuplicates []string ` + "`" + `json:"disabled_duplicates,omitempty"` + "`" + `
+	Success           bool     ` + "`" + `json:"success"` + "`" + `
+	FileName          string   ` + "`" + `json:"file_name"` + "`" + `
+	Message           string   ` + "`" + `json:"message"` + "`" + `
+	RemovedDuplicates []string ` + "`" + `json:"removed_duplicates,omitempty"` + "`" + `
 }
 
 type ReconcileNoticeDTO struct {
-	InstanceID         string   ` + "`" + `json:"instance_id"` + "`" + `
-	DisabledDuplicates []string ` + "`" + `json:"disabled_duplicates"` + "`" + `
+	InstanceID        string   ` + "`" + `json:"instance_id"` + "`" + `
+	RemovedDuplicates []string ` + "`" + `json:"removed_duplicates"` + "`" + `
 }
 
 type SetSettingRequest struct {
@@ -307,7 +327,102 @@ type ExportMrPackRequest struct {
 	IncludeShaders   bool   ` + "`" + `json:"include_shaders,omitempty"` + "`" + `
 	IncludeResources bool   ` + "`" + `json:"include_resources,omitempty"` + "`" + `
 }
+
+type ScreenshotDTO struct {
+	FileName  string    ` + "`" + `json:"file_name"` + "`" + `
+	Path      string    ` + "`" + `json:"path"` + "`" + `
+	Size      int64     ` + "`" + `json:"size"` + "`" + `
+	CreatedAt time.Time ` + "`" + `json:"created_at"` + "`" + `
+}
+
+type ListScreenshotsRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+}
+
+type DeleteScreenshotRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+}
+
+type GetScreenshotDataRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+}
+
+type GetScreenshotDataResponse struct {
+	DataURL string ` + "`" + `json:"data_url"` + "`" + `
+}
+
+type SaveGameLogRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	TargetPath string ` + "`" + `json:"target_path,omitempty"` + "`" + `
+}
+
+type SaveGameLogResponse struct {
+	Success  bool   ` + "`" + `json:"success"` + "`" + `
+	FilePath string ` + "`" + `json:"file_path"` + "`" + `
+	Error    string ` + "`" + `json:"error,omitempty"` + "`" + `
+}
+
+type MinecraftImportSummaryDTO struct {
+	Path           string   ` + "`" + `json:"path"` + "`" + `
+	Versions       []string ` + "`" + `json:"versions"` + "`" + `
+	DefaultVersion string   ` + "`" + `json:"default_version"` + "`" + `
+	WorldCount     int      ` + "`" + `json:"world_count"` + "`" + `
+	ResourcePacks  int      ` + "`" + `json:"resource_packs"` + "`" + `
+	Screenshots    int      ` + "`" + `json:"screenshots"` + "`" + `
+	ModCount       int      ` + "`" + `json:"mod_count"` + "`" + `
+	HasOptions     bool     ` + "`" + `json:"has_options"` + "`" + `
+	HasServers     bool     ` + "`" + `json:"has_servers"` + "`" + `
+}
+
+type ScanOfficialMinecraftRequest struct {
+	DirPath string ` + "`" + `json:"dir_path,omitempty"` + "`" + `
+}
+
+type ImportOfficialMinecraftRequest struct {
+	SourceDir         string ` + "`" + `json:"source_dir"` + "`" + `
+	InstanceName      string ` + "`" + `json:"instance_name"` + "`" + `
+	GameVersion       string ` + "`" + `json:"game_version"` + "`" + `
+	Loader            string ` + "`" + `json:"loader"` + "`" + `
+	CopySaves         bool   ` + "`" + `json:"copy_saves"` + "`" + `
+	CopyResourcePacks bool   ` + "`" + `json:"copy_resource_packs"` + "`" + `
+	CopyScreenshots   bool   ` + "`" + `json:"copy_screenshots"` + "`" + `
+	CopyMods          bool   ` + "`" + `json:"copy_mods"` + "`" + `
+	CopyOptions       bool   ` + "`" + `json:"copy_options"` + "`" + `
+	CopyServers       bool   ` + "`" + `json:"copy_servers"` + "`" + `
+}
+
+type PrismImportSummaryDTO struct {
+	Path          string ` + "`" + `json:"path"` + "`" + `
+	InstanceName  string ` + "`" + `json:"instance_name"` + "`" + `
+	GameVersion   string ` + "`" + `json:"game_version"` + "`" + `
+	Loader        string ` + "`" + `json:"loader"` + "`" + `
+	LoaderVersion string ` + "`" + `json:"loader_version,omitempty"` + "`" + `
+	WorldCount    int    ` + "`" + `json:"world_count"` + "`" + `
+	ResourcePacks int    ` + "`" + `json:"resource_packs"` + "`" + `
+	Screenshots   int    ` + "`" + `json:"screenshots"` + "`" + `
+	ModCount      int    ` + "`" + `json:"mod_count"` + "`" + `
+	HasOptions    bool   ` + "`" + `json:"has_options"` + "`" + `
+	HasServers    bool   ` + "`" + `json:"has_servers"` + "`" + `
+}
+
+type ScanPrismInstanceRequest struct {
+	DirPath string ` + "`" + `json:"dir_path"` + "`" + `
+}
+
+type ImportPrismInstanceRequest struct {
+	SourceDir         string ` + "`" + `json:"source_dir"` + "`" + `
+	InstanceName      string ` + "`" + `json:"instance_name"` + "`" + `
+	CopySaves         bool   ` + "`" + `json:"copy_saves"` + "`" + `
+	CopyResourcePacks bool   ` + "`" + `json:"copy_resource_packs"` + "`" + `
+	CopyScreenshots   bool   ` + "`" + `json:"copy_screenshots"` + "`" + `
+	CopyMods          bool   ` + "`" + `json:"copy_mods"` + "`" + `
+	CopyOptions       bool   ` + "`" + `json:"copy_options"` + "`" + `
+	CopyServers       bool   ` + "`" + `json:"copy_servers"` + "`" + `
+}
 `
+
 
 	tsContent := `// Code generated by ipc/codegen/generate.go; DO NOT EDIT.
 
@@ -315,6 +430,8 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
+export type ProjectType = "mod" | "resourcepack" | "shader";
+
 
 export interface InstanceDTO {
   id: string;
@@ -328,6 +445,8 @@ export interface InstanceDTO {
   max_ram_mb: number;
   jvm_args: string[];
   skip_java_check: boolean;
+  group?: string;
+  is_favorite?: boolean;
   state: InstanceState;
   last_played_at?: string;
   total_play_seconds: number;
@@ -338,6 +457,7 @@ export interface CreateInstanceRequest {
   game_version: string;
   loader: LoaderType;
   java_path?: string;
+  group?: string;
 }
 
 export interface UpdateInstanceRequest {
@@ -349,6 +469,19 @@ export interface UpdateInstanceRequest {
   max_ram_mb?: number;
   jvm_args?: string[];
   skip_java_check?: boolean;
+  group?: string;
+  is_favorite?: boolean;
+  icon_path?: string;
+}
+
+export interface SetFavoriteRequest {
+  id: string;
+  is_favorite: boolean;
+}
+
+export interface SetGroupRequest {
+  id: string;
+  group: string;
 }
 
 export interface LaunchResponse {
@@ -374,6 +507,7 @@ export interface ModItemDTO {
   icon_url?: string;
   downloads: number;
   categories: string[];
+  project_type?: ProjectType;
 }
 
 export interface InstalledModDTO {
@@ -385,6 +519,7 @@ export interface InstalledModDTO {
   release_type?: string;
   enabled: boolean;
   size_bytes: number;
+  type?: ProjectType | string;
 }
 
 export interface CrashReportDTO {
@@ -405,6 +540,7 @@ export interface SearchModsRequest {
   offset: number;
   sort?: string;
   category?: string;
+  project_type?: ProjectType;
 }
 
 export interface SearchModsResultDTO {
@@ -514,6 +650,7 @@ export interface InstallModRequest {
   game_version: string;
   loader: string;
   version_id?: string;
+  project_type?: ProjectType;
 }
 
 export interface UpdateModRequest {
@@ -530,12 +667,12 @@ export interface InstallModResponse {
   success: boolean;
   file_name: string;
   message: string;
-  disabled_duplicates?: string[];
+  removed_duplicates?: string[];
 }
 
 export interface ReconcileNoticeDTO {
   instance_id: string;
-  disabled_duplicates: string[];
+  removed_duplicates: string[];
 }
 
 export interface SetSettingRequest {
@@ -612,7 +749,102 @@ export interface ExportMrPackRequest {
   include_shaders?: boolean;
   include_resources?: boolean;
 }
+
+export interface ScreenshotDTO {
+  file_name: string;
+  path: string;
+  size: number;
+  created_at: string;
+}
+
+export interface ListScreenshotsRequest {
+  instance_id: string;
+}
+
+export interface DeleteScreenshotRequest {
+  instance_id: string;
+  file_name: string;
+}
+
+export interface GetScreenshotDataRequest {
+  instance_id: string;
+  file_name: string;
+}
+
+export interface GetScreenshotDataResponse {
+  data_url: string;
+}
+
+export interface SaveGameLogRequest {
+  instance_id: string;
+  target_path?: string;
+}
+
+export interface SaveGameLogResponse {
+  success: boolean;
+  file_path: string;
+  error?: string;
+}
+
+export interface MinecraftImportSummaryDTO {
+  path: string;
+  versions: string[];
+  default_version: string;
+  world_count: number;
+  resource_packs: number;
+  screenshots: number;
+  mod_count: number;
+  has_options: boolean;
+  has_servers: boolean;
+}
+
+export interface ScanOfficialMinecraftRequest {
+  dir_path?: string;
+}
+
+export interface ImportOfficialMinecraftRequest {
+  source_dir: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  copy_saves: boolean;
+  copy_resource_packs: boolean;
+  copy_screenshots: boolean;
+  copy_mods: boolean;
+  copy_options: boolean;
+  copy_servers: boolean;
+}
+
+export interface PrismImportSummaryDTO {
+  path: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+  world_count: number;
+  resource_packs: number;
+  screenshots: number;
+  mod_count: number;
+  has_options: boolean;
+  has_servers: boolean;
+}
+
+export interface ScanPrismInstanceRequest {
+  dir_path: string;
+}
+
+export interface ImportPrismInstanceRequest {
+  source_dir: string;
+  instance_name: string;
+  copy_saves: boolean;
+  copy_resource_packs: boolean;
+  copy_screenshots: boolean;
+  copy_mods: boolean;
+  copy_options: boolean;
+  copy_servers: boolean;
+}
 `
+
 
 	if err := os.WriteFile("internal/adapters/wails/ipc_types.go", []byte(goContent), 0644); err != nil {
 		fmt.Printf("failed to write go types: %v\n", err)

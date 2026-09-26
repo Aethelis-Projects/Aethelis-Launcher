@@ -91,12 +91,32 @@ if ($MakensisPath) {
     Write-Host "Notice: makensis not in PATH. Skipping NSIS packaging step." -ForegroundColor Yellow
 }
 
-Write-Host "==> [6/6] Generating SHA256 Checksums..." -ForegroundColor Cyan
+Write-Host "==> [6/7] Building Windows Portable Zip (6th Release Asset)..." -ForegroundColor Cyan
+$ZipName = "nord-launcher-v$Version-windows-x64-portable.zip"
+$PortableZipPath = Join-Path $DistWin $ZipName
+$StagingDir = Join-Path $DistWin "portable-staging"
+if (Test-Path $StagingDir) { Remove-Item -Recurse -Force $StagingDir }
+New-Item -ItemType Directory -Force -Path $StagingDir | Out-Null
+Copy-Item $BinaryPath (Join-Path $StagingDir "NordLauncher.exe")
+if (Test-Path (Join-Path $DistWin "cf.key")) {
+    Copy-Item (Join-Path $DistWin "cf.key") (Join-Path $StagingDir "cf.key")
+}
+Compress-Archive -Path "$StagingDir\*" -DestinationPath $PortableZipPath -Force
+Remove-Item -Recurse -Force $StagingDir
+$ZipBytes = (Get-Item $PortableZipPath).Length
+$ZipMB = [math]::Round($ZipBytes / 1MB, 2)
+Write-Host "Portable Zip compiled: $PortableZipPath ($ZipMB MB)" -ForegroundColor Green
+
+Write-Host "==> [7/7] Generating SHA256 Checksums..." -ForegroundColor Cyan
 $HashBin = (Get-FileHash -Algorithm SHA256 $BinaryPath).Hash.ToLower()
 $ChecksumContent = "$HashBin  NordLauncher.exe`n"
 if (Test-Path $InstallerPath) {
     $HashInst = (Get-FileHash -Algorithm SHA256 $InstallerPath).Hash.ToLower()
     $ChecksumContent += "$HashInst  NordLauncher-Setup.exe`n"
+}
+if (Test-Path $PortableZipPath) {
+    $HashZip = (Get-FileHash -Algorithm SHA256 $PortableZipPath).Hash.ToLower()
+    $ChecksumContent += "$HashZip  $ZipName`n"
 }
 Set-Content -Path (Join-Path $DistWin "SHA256SUMS.txt") -Value $ChecksumContent -NoNewline
 

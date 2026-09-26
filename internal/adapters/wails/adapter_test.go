@@ -2546,4 +2546,399 @@ func TestWailsAdapter_OpenPath(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_Screenshots(t *testing.T) {
+	tempDir := t.TempDir()
+	instancesDir := filepath.Join(tempDir, "instances")
+	instID := "test-shot-inst"
+	shotsDir := filepath.Join(instancesDir, instID, "screenshots")
+	if err := os.MkdirAll(shotsDir, 0755); err != nil {
+		t.Fatalf("failed to create screenshots dir: %v", err)
+	}
+
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(nil, instancesDir)
+
+	// 1. Initially empty directory
+	list, err := adapter.ListScreenshots(instID)
+	if err != nil {
+		t.Fatalf("ListScreenshots failed on empty dir: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("expected 0 screenshots, got %d", len(list))
+	}
+
+	// 2. Create sample files: shot1 (older), shot2 (newer), and ignore text file
+	shot1 := filepath.Join(shotsDir, "2026-09-01_12.00.00.png")
+	shot2 := filepath.Join(shotsDir, "2026-09-02_12.00.00.png")
+	txtFile := filepath.Join(shotsDir, "notes.txt")
+
+	_ = os.WriteFile(shot1, []byte("fake-png-1"), 0644)
+	time.Sleep(10 * time.Millisecond)
+	_ = os.WriteFile(shot2, []byte("fake-png-2"), 0644)
+	_ = os.WriteFile(txtFile, []byte("ignore me"), 0644)
+
+	list, err = adapter.ListScreenshots(instID)
+	if err != nil {
+		t.Fatalf("ListScreenshots failed: %v", err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("expected exactly 2 PNG screenshots, got %d", len(list))
+	}
+	// Newest first: shot2 should be index 0
+	if list[0].FileName != "2026-09-02_12.00.00.png" {
+		t.Errorf("expected newest shot first, got %s", list[0].FileName)
+	}
+
+	// 3. GetScreenshotData
+	dataRes, err := adapter.GetScreenshotData(wails.GetScreenshotDataRequest{
+		InstanceID: instID,
+		FileName:   "2026-09-02_12.00.00.png",
+	})
+	if err != nil {
+		t.Fatalf("GetScreenshotData failed: %v", err)
+	}
+	if !strings.HasPrefix(dataRes.DataURL, "data:image/png;base64,") {
+		t.Errorf("expected data URL to start with data:image/png;base64,, got %s", dataRes.DataURL)
+	}
+
+	// Security: traversal check
+	_, err = adapter.GetScreenshotData(wails.GetScreenshotDataRequest{
+		InstanceID: instID,
+		FileName:   "../notes.txt",
+	})
+	if err == nil {
+		t.Errorf("expected error on path traversal in GetScreenshotData, got nil")
+	}
+
+	// 4. DeleteScreenshot
+	err = adapter.DeleteScreenshot(wails.DeleteScreenshotRequest{
+		InstanceID: instID,
+		FileName:   "2026-09-01_12.00.00.png",
+	})
+	if err != nil {
+		t.Fatalf("DeleteScreenshot failed: %v", err)
+	}
+
+	// Verify file is gone
+	if _, err := os.Stat(shot1); !os.IsNotExist(err) {
+		t.Errorf("expected file to be deleted from disk")
+	}
+
+	// Verify delete is idempotent
+	err = adapter.DeleteScreenshot(wails.DeleteScreenshotRequest{
+		InstanceID: instID,
+		FileName:   "2026-09-01_12.00.00.png",
+	})
+	if err != nil {
+		t.Errorf("expected idempotent DeleteScreenshot to return nil, got %v", err)
+	}
+}
+
+func TestWailsAdapter_GameLogsAndStreaming(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "nord-logs-test-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	instancesDir := filepath.Join(tmpDir, "instances")
+	instID := "test-inst-logs"
+	instLogsDir := filepath.Join(instancesDir, instID, "logs")
+	if err := os.MkdirAll(instLogsDir, 0755); err != nil {
+		t.Fatalf("create logs dir: %v", err)
+	}
+
+	// 1. Fallback to latest.log on disk when no supervisor is active
+	latestLogFile := filepath.Join(instLogsDir, "latest.log")
+	initialContent := "[10:00:00] [main/INFO]: Loading Minecraft\n[10:00:01] [main/WARN]: Deprecated mod detected\n"
+	if err := os.WriteFile(latestLogFile, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("write latest.log: %v", err)
+	}
+
+	fileSys := fs.NewOSFileSystem()
+	procMgr := process.NewProcessManager()
+	kr := keyring.NewSystemKeyring()
+	clk := clock.NewRealClock()
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetFileSystem(fileSys, instancesDir)
+
+	logs, err := adapter.GetGameLogs(instID)
+	if err != nil {
+		t.Fatalf("GetGameLogs error: %v", err)
+	}
+	if len(logs) != 2 {
+		t.Fatalf("expected 2 lines from latest.log, got %d", len(logs))
+	}
+
+	// 2. SaveGameLog with default path
+	saveRes, err := adapter.SaveGameLog(wails.SaveGameLogRequest{
+		InstanceID: instID,
+	})
+	if err != nil {
+		t.Fatalf("SaveGameLog failed: %v", err)
+	}
+	if !saveRes.Success || saveRes.FilePath == "" {
+		t.Fatalf("expected success and non-empty FilePath, got %+v", saveRes)
+	}
+	data, err := os.ReadFile(saveRes.FilePath)
+	if err != nil {
+		t.Fatalf("read saved log file: %v", err)
+	}
+	if !strings.Contains(string(data), "Deprecated mod detected") {
+		t.Fatalf("saved log missing expected content: %s", string(data))
+	}
+
+	// 3. SaveGameLog with custom target path
+	customPath := filepath.Join(tmpDir, "exported_log.txt")
+	customRes, err := adapter.SaveGameLog(wails.SaveGameLogRequest{
+		InstanceID: instID,
+		TargetPath: customPath,
+	})
+	if err != nil {
+		t.Fatalf("SaveGameLog custom path failed: %v", err)
+	}
+	if customRes.FilePath != customPath {
+		t.Fatalf("expected FilePath %s, got %s", customPath, customRes.FilePath)
+	}
+	if _, err := os.Stat(customPath); err != nil {
+		t.Fatalf("custom export file not found on disk: %v", err)
+	}
+
+	// 4. Test log streaming & onLogBatch hook
+	receivedBatches := make(chan []string, 5)
+	adapter.SetOnLogBatch(func(id string, lines []string) {
+		if id == instID {
+			receivedBatches <- lines
+		}
+	})
+
+	sup := launch.NewLogSupervisor(100)
+	// Process lines through supervisor and verify subscription
+	ch, unsub := sup.Subscribe(10)
+	defer unsub()
+
+	sup.ProcessLine("[10:00:02] [main/INFO]: Game running smoothly")
+	select {
+	case line := <-ch:
+		if !strings.Contains(line, "Game running smoothly") {
+			t.Fatalf("unexpected line: %s", line)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("timed out waiting for subscribed line")
+	}
+}
+
+func TestWailsAdapter_AddonsResourcePacksAndShaders(t *testing.T) {
+	// Setup mock download server
+	fileContent := "dummy-zip-bytes"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write([]byte(fileContent))
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	allowedHost := u.Host
+
+	tmpDir, err := os.MkdirTemp("", "nord-addons-test-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	instancesDir := filepath.Join(tmpDir, "instances")
+	instID := "addons-instance"
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, instancesDir)
+	adapter.SetAllowedHosts([]string{allowedHost, u.Hostname()})
+
+	// 1. Install resource pack directly by simulating downloaded file in resourcepacks folder
+	rpDir := filepath.Join(instancesDir, instID, "resourcepacks")
+	if err := os.MkdirAll(rpDir, 0755); err != nil {
+		t.Fatalf("mkdir rpDir: %v", err)
+	}
+	rpFile := filepath.Join(rpDir, "BareBones.zip")
+	if err := os.WriteFile(rpFile, []byte("rp-content"), 0644); err != nil {
+		t.Fatalf("write rpFile: %v", err)
+	}
+
+	// 2. Install shader pack directly by simulating downloaded file in shaderpacks folder
+	shaderDir := filepath.Join(instancesDir, instID, "shaderpacks")
+	if err := os.MkdirAll(shaderDir, 0755); err != nil {
+		t.Fatalf("mkdir shaderDir: %v", err)
+	}
+	shaderFile := filepath.Join(shaderDir, "Complementary.zip")
+	if err := os.WriteFile(shaderFile, []byte("shader-content"), 0644); err != nil {
+		t.Fatalf("write shaderFile: %v", err)
+	}
+
+	// 3. List installed content
+	items, err := adapter.ListInstalledMods(instID)
+	if err != nil {
+		t.Fatalf("ListInstalledMods failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d: %+v", len(items), items)
+	}
+
+	var foundRP, foundShader bool
+	for _, it := range items {
+		if it.FileName == "BareBones.zip" && it.Type == "resourcepack" {
+			foundRP = true
+		}
+		if it.FileName == "Complementary.zip" && it.Type == "shader" {
+			foundShader = true
+		}
+	}
+	if !foundRP {
+		t.Errorf("expected resourcepack BareBones.zip with type 'resourcepack'")
+	}
+	if !foundShader {
+		t.Errorf("expected shader Complementary.zip with type 'shader'")
+	}
+
+	// 4. Toggle resourcepack
+	err = adapter.ToggleMod(wails.ToggleModRequest{
+		InstanceID: instID,
+		FileName:   "BareBones.zip",
+		Enable:     false,
+	})
+	if err != nil {
+		t.Fatalf("ToggleMod disable failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rpDir, "BareBones.zip.disabled")); err != nil {
+		t.Errorf("expected disabled file in rpDir: %v", err)
+	}
+
+	// 5. Delete shader pack
+	err = adapter.DeleteMod(wails.DeleteModRequest{
+		InstanceID: instID,
+		FileName:   "Complementary.zip",
+	})
+	if err != nil {
+		t.Fatalf("DeleteMod shader failed: %v", err)
+	}
+	if _, err := os.Stat(shaderFile); !os.IsNotExist(err) {
+		t.Errorf("expected Complementary.zip to be deleted from shaderDir")
+	}
+}
+
+func TestWailsAdapter_ImportOfficialAndPrism(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := storage.OpenDatabase(filepath.Join(tempDir, "adapter_test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	instRepo := storage.NewInstanceRepository(db)
+	fileSys := fs.NewOSFileSystem()
+	procMgr := process.NewProcessManager()
+	kr := keyring.NewMemoryKeyring()
+	clk := clock.NewMockClock(time.Now())
+	svc := launch.NewInstanceService(instRepo, fileSys, procMgr, kr, clk)
+
+	instancesDir := filepath.Join(tempDir, "instances")
+	if err := os.MkdirAll(instancesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetFileSystem(fileSys, instancesDir)
+
+	// 1. Setup mock official .minecraft folder
+	mcDir := filepath.Join(tempDir, "official_minecraft")
+	if err := os.MkdirAll(filepath.Join(mcDir, "saves", "TestWorld"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcDir, "saves", "TestWorld", "level.dat"), []byte("level"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcDir, "options.txt"), []byte("fov:80.0"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(mcDir, "versions", "1.21.1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Scan official
+	summary, err := adapter.ScanOfficialMinecraft(wails.ScanOfficialMinecraftRequest{DirPath: mcDir})
+	if err != nil {
+		t.Fatalf("ScanOfficialMinecraft error: %v", err)
+	}
+	if summary.WorldCount != 1 || !summary.HasOptions || summary.DefaultVersion != "1.21.1" {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+
+	// 3. Import official
+	instDTO, err := adapter.ImportOfficialMinecraft(wails.ImportOfficialMinecraftRequest{
+		SourceDir:    mcDir,
+		InstanceName: "Imported Official",
+		GameVersion:  "1.21.1",
+		Loader:       "vanilla",
+		CopySaves:    true,
+		CopyOptions:  true,
+	})
+	if err != nil {
+		t.Fatalf("ImportOfficialMinecraft error: %v", err)
+	}
+	if instDTO.Name != "Imported Official" {
+		t.Errorf("expected name 'Imported Official', got %s", instDTO.Name)
+	}
+	destLevel := filepath.Join(instancesDir, instDTO.ID, "saves", "TestWorld", "level.dat")
+	if _, err := os.Stat(destLevel); err != nil {
+		t.Errorf("expected level.dat at %s: %v", destLevel, err)
+	}
+
+	// 4. Setup mock Prism instance
+	prismDir := filepath.Join(tempDir, "prism_instance")
+	if err := os.MkdirAll(prismDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prismDir, "instance.cfg"), []byte("name = Speedrun Pack\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	packJSON := `{"components":[{"uid":"net.minecraft","version":"1.20.1"},{"uid":"net.fabricmc.fabric-loader","version":"0.16.5"}]}`
+	if err := os.WriteFile(filepath.Join(prismDir, "mmc-pack.json"), []byte(packJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(prismDir, ".minecraft", "mods"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prismDir, ".minecraft", "mods", "sodium.jar"), []byte("jar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. Scan Prism
+	prismSummary, err := adapter.ScanPrismInstance(wails.ScanPrismInstanceRequest{DirPath: prismDir})
+	if err != nil {
+		t.Fatalf("ScanPrismInstance error: %v", err)
+	}
+	if prismSummary.InstanceName != "Speedrun Pack" || prismSummary.Loader != "fabric" || prismSummary.ModCount != 1 {
+		t.Fatalf("unexpected prism summary: %+v", prismSummary)
+	}
+
+	// 6. Import Prism
+	prismDTO, err := adapter.ImportPrismInstance(wails.ImportPrismInstanceRequest{
+		SourceDir:    prismDir,
+		InstanceName: "Imported Speedrun",
+		CopyMods:     true,
+	})
+	if err != nil {
+		t.Fatalf("ImportPrismInstance error: %v", err)
+	}
+	if prismDTO.Loader != "fabric" {
+		t.Errorf("expected loader fabric, got %s", prismDTO.Loader)
+	}
+	destMod := filepath.Join(instancesDir, prismDTO.ID, "mods", "sodium.jar")
+	if _, err := os.Stat(destMod); err != nil {
+		t.Errorf("expected mod at %s: %v", destMod, err)
+	}
+}
+
+
+
 

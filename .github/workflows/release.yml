@@ -133,6 +133,20 @@ jobs:
         run: |
           ./scripts/sign_windows.ps1 -TargetFile "dist/windows/NordLauncher-Setup.exe"
 
+      - name: Build Windows Portable Zip (6th Release Asset)
+        shell: pwsh
+        run: |
+          $ver = "${{ github.ref_name }}"
+          $zipName = "nord-launcher-$ver-windows-x64-portable.zip"
+          New-Item -ItemType Directory -Force -Path "dist/windows/portable-staging"
+          Copy-Item "dist/windows/NordLauncher.exe" "dist/windows/portable-staging/"
+          if (Test-Path "dist/windows/cf.key") {
+            Copy-Item "dist/windows/cf.key" "dist/windows/portable-staging/"
+          }
+          Compress-Archive -Path "dist/windows/portable-staging/*" -DestinationPath "dist/windows/$zipName" -Force
+          Remove-Item -Recurse -Force "dist/windows/portable-staging"
+          Write-Host "PASS: Created dist/windows/$zipName"
+
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -140,6 +154,7 @@ jobs:
           path: |
             dist/windows/NordLauncher.exe
             dist/windows/NordLauncher-Setup.exe
+            dist/windows/nord-launcher-*-windows-x64-portable.zip
 
   build-linux:
     name: Build & Package Linux (x64)
@@ -268,6 +283,21 @@ jobs:
             echo "prerelease=false" >> $GITHUB_OUTPUT
           fi
 
+      - name: Verify CI Quality Gate Success on Release Commit (T0.4 Process Rule)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          COMMIT_SHA="${{ github.sha }}"
+          echo "Verifying CI check runs for commit $COMMIT_SHA..."
+          STATUS=$(gh api "repos/${{ github.repository }}/commits/$COMMIT_SHA/check-runs" --jq '.check_runs[] | select(.name != "Publish GitHub Release") | .conclusion' || true)
+          echo "Check run conclusions: $STATUS"
+          if echo "$STATUS" | grep -qi "failure"; then
+            echo "CRITICAL ERROR: CI quality gate check run failed on commit $COMMIT_SHA!"
+            exit 1
+          fi
+          echo "PASS: CI status verified on release commit."
+        shell: bash
+
       - name: Validate Ed25519 Secret Guard
         run: |
           if [ -z "${{ secrets.ED25519_PRIVATE_KEY }}" ]; then
@@ -292,7 +322,7 @@ jobs:
         run: |
           sha256sum * > SHA256SUMS.txt
 
-      - name: Generate Release Body with Complete 5-Row Artifact Table (DEFECT-2 Fix)
+      - name: Generate Release Body with Complete 6-Row Artifact Table (DEFECT-2 Fix)
         run: |
           go run scripts/generate_manifest.go \
             -version "${{ github.ref_name }}" \
@@ -321,10 +351,10 @@ jobs:
             echo "ERROR: Release body missing '### Verification & Forensic Integrity' section!"
             exit 1
           fi
-          TABLE_DATA_ROWS=$(grep -Ec '\| `?[A-Za-z0-9._-]+\.(exe|tar\.gz|json|txt)`? .*[0-9a-f]{64}' release-body.md || true)
+          TABLE_DATA_ROWS=$(grep -Ec '\| `?[A-Za-z0-9._-]+\.(exe|tar\.gz|json|txt|zip)`? .*[0-9a-f]{64}' release-body.md || true)
           echo "Release body table data rows: $TABLE_DATA_ROWS"
-          if [ "$TABLE_DATA_ROWS" -lt 4 ]; then
-            echo "ERROR: Release body table too short ($TABLE_DATA_ROWS data rows < 4 rows threshold)!"
+          if [ "$TABLE_DATA_ROWS" -lt 5 ]; then
+            echo "ERROR: Release body table too short ($TABLE_DATA_ROWS data rows < 5 rows threshold)!"
             exit 1
           fi
           echo "PASS: Release body verified ($BODY_LEN bytes, $TABLE_DATA_ROWS data rows)."
