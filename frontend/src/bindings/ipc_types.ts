@@ -219,12 +219,12 @@ export interface InstallModResponse {
   success: boolean;
   file_name: string;
   message: string;
-  disabled_duplicates?: string[];
+  removed_duplicates?: string[];
 }
 
 export interface ReconcileNoticeDTO {
   instance_id: string;
-  disabled_duplicates: string[];
+  removed_duplicates: string[];
 }
 
 export interface SetSettingRequest {

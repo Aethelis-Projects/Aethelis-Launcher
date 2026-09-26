@@ -5,7 +5,10 @@ import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "..
 import { InstalledModsManager } from "../mods/InstalledModsManager";
 import { ModCatalog } from "../mods/ModCatalog";
 
-export function getRecommendedJavaMajor(version: string): number {
+export function getRecommendedJavaMajor(version: string, manifestMajor?: number): number {
+  if (manifestMajor && manifestMajor > 0) {
+    return manifestMajor;
+  }
   if (!version) return 21;
   const clean = version.replace(/^v/, "");
   const parts = clean.split(".").map((p) => {
@@ -26,8 +29,11 @@ export function getRecommendedJavaMajor(version: string): number {
     if (minor > 20 || (minor === 20 && (parts[2] || 0) >= 5)) {
       return 21;
     }
-    if (minor >= 17) {
+    if (minor >= 18) {
       return 17;
+    }
+    if (minor === 17) {
+      return 16;
     }
     return 8;
   }

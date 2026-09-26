@@ -214,15 +214,15 @@ type UpdateModRequest struct {
 }
 
 type InstallModResponse struct {
-	Success            bool     `json:"success"`
-	FileName           string   `json:"file_name"`
-	Message            string   `json:"message"`
-	DisabledDuplicates []string `json:"disabled_duplicates,omitempty"`
+	Success           bool     `json:"success"`
+	FileName          string   `json:"file_name"`
+	Message           string   `json:"message"`
+	RemovedDuplicates []string `json:"removed_duplicates,omitempty"`
 }
 
 type ReconcileNoticeDTO struct {
-	InstanceID         string   `json:"instance_id"`
-	DisabledDuplicates []string `json:"disabled_duplicates"`
+	InstanceID        string   `json:"instance_id"`
+	RemovedDuplicates []string `json:"removed_duplicates"`
 }
 
 type SetSettingRequest struct {

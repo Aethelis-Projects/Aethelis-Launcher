@@ -55,4 +55,30 @@ func TestResolveSidecarKey(t *testing.T) {
 	if key != envKey {
 		t.Errorf("expected env key %q, got %q", envKey, key)
 	}
+
+	// 4. UserConfigDir fallback when adjacent is missing
+	_ = os.Unsetenv("NORD_CF_KEY") // errcheck:ok clean env
+	_ = os.Remove(sidecarFile)     // errcheck:ok remove adjacent file
+	cfgDir := t.TempDir()
+	oldAppData := os.Getenv("AppData")
+	oldXDG := os.Getenv("XDG_CONFIG_HOME")
+	defer func() {
+		_ = os.Setenv("AppData", oldAppData)          // errcheck:ok restore env
+		_ = os.Setenv("XDG_CONFIG_HOME", oldXDG)      // errcheck:ok restore env
+	}()
+	_ = os.Setenv("AppData", cfgDir)             // errcheck:ok override config dir for test
+	_ = os.Setenv("XDG_CONFIG_HOME", cfgDir)     // errcheck:ok override config dir for test
+
+	nordCfgDir := filepath.Join(cfgDir, "nord-launcher")
+	_ = os.MkdirAll(nordCfgDir, 0755) // errcheck:ok test dir setup
+	cfgKey := "cfg-sidecar-key-555"
+	_ = os.WriteFile(filepath.Join(nordCfgDir, "cf.key"), []byte(cfgKey), 0644) // errcheck:ok write test key
+
+	key, err = ResolveSidecarKey(fakeExe)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if key != cfgKey {
+		t.Errorf("expected config dir key %q, got %q", cfgKey, key)
+	}
 }

@@ -26,13 +26,16 @@ func TestResolveJavaMajor(t *testing.T) {
 		{"1.20.6", 21},
 		{"1.20.5", 21},
 
-		// 1.17 to 1.20.4 -> Java 17
+		// 1.18 to 1.20.4 -> Java 17
 		{"1.20.4", 17},
 		{"1.20.1", 17},
 		{"1.19.4", 17},
 		{"1.18.2", 17},
-		{"1.17.1", 17},
-		{"1.17", 17},
+		{"1.18", 17},
+
+		// 1.17 to 1.17.1 -> Java 16
+		{"1.17.1", 16},
+		{"1.17", 16},
 
 		// Legacy <= 1.16.5 -> Java 8
 		{"1.16.5", 8},
@@ -53,6 +56,27 @@ func TestResolveJavaMajor(t *testing.T) {
 			}
 		})
 	}
+
+	// Test dynamic manifest priority
+	t.Run("DynamicManifestPriority", func(t *testing.T) {
+		// Even if MC 1.20.1 matrix defaults to 17, manifest says 21:
+		major, err := java.ResolveJavaMajor("1.20.1", 21)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if major != 21 {
+			t.Errorf("expected dynamic manifest Java 21, got %d", major)
+		}
+
+		// When manifest major is <= 0, falls back to matrix
+		majorFallback, err := java.ResolveJavaMajor("1.20.1", 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if majorFallback != 17 {
+			t.Errorf("expected matrix fallback Java 17, got %d", majorFallback)
+		}
+	})
 }
 
 func TestAdoptiumClient_GetLatestRelease_Java25(t *testing.T) {

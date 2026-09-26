@@ -152,8 +152,8 @@ func TestManifest_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
 	if !res.Changed {
 		t.Errorf("expected changed=true on duplicate self-heal")
 	}
-	if len(res.DisabledDuplicates) != 1 || res.DisabledDuplicates[0] != "modmenu-11.0.4.jar" {
-		t.Errorf("expected deleted duplicate ['modmenu-11.0.4.jar'], got: %v", res.DisabledDuplicates)
+	if len(res.RemovedDuplicates) != 1 || res.RemovedDuplicates[0] != "modmenu-11.0.4.jar" {
+		t.Errorf("expected deleted duplicate ['modmenu-11.0.4.jar'], got: %v", res.RemovedDuplicates)
 	}
 
 	// Verify new file is still active
@@ -170,13 +170,13 @@ func TestManifest_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
 		t.Errorf("expected old jar to not exist as .disabled")
 	}
 
-	// Idempotency: second reconcile should find 0 disabled duplicates
+	// Idempotency: second reconcile should find 0 removed duplicates
 	res2, err := m.ReconcileWithDisk(tempDir)
 	if err != nil {
 		t.Fatalf("second reconcile failed: %v", err)
 	}
-	if len(res2.DisabledDuplicates) != 0 {
-		t.Errorf("expected 0 disabled duplicates on second run, got: %v", res2.DisabledDuplicates)
+	if len(res2.RemovedDuplicates) != 0 {
+		t.Errorf("expected 0 removed duplicates on second run, got: %v", res2.RemovedDuplicates)
 	}
 }
 
