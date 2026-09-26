@@ -67,6 +67,7 @@ type WailsAdapter struct {
 	mrpackImporter     *content.MrPackImporter
 	mrpackExporter     *content.MrPackExporter
 	mrpackProgress     map[string]*MrPackImportStatusDTO
+	importer           *launch.InstanceImporter
 	filePickerFn       func() (string, error)
 	onLogBatch         func(instanceID string, lines []string)
 	mu                 sync.RWMutex
@@ -2956,5 +2957,96 @@ func (a *WailsAdapter) GetScreenshotData(req GetScreenshotDataRequest) (*GetScre
 
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mimeType, base64.StdEncoding.EncodeToString(data))
 	return &GetScreenshotDataResponse{DataURL: dataURL}, nil
+}
+
+func (a *WailsAdapter) SetImporter(imp *launch.InstanceImporter) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.importer = imp
+}
+
+func (a *WailsAdapter) getImporter() *launch.InstanceImporter {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.importer == nil {
+		a.importer = launch.NewInstanceImporter(a.svc, a.instancesDir)
+	}
+	return a.importer
+}
+
+func (a *WailsAdapter) ScanOfficialMinecraft(req ScanOfficialMinecraftRequest) (*MinecraftImportSummaryDTO, error) {
+	summary, err := a.getImporter().ScanOfficialMinecraft(req.DirPath)
+	if err != nil {
+		return nil, err
+	}
+	return &MinecraftImportSummaryDTO{
+		Path:           summary.Path,
+		Versions:       summary.Versions,
+		DefaultVersion: summary.DefaultVersion,
+		WorldCount:     summary.WorldCount,
+		ResourcePacks:  summary.ResourcePacks,
+		Screenshots:    summary.Screenshots,
+		ModCount:       summary.ModCount,
+		HasOptions:     summary.HasOptions,
+		HasServers:     summary.HasServers,
+	}, nil
+}
+
+func (a *WailsAdapter) ImportOfficialMinecraft(req ImportOfficialMinecraftRequest) (*InstanceDTO, error) {
+	inst, err := a.getImporter().ImportOfficialMinecraft(context.Background(), launch.ImportOfficialRequest{
+		SourceDir:         req.SourceDir,
+		InstanceName:      req.InstanceName,
+		GameVersion:       req.GameVersion,
+		Loader:            req.Loader,
+		CopySaves:         req.CopySaves,
+		CopyResourcePacks: req.CopyResourcePacks,
+		CopyScreenshots:   req.CopyScreenshots,
+		CopyMods:          req.CopyMods,
+		CopyOptions:       req.CopyOptions,
+		CopyServers:       req.CopyServers,
+	})
+	if err != nil {
+		return nil, err
+	}
+	dto := toInstanceDTO(inst)
+	return &dto, nil
+}
+
+func (a *WailsAdapter) ScanPrismInstance(req ScanPrismInstanceRequest) (*PrismImportSummaryDTO, error) {
+	summary, err := a.getImporter().ScanPrismInstance(req.DirPath)
+	if err != nil {
+		return nil, err
+	}
+	return &PrismImportSummaryDTO{
+		Path:          summary.Path,
+		InstanceName:  summary.InstanceName,
+		GameVersion:   summary.GameVersion,
+		Loader:        summary.Loader,
+		LoaderVersion: summary.LoaderVersion,
+		WorldCount:    summary.WorldCount,
+		ResourcePacks: summary.ResourcePacks,
+		Screenshots:   summary.Screenshots,
+		ModCount:      summary.ModCount,
+		HasOptions:    summary.HasOptions,
+		HasServers:    summary.HasServers,
+	}, nil
+}
+
+func (a *WailsAdapter) ImportPrismInstance(req ImportPrismInstanceRequest) (*InstanceDTO, error) {
+	inst, err := a.getImporter().ImportPrismInstance(context.Background(), launch.ImportPrismRequest{
+		SourceDir:         req.SourceDir,
+		InstanceName:      req.InstanceName,
+		CopySaves:         req.CopySaves,
+		CopyResourcePacks: req.CopyResourcePacks,
+		CopyScreenshots:   req.CopyScreenshots,
+		CopyMods:          req.CopyMods,
+		CopyOptions:       req.CopyOptions,
+		CopyServers:       req.CopyServers,
+	})
+	if err != nil {
+		return nil, err
+	}
+	dto := toInstanceDTO(inst)
+	return &dto, nil
 }
 

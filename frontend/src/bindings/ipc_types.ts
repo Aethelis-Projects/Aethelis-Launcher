@@ -359,3 +359,61 @@ export interface SaveGameLogResponse {
   file_path: string;
   error?: string;
 }
+
+export interface MinecraftImportSummaryDTO {
+  path: string;
+  versions: string[];
+  default_version: string;
+  world_count: number;
+  resource_packs: number;
+  screenshots: number;
+  mod_count: number;
+  has_options: boolean;
+  has_servers: boolean;
+}
+
+export interface ScanOfficialMinecraftRequest {
+  dir_path?: string;
+}
+
+export interface ImportOfficialMinecraftRequest {
+  source_dir: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  copy_saves: boolean;
+  copy_resource_packs: boolean;
+  copy_screenshots: boolean;
+  copy_mods: boolean;
+  copy_options: boolean;
+  copy_servers: boolean;
+}
+
+export interface PrismImportSummaryDTO {
+  path: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+  world_count: number;
+  resource_packs: number;
+  screenshots: number;
+  mod_count: number;
+  has_options: boolean;
+  has_servers: boolean;
+}
+
+export interface ScanPrismInstanceRequest {
+  dir_path: string;
+}
+
+export interface ImportPrismInstanceRequest {
+  source_dir: string;
+  instance_name: string;
+  copy_saves: boolean;
+  copy_resource_packs: boolean;
+  copy_screenshots: boolean;
+  copy_mods: boolean;
+  copy_options: boolean;
+  copy_servers: boolean;
+}

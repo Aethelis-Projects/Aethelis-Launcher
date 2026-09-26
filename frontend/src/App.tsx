@@ -1,5 +1,5 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image } from "lucide-solid";
+import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image, FolderDown } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
@@ -7,6 +7,7 @@ import { InstanceSettingsModal, SettingsTab } from "./components/instance/Instan
 import { ScreenshotGalleryModal } from "./components/instance/ScreenshotGalleryModal";
 import { MrPackImportModal } from "./components/instance/MrPackImportModal";
 import { MrPackExportModal } from "./components/instance/MrPackExportModal";
+import { ImportInstanceModal } from "./components/instance/ImportInstanceModal";
 import { JavaManager } from "./components/java/JavaManager";
 import { AccountManager } from "./components/accounts/AccountManager";
 import { CrashModal } from "./components/console/CrashModal";
@@ -47,6 +48,7 @@ export const App: Component = () => {
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
   const [isImportModalOpen, setIsImportModalOpen] = createSignal(false);
+  const [isInstanceImportOpen, setIsInstanceImportOpen] = createSignal(false);
   const [isExportModalOpen, setIsExportModalOpen] = createSignal(false);
   const [isScreenshotsOpen, setIsScreenshotsOpen] = createSignal(false);
   const [isConsoleOpen, setIsConsoleOpen] = createSignal(false);
@@ -538,6 +540,17 @@ export const App: Component = () => {
               <Download class="w-3.5 h-3.5 text-nord-cyan" />
               <span>Импорт .mrpack</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => setIsInstanceImportOpen(true)}
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium transition-colors cursor-pointer"
+              title="Импортировать из .minecraft или Prism / MultiMC"
+              data-testid="import-instance-btn"
+            >
+              <FolderDown class="w-3.5 h-3.5 text-nord-cyan" />
+              <span>Импорт</span>
+            </button>
           </div>
 
           {/* System Status Indicator */}
@@ -929,6 +942,22 @@ export const App: Component = () => {
             setSelectedInstanceId(newInst.id);
           } catch (_err) {
             // non-fatal
+          }
+        }}
+      />
+
+      {/* 1-Click Instance Import Modal (v0.7.0 Feature D'4a) */}
+      <ImportInstanceModal
+        isOpen={isInstanceImportOpen()}
+        onClose={() => setIsInstanceImportOpen(false)}
+        onImported={async (newInst) => {
+          setIsInstanceImportOpen(false);
+          try {
+            const list = await launcherAPI.listInstances();
+            setInstances(list);
+            setSelectedInstanceId(newInst.id);
+          } catch (_err) {
+            void _err;
           }
         }}
       />

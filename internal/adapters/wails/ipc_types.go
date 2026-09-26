@@ -355,3 +355,61 @@ type SaveGameLogResponse struct {
 	FilePath string `json:"file_path"`
 	Error    string `json:"error,omitempty"`
 }
+
+type MinecraftImportSummaryDTO struct {
+	Path           string   `json:"path"`
+	Versions       []string `json:"versions"`
+	DefaultVersion string   `json:"default_version"`
+	WorldCount     int      `json:"world_count"`
+	ResourcePacks  int      `json:"resource_packs"`
+	Screenshots    int      `json:"screenshots"`
+	ModCount       int      `json:"mod_count"`
+	HasOptions     bool     `json:"has_options"`
+	HasServers     bool     `json:"has_servers"`
+}
+
+type ScanOfficialMinecraftRequest struct {
+	DirPath string `json:"dir_path,omitempty"`
+}
+
+type ImportOfficialMinecraftRequest struct {
+	SourceDir         string `json:"source_dir"`
+	InstanceName      string `json:"instance_name"`
+	GameVersion       string `json:"game_version"`
+	Loader            string `json:"loader"`
+	CopySaves         bool   `json:"copy_saves"`
+	CopyResourcePacks bool   `json:"copy_resource_packs"`
+	CopyScreenshots   bool   `json:"copy_screenshots"`
+	CopyMods          bool   `json:"copy_mods"`
+	CopyOptions       bool   `json:"copy_options"`
+	CopyServers       bool   `json:"copy_servers"`
+}
+
+type PrismImportSummaryDTO struct {
+	Path          string `json:"path"`
+	InstanceName  string `json:"instance_name"`
+	GameVersion   string `json:"game_version"`
+	Loader        string `json:"loader"`
+	LoaderVersion string `json:"loader_version,omitempty"`
+	WorldCount    int    `json:"world_count"`
+	ResourcePacks int    `json:"resource_packs"`
+	Screenshots   int    `json:"screenshots"`
+	ModCount      int    `json:"mod_count"`
+	HasOptions    bool   `json:"has_options"`
+	HasServers    bool   `json:"has_servers"`
+}
+
+type ScanPrismInstanceRequest struct {
+	DirPath string `json:"dir_path"`
+}
+
+type ImportPrismInstanceRequest struct {
+	SourceDir         string `json:"source_dir"`
+	InstanceName      string `json:"instance_name"`
+	CopySaves         bool   `json:"copy_saves"`
+	CopyResourcePacks bool   `json:"copy_resource_packs"`
+	CopyScreenshots   bool   `json:"copy_screenshots"`
+	CopyMods          bool   `json:"copy_mods"`
+	CopyOptions       bool   `json:"copy_options"`
+	CopyServers       bool   `json:"copy_servers"`
+}
