@@ -218,3 +218,49 @@ func TestModrinthClient_GetProject(t *testing.T) {
 		t.Fatalf("expected error on unknown mod 404, got nil")
 	}
 }
+
+func TestModrinthClient_SearchMods_ProjectTypes(t *testing.T) {
+	var capturedFacets string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedFacets = r.URL.Query().Get("facets")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"hits": []map[string]any{
+				{
+					"project_id":   "test-addon",
+					"slug":         "test-addon",
+					"title":        "Test Addon",
+					"project_type": "resourcepack",
+					"versions":     []string{"1.21.1"},
+				},
+			},
+			"total_hits": 1,
+			"offset":     0,
+			"limit":      20,
+		})
+	}))
+	defer server.Close()
+
+	client := modrinth.NewClient(server.URL, server.Client())
+
+	// 1. Search resourcepack via opts[2]
+	items, _, err := client.SearchMods(context.Background(), "bare bones", "1.21.1", "fabric", 20, 0, "downloads", "", "resourcepack")
+	if err != nil {
+		t.Fatalf("SearchMods resourcepack failed: %v", err)
+	}
+	if !strings.Contains(capturedFacets, `["project_type:resourcepack"]`) {
+		t.Fatalf("expected exact lowercase facet [\"project_type:resourcepack\"], got %s", capturedFacets)
+	}
+	if len(items) != 1 || items[0].ProjectType != content.ProjectTypeResourcePack {
+		t.Fatalf("expected item ProjectType resourcepack, got %v", items[0].ProjectType)
+	}
+
+	// 2. Search shader via category shorthand
+	items, _, err = client.SearchMods(context.Background(), "complementary", "1.21.1", "fabric", 20, 0, "downloads", "shader")
+	if err != nil {
+		t.Fatalf("SearchMods shader failed: %v", err)
+	}
+	if !strings.Contains(capturedFacets, `["project_type:shader"]`) {
+		t.Fatalf("expected exact lowercase facet [\"project_type:shader\"], got %s", capturedFacets)
+	}
+}

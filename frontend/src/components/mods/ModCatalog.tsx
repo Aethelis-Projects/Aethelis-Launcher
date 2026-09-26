@@ -1,7 +1,7 @@
 import { Component, createSignal, createResource, For, Show, onMount, onCleanup } from "solid-js";
 import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle, ChevronDown, AlertTriangle, FileText } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
-import type { ModItemDTO, ModSource, ModFileDTO, ModInstallProgressDTO } from "../../bindings/ipc_types";
+import type { ModItemDTO, ModSource, ModFileDTO, ModInstallProgressDTO, ProjectType } from "../../bindings/ipc_types";
 import { renderMarkdownLite } from "../common/MarkdownLite";
 
 interface ModCatalogProps {
@@ -10,6 +10,25 @@ interface ModCatalogProps {
   loader: string;
   onModInstalled?: (mod: ModItemDTO) => void;
 }
+
+interface CatalogFiltersState {
+  project_type?: ProjectType;
+  category?: string;
+  sort?: string;
+  search_query?: string;
+}
+
+const loadSavedFilters = (): CatalogFiltersState => {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem("nord_catalog_filters") : null;
+    if (raw) return JSON.parse(raw);
+  } catch (_e) {
+    void _e;
+  }
+  return {};
+};
+
+const savedFilters = loadSavedFilters();
 
 const CATEGORIES = [
   { id: "", label: "Все категории" },
@@ -36,10 +55,16 @@ const CURSEFORGE_SORTS = [
 ];
 
 export const ModCatalog: Component<ModCatalogProps> = (props) => {
-  const [query, setQuery] = createSignal("");
+  const initialProjectType: ProjectType =
+    savedFilters.project_type === "resourcepack" || savedFilters.project_type === "shader"
+      ? savedFilters.project_type
+      : "mod";
+
+  const [projectType, setProjectType] = createSignal<ProjectType>(initialProjectType);
+  const [query, setQuery] = createSignal(savedFilters.search_query || "");
   const [source, setSource] = createSignal<ModSource>("modrinth");
-  const [selectedCategory, setSelectedCategory] = createSignal("");
-  const [selectedSort, setSelectedSort] = createSignal("relevance");
+  const [selectedCategory, setSelectedCategory] = createSignal(savedFilters.category || "");
+  const [selectedSort, setSelectedSort] = createSignal(savedFilters.sort || "relevance");
   const [installingId, setInstallingId] = createSignal<string | null>(null);
   const [installProgress, setInstallProgress] = createSignal<ModInstallProgressDTO | null>(null);
   const [installedIds, setInstalledIds] = createSignal<Set<string>>(new Set());
@@ -70,10 +95,54 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
 
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let countdownTimer: ReturnType<typeof setInterval> | null = null;
+  let querySaveTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  const saveFilters = (delta?: Partial<CatalogFiltersState>) => {
+    try {
+      if (typeof localStorage === "undefined") return;
+      const state: CatalogFiltersState = {
+        project_type: delta?.project_type ?? projectType(),
+        category: delta?.category ?? selectedCategory(),
+        sort: delta?.sort ?? selectedSort(),
+        search_query: delta?.search_query ?? query(),
+      };
+      localStorage.setItem("nord_catalog_filters", JSON.stringify(state));
+    } catch (_e) {
+      void _e;
+    }
+  };
+
+  const handleProjectTypeChange = (type: ProjectType) => {
+    if (projectType() === type) return;
+    setProjectType(type);
+    if (type !== "mod") {
+      switchSource("modrinth");
+    }
+    saveFilters({ project_type: type });
+  };
+
+  const handleCategoryChange = (catId: string) => {
+    setSelectedCategory(catId);
+    saveFilters({ category: catId });
+  };
+
+  const handleSortChange = (sortId: string) => {
+    setSelectedSort(sortId);
+    saveFilters({ sort: sortId });
+  };
+
+  const handleQueryInput = (val: string) => {
+    setQuery(val);
+    if (querySaveTimeout) clearTimeout(querySaveTimeout);
+    querySaveTimeout = setTimeout(() => {
+      saveFilters({ search_query: val });
+    }, 300);
+  };
 
   const sortOptions = () => (source() === "curseforge" ? CURSEFORGE_SORTS : MODRINTH_SORTS);
 
   const switchSource = (newSource: ModSource) => {
+    if (projectType() !== "mod" && newSource !== "modrinth") return;
     if (source() === newSource) return;
     if (countdownTimer) {
       clearInterval(countdownTimer);
@@ -99,6 +168,10 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
       clearInterval(countdownTimer);
       countdownTimer = null;
     }
+    if (querySaveTimeout) {
+      clearTimeout(querySaveTimeout);
+      querySaveTimeout = null;
+    }
   });
 
   onMount(async () => {
@@ -112,6 +185,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
 
   const [mods, { refetch }] = createResource(
     () => ({
+      pt: projectType(),
       q: query(),
       s: source(),
       gv: props.gameVersion,
@@ -119,7 +193,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
       sort: selectedSort(),
       category: selectedCategory(),
     }),
-    async ({ q, s, gv, l, sort, category }) => {
+    async ({ pt, q, s, gv, l, sort, category }) => {
       setSearchError("");
       setSearchReason("");
       if (countdownTimer) {
@@ -130,6 +204,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
 
       try {
         const res = await launcherAPI.searchMods({
+          project_type: pt,
           query: q,
           source: s,
           game_version: gv,
@@ -225,8 +300,8 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
     }, 1000);
 
     try {
-      if (versionId) {
-        await launcherAPI.installMod(props.activeInstanceId, mod, versionId);
+      if (versionId || projectType() !== "mod") {
+        await launcherAPI.installMod(props.activeInstanceId, mod, versionId, projectType());
       } else {
         await launcherAPI.installMod(props.activeInstanceId, mod);
       }
@@ -255,7 +330,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
 
   return (
     <div class="space-y-4">
-      {/* Header & Source switcher */}
+      {/* Header, Type Switcher & Source switcher */}
       <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-zinc-800 pb-4">
         <div>
           <h2 class="text-sm font-semibold uppercase tracking-wider text-zinc-100 flex items-center gap-2">
@@ -263,39 +338,94 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
             Каталог модификаций
           </h2>
           <p class="text-xs text-zinc-400 mt-0.5">
-            Поиск проверенных модификаций для {props.loader} {props.gameVersion}
+            Поиск {projectType() === "resourcepack" ? "ресурспаков" : projectType() === "shader" ? "шейдеров" : "проверенных модификаций"} для {props.loader} {props.gameVersion}
             <Show when={totalCount() > 0}>
               <span class="ml-1 text-zinc-500 font-mono">({totalCount()})</span>
             </Show>
           </p>
         </div>
 
-        {/* Source Toggle Tabs */}
-        <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5 text-xs font-mono">
-          <button
-            type="button"
-            onClick={() => switchSource("modrinth")}
-            class={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 ${
-              source() === "modrinth"
-                ? "bg-[#00D4B2] text-zinc-950 font-medium"
-                : "text-zinc-400 hover:text-zinc-100"
-            }`}
+        <div class="flex flex-wrap items-center gap-2">
+          {/* Project Type Segment Tabs */}
+          <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5 text-xs font-mono" data-testid="project-type-tabs">
+            <button
+              type="button"
+              onClick={() => handleProjectTypeChange("mod")}
+              class={`px-3 py-1 rounded transition-colors cursor-pointer ${
+                projectType() === "mod"
+                  ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+              data-testid="project-type-mod"
+            >
+              Моды
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProjectTypeChange("resourcepack")}
+              class={`px-3 py-1 rounded transition-colors cursor-pointer ${
+                projectType() === "resourcepack"
+                  ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+              data-testid="project-type-resourcepack"
+            >
+              Ресурспаки
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProjectTypeChange("shader")}
+              class={`px-3 py-1 rounded transition-colors cursor-pointer ${
+                projectType() === "shader"
+                  ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+              data-testid="project-type-shader"
+            >
+              Шейдеры
+            </button>
+          </div>
+
+          {/* Source Toggle Tabs or Only Modrinth Badge */}
+          <Show
+            when={projectType() === "mod"}
+            fallback={
+              <div
+                class="flex items-center gap-1.5 px-3 py-1 rounded bg-zinc-900 border border-zinc-800 text-xs font-mono text-[#00D4B2]"
+                data-testid="only-modrinth-badge"
+              >
+                <Globe class="w-3 h-3" />
+                <span>Только Modrinth</span>
+              </div>
+            }
           >
-            <Globe class="w-3 h-3" />
-            Modrinth
-          </button>
-          <button
-            type="button"
-            onClick={() => switchSource("curseforge")}
-            class={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 ${
-              source() === "curseforge"
-                ? "bg-[#00D4B2] text-zinc-950 font-medium"
-                : "text-zinc-400 hover:text-zinc-100"
-            }`}
-          >
-            <Globe class="w-3 h-3" />
-            CurseForge
-          </button>
+            <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded p-0.5 text-xs font-mono">
+              <button
+                type="button"
+                onClick={() => switchSource("modrinth")}
+                class={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  source() === "modrinth"
+                    ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                    : "text-zinc-400 hover:text-zinc-100"
+                }`}
+              >
+                <Globe class="w-3 h-3" />
+                Modrinth
+              </button>
+              <button
+                type="button"
+                onClick={() => switchSource("curseforge")}
+                class={`px-3 py-1 rounded transition-colors flex items-center gap-1.5 cursor-pointer ${
+                  source() === "curseforge"
+                    ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                    : "text-zinc-400 hover:text-zinc-100"
+                }`}
+              >
+                <Globe class="w-3 h-3" />
+                CurseForge
+              </button>
+            </div>
+          </Show>
         </div>
       </div>
 
@@ -305,7 +435,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           {(cat) => (
             <button
               type="button"
-              onClick={() => setSelectedCategory(cat.id)}
+              onClick={() => handleCategoryChange(cat.id)}
               class={`px-2.5 py-1 rounded-full border text-xs whitespace-nowrap transition-colors cursor-pointer ${
                 selectedCategory() === cat.id
                   ? "bg-[#00D4B2]/15 text-[#00D4B2] border-[#00D4B2]/40 font-medium"
@@ -326,7 +456,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           <input
             type="text"
             value={query()}
-            onInput={(e) => setQuery(e.currentTarget.value)}
+            onInput={(e) => handleQueryInput(e.currentTarget.value)}
             placeholder={`Поиск в ${source() === "modrinth" ? "Modrinth" : "CurseForge"}...`}
             class="w-full bg-zinc-900 border border-zinc-800 focus:border-[#00D4B2] rounded px-9 py-2 text-xs text-zinc-100 placeholder-zinc-500 outline-none transition-colors"
           />
@@ -334,7 +464,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
 
         <select
           value={selectedSort()}
-          onChange={(e) => setSelectedSort(e.currentTarget.value)}
+          onChange={(e) => handleSortChange(e.currentTarget.value)}
           class="bg-zinc-900 border border-zinc-800 focus:border-[#00D4B2] rounded px-3 py-2 text-xs text-zinc-300 outline-none cursor-pointer"
           data-testid="mods-sort-select"
         >

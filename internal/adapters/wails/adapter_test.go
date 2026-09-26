@@ -2730,5 +2730,102 @@ func TestWailsAdapter_GameLogsAndStreaming(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_AddonsResourcePacksAndShaders(t *testing.T) {
+	// Setup mock download server
+	fileContent := "dummy-zip-bytes"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write([]byte(fileContent))
+	}))
+	defer server.Close()
+
+	u, _ := url.Parse(server.URL)
+	allowedHost := u.Host
+
+	tmpDir, err := os.MkdirTemp("", "nord-addons-test-*")
+	if err != nil {
+		t.Fatalf("temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	instancesDir := filepath.Join(tmpDir, "instances")
+	instID := "addons-instance"
+	fileSys := fs.NewOSFileSystem()
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetFileSystem(fileSys, instancesDir)
+	adapter.SetAllowedHosts([]string{allowedHost, u.Hostname()})
+
+	// 1. Install resource pack directly by simulating downloaded file in resourcepacks folder
+	rpDir := filepath.Join(instancesDir, instID, "resourcepacks")
+	if err := os.MkdirAll(rpDir, 0755); err != nil {
+		t.Fatalf("mkdir rpDir: %v", err)
+	}
+	rpFile := filepath.Join(rpDir, "BareBones.zip")
+	if err := os.WriteFile(rpFile, []byte("rp-content"), 0644); err != nil {
+		t.Fatalf("write rpFile: %v", err)
+	}
+
+	// 2. Install shader pack directly by simulating downloaded file in shaderpacks folder
+	shaderDir := filepath.Join(instancesDir, instID, "shaderpacks")
+	if err := os.MkdirAll(shaderDir, 0755); err != nil {
+		t.Fatalf("mkdir shaderDir: %v", err)
+	}
+	shaderFile := filepath.Join(shaderDir, "Complementary.zip")
+	if err := os.WriteFile(shaderFile, []byte("shader-content"), 0644); err != nil {
+		t.Fatalf("write shaderFile: %v", err)
+	}
+
+	// 3. List installed content
+	items, err := adapter.ListInstalledMods(instID)
+	if err != nil {
+		t.Fatalf("ListInstalledMods failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d: %+v", len(items), items)
+	}
+
+	var foundRP, foundShader bool
+	for _, it := range items {
+		if it.FileName == "BareBones.zip" && it.Type == "resourcepack" {
+			foundRP = true
+		}
+		if it.FileName == "Complementary.zip" && it.Type == "shader" {
+			foundShader = true
+		}
+	}
+	if !foundRP {
+		t.Errorf("expected resourcepack BareBones.zip with type 'resourcepack'")
+	}
+	if !foundShader {
+		t.Errorf("expected shader Complementary.zip with type 'shader'")
+	}
+
+	// 4. Toggle resourcepack
+	err = adapter.ToggleMod(wails.ToggleModRequest{
+		InstanceID: instID,
+		FileName:   "BareBones.zip",
+		Enable:     false,
+	})
+	if err != nil {
+		t.Fatalf("ToggleMod disable failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(rpDir, "BareBones.zip.disabled")); err != nil {
+		t.Errorf("expected disabled file in rpDir: %v", err)
+	}
+
+	// 5. Delete shader pack
+	err = adapter.DeleteMod(wails.DeleteModRequest{
+		InstanceID: instID,
+		FileName:   "Complementary.zip",
+	})
+	if err != nil {
+		t.Fatalf("DeleteMod shader failed: %v", err)
+	}
+	if _, err := os.Stat(shaderFile); !os.IsNotExist(err) {
+		t.Errorf("expected Complementary.zip to be deleted from shaderDir")
+	}
+}
+
+
 
 
