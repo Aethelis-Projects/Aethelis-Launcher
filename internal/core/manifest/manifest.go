@@ -36,6 +36,7 @@ type ModRecord struct {
 	Source      string    `json:"source"`
 	VersionID   string    `json:"version_id,omitempty"`
 	ReleaseType string    `json:"release_type,omitempty"`
+	Type        string    `json:"type,omitempty"`
 	InstalledAt time.Time `json:"installed_at"`
 }
 
@@ -52,16 +53,17 @@ func NewManifest() *InstallsManifest {
 	}
 }
 
-// CleanModKey produces a normalized canonical lookup key by stripping .disabled and .jar extensions.
+// CleanModKey produces a normalized canonical lookup key by stripping .disabled, .jar, and .zip extensions.
 func CleanModKey(fileName string) string {
 	name := strings.TrimSuffix(fileName, ".disabled")
 	name = strings.TrimSuffix(name, ".jar")
+	name = strings.TrimSuffix(name, ".zip")
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
 // CanonicalModBase extracts a normalized mod identity base from a filename by stripping version segments.
 func CanonicalModBase(fileName string) string {
-	clean := strings.TrimSuffix(strings.TrimSuffix(fileName, ".disabled"), ".jar")
+	clean := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(fileName, ".disabled"), ".jar"), ".zip")
 	clean = strings.TrimSpace(clean)
 	if match := modBaseRegex.FindStringSubmatch(clean); len(match) > 1 {
 		return strings.ToLower(match[1])

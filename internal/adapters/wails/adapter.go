@@ -722,9 +722,10 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 				Name:       it.Name,
 				Author:     it.Author,
 				Summary:    it.Summary,
-				IconURL:    it.IconURL,
-				Downloads:  it.Downloads,
-				Categories: it.Categories,
+				IconURL:     it.IconURL,
+				Downloads:   it.Downloads,
+				Categories:  it.Categories,
+				ProjectType: "mod",
 			})
 		}
 		return &SearchModsResultDTO{
@@ -737,7 +738,7 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 	if a.modrinth == nil {
 		return nil, fmt.Errorf("modrinth client not initialized")
 	}
-	items, total, err := a.modrinth.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category)
+	items, total, err := a.modrinth.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category, req.ProjectType)
 	if err != nil {
 		var netErr net.Error
 		if errors.As(err, &netErr) || strings.Contains(strings.ToLower(err.Error()), "dial") || strings.Contains(strings.ToLower(err.Error()), "connect") || strings.Contains(strings.ToLower(err.Error()), "no such host") {
@@ -752,16 +753,24 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 	}
 	dtos := make([]ModItemDTO, 0, len(items))
 	for _, it := range items {
+		pt := string(it.ProjectType)
+		if pt == "" {
+			pt = req.ProjectType
+		}
+		if pt == "" {
+			pt = "mod"
+		}
 		dtos = append(dtos, ModItemDTO{
-			ID:         it.ID,
-			Slug:       it.Slug,
-			Source:     string(it.Source),
-			Name:       it.Name,
-			Author:     it.Author,
-			Summary:    it.Summary,
-			IconURL:    it.IconURL,
-			Downloads:  it.Downloads,
-			Categories: it.Categories,
+			ID:          it.ID,
+			Slug:        it.Slug,
+			Source:      string(it.Source),
+			Name:        it.Name,
+			Author:      it.Author,
+			Summary:     it.Summary,
+			IconURL:     it.IconURL,
+			Downloads:   it.Downloads,
+			Categories:  it.Categories,
+			ProjectType: pt,
 		})
 	}
 	return &SearchModsResultDTO{
@@ -952,10 +961,7 @@ func (a *WailsAdapter) GetModInstallStatus(instanceID string) (*ModInstallProgre
 func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, error) {
 	modsDir := a.getModsDir(instanceID)
 	entries, err := os.ReadDir(modsDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []InstalledModDTO{}, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read mods dir: %w", err)
 	}
 
@@ -995,6 +1001,7 @@ func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, 
 				Enabled:   enabled,
 				SizeBytes: size,
 				Source:    "local",
+				Type:      "mod",
 			}
 
 			if rec := m.GetRecord(cleanKey); rec != nil {
@@ -1007,10 +1014,100 @@ func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, 
 					item.Source = rec.Source
 				}
 				item.ReleaseType = rec.ReleaseType
+				if rec.Type != "" {
+					item.Type = rec.Type
+				}
 			}
 
 			res = append(res, item)
 			activeFiles = append(activeFiles, name)
+		}
+	}
+
+	// Also scan resourcepacks/
+	rpDir := a.getContentDir(instanceID, "resourcepack")
+	if rpEntries, err := os.ReadDir(rpDir); err == nil {
+		rpManifest, _ := manifest.LoadManifest(rpDir)
+		for _, e := range rpEntries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasSuffix(name, ".zip") || strings.HasSuffix(name, ".zip.disabled") ||
+				strings.HasSuffix(name, ".jar") || strings.HasSuffix(name, ".jar.disabled") {
+				info, err := e.Info()
+				size := int64(0)
+				if err == nil {
+					size = info.Size()
+				}
+				enabled := !strings.HasSuffix(name, ".disabled")
+				cleanDisplayName := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(name, ".disabled"), ".jar"), ".zip")
+				item := InstalledModDTO{
+					FileName:  name,
+					Name:      cleanDisplayName,
+					Enabled:   enabled,
+					SizeBytes: size,
+					Source:    "local",
+					Type:      "resourcepack",
+				}
+				if rpManifest != nil {
+					cleanKey := manifest.CleanModKey(name)
+					if rec := rpManifest.GetRecord(cleanKey); rec != nil {
+						if rec.ModName != "" {
+							item.Name = rec.ModName
+						}
+						item.ModID = rec.ModID
+						item.Version = rec.VersionID
+						if rec.Source != "" {
+							item.Source = rec.Source
+						}
+					}
+				}
+				res = append(res, item)
+			}
+		}
+	}
+
+	// Also scan shaderpacks/
+	shaderDir := a.getContentDir(instanceID, "shader")
+	if shaderEntries, err := os.ReadDir(shaderDir); err == nil {
+		shaderManifest, _ := manifest.LoadManifest(shaderDir)
+		for _, e := range shaderEntries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasSuffix(name, ".zip") || strings.HasSuffix(name, ".zip.disabled") {
+				info, err := e.Info()
+				size := int64(0)
+				if err == nil {
+					size = info.Size()
+				}
+				enabled := !strings.HasSuffix(name, ".disabled")
+				cleanDisplayName := strings.TrimSuffix(strings.TrimSuffix(name, ".disabled"), ".zip")
+				item := InstalledModDTO{
+					FileName:  name,
+					Name:      cleanDisplayName,
+					Enabled:   enabled,
+					SizeBytes: size,
+					Source:    "local",
+					Type:      "shader",
+				}
+				if shaderManifest != nil {
+					cleanKey := manifest.CleanModKey(name)
+					if rec := shaderManifest.GetRecord(cleanKey); rec != nil {
+						if rec.ModName != "" {
+							item.Name = rec.ModName
+						}
+						item.ModID = rec.ModID
+						item.Version = rec.VersionID
+						if rec.Source != "" {
+							item.Source = rec.Source
+						}
+					}
+				}
+				res = append(res, item)
+			}
 		}
 	}
 
@@ -1037,8 +1134,7 @@ func (a *WailsAdapter) ListInstalledMods(instanceID string) ([]InstalledModDTO, 
 }
 
 func (a *WailsAdapter) ToggleMod(req ToggleModRequest) error {
-	modsDir := a.getModsDir(req.InstanceID)
-	oldPath := filepath.Join(modsDir, req.FileName)
+	contentDir, oldPath := a.findContentFile(req.InstanceID, req.FileName)
 
 	var newName string
 	if req.Enable && strings.HasSuffix(req.FileName, ".disabled") {
@@ -1049,19 +1145,19 @@ func (a *WailsAdapter) ToggleMod(req ToggleModRequest) error {
 		return nil // already in desired state
 	}
 
-	newPath := filepath.Join(modsDir, newName)
+	newPath := filepath.Join(contentDir, newName)
 	if err := os.Rename(oldPath, newPath); err != nil {
 		return err
 	}
 
 	// Update manifest
-	m, err := manifest.LoadManifest(modsDir)
+	m, err := manifest.LoadManifest(contentDir)
 	if err == nil {
 		cleanKey := manifest.CleanModKey(req.FileName)
 		if rec := m.GetRecord(cleanKey); rec != nil {
 			rec.FileName = newName
 			m.AddOrUpdate(rec)
-			_ = m.Save(modsDir) // errcheck:ok best effort manifest save on toggle
+			_ = m.Save(contentDir) // errcheck:ok best effort manifest save on toggle
 		}
 	}
 
@@ -1077,24 +1173,27 @@ func (a *WailsAdapter) ToggleMod(req ToggleModRequest) error {
 }
 
 func (a *WailsAdapter) DeleteMod(req DeleteModRequest) error {
-	modsDir := a.getModsDir(req.InstanceID)
+	contentDir, targetPath := a.findContentFile(req.InstanceID, req.FileName)
 	cleanKey := manifest.CleanModKey(req.FileName)
-	rawClean := strings.TrimSuffix(strings.TrimSuffix(req.FileName, ".disabled"), ".jar")
+	rawClean := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(req.FileName, ".disabled"), ".jar"), ".zip")
 
-	jarPath := filepath.Join(modsDir, rawClean+".jar")
-	disabledPath := filepath.Join(modsDir, rawClean+".jar.disabled")
-	targetPath := filepath.Join(modsDir, req.FileName)
+	jarPath := filepath.Join(contentDir, rawClean+".jar")
+	disabledPath := filepath.Join(contentDir, rawClean+".jar.disabled")
+	zipPath := filepath.Join(contentDir, rawClean+".zip")
+	zipDisabledPath := filepath.Join(contentDir, rawClean+".zip.disabled")
 
-	// A2: Remove both candidate filenames (X.jar and X.jar.disabled) as well as explicit target
-	_ = os.Remove(jarPath)      // errcheck:ok best effort candidate removal
-	_ = os.Remove(disabledPath) // errcheck:ok best effort candidate removal
-	_ = os.Remove(targetPath)   // errcheck:ok best effort target removal
+	// Remove candidate filenames (.jar, .jar.disabled, .zip, .zip.disabled) as well as explicit target
+	_ = os.Remove(jarPath)          // errcheck:ok best effort candidate removal
+	_ = os.Remove(disabledPath)     // errcheck:ok best effort candidate removal
+	_ = os.Remove(zipPath)          // errcheck:ok best effort candidate removal
+	_ = os.Remove(zipDisabledPath)  // errcheck:ok best effort candidate removal
+	_ = os.Remove(targetPath)       // errcheck:ok best effort target removal
 
 	// Remove from manifest
-	m, err := manifest.LoadManifest(modsDir)
+	m, err := manifest.LoadManifest(contentDir)
 	if err == nil {
 		m.Remove(cleanKey)
-		_ = m.Save(modsDir) // errcheck:ok best effort manifest save on delete
+		_ = m.Save(contentDir) // errcheck:ok best effort manifest save on delete
 	}
 
 	// Remove from SQLite
@@ -1135,6 +1234,35 @@ func (a *WailsAdapter) getModsDir(instanceID string) string {
 		return filepath.Join(a.instancesDir, instanceID, "mods")
 	}
 	return filepath.Join("instances", instanceID, "mods")
+}
+
+func (a *WailsAdapter) getContentDir(instanceID string, projectType string) string {
+	folder := "mods"
+	switch strings.ToLower(projectType) {
+	case "resourcepack", "resourcepacks":
+		folder = "resourcepacks"
+	case "shader", "shaders", "shaderpacks":
+		folder = "shaderpacks"
+	}
+	if a.instancesDir != "" {
+		return filepath.Join(a.instancesDir, instanceID, folder)
+	}
+	return filepath.Join("instances", instanceID, folder)
+}
+
+func (a *WailsAdapter) findContentFile(instanceID string, fileName string) (dir string, fullPath string) {
+	for _, folder := range []string{"mods", "resourcepacks", "shaderpacks"} {
+		var p string
+		if a.instancesDir != "" {
+			p = filepath.Join(a.instancesDir, instanceID, folder, fileName)
+		} else {
+			p = filepath.Join("instances", instanceID, folder, fileName)
+		}
+		if _, err := os.Stat(p); err == nil {
+			return filepath.Dir(p), p
+		}
+	}
+	return a.getModsDir(instanceID), filepath.Join(a.getModsDir(instanceID), fileName)
 }
 
 func (a *WailsAdapter) CheckForUpdates() (*UpdateInfoDTO, error) {
@@ -1459,9 +1587,9 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		return nil, installErr
 	}
 
-	modsDir := a.getModsDir(req.InstanceID)
-	if err := os.MkdirAll(modsDir, 0755); err != nil {
-		installErr = fmt.Errorf("create mods directory: %w", err)
+	targetDir := a.getContentDir(req.InstanceID, req.ProjectType)
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		installErr = fmt.Errorf("create content directory: %w", err)
 		return nil, installErr
 	}
 
@@ -1470,17 +1598,25 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		fileName = filepath.Base(fileToDownload.URL)
 	}
 	if fileName == "" || fileName == "." || fileName == "/" {
-		fileName = fmt.Sprintf("%s.jar", req.ModID)
+		ext := ".jar"
+		if req.ProjectType == "resourcepack" || req.ProjectType == "shader" {
+			ext = ".zip"
+		}
+		fileName = fmt.Sprintf("%s%s", req.ModID, ext)
 	}
-	if !strings.HasSuffix(fileName, ".jar") {
-		fileName = fileName + ".jar"
+	if !strings.HasSuffix(fileName, ".jar") && !strings.HasSuffix(fileName, ".zip") {
+		if req.ProjectType == "resourcepack" || req.ProjectType == "shader" {
+			fileName = fileName + ".zip"
+		} else {
+			fileName = fileName + ".jar"
+		}
 	}
 
-	destPath := filepath.Join(modsDir, fileName)
+	destPath := filepath.Join(targetDir, fileName)
 
 	// Idempotency: if mod file already exists, return success
 	if _, err := os.Stat(destPath); err == nil {
-		a.recordInstalledMod(req.InstanceID, req.ModID, fileName, source, fileToDownload, req.VersionID)
+		a.recordInstalledMod(req.InstanceID, req.ModID, fileName, source, fileToDownload, req.VersionID, req.ProjectType)
 		a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
 			TaskID:     fmt.Sprintf("install-%s", req.ModID),
 			InstanceID: req.InstanceID,
@@ -1505,7 +1641,7 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		Percentage: 50,
 	})
 
-	tempFile, err := os.CreateTemp(modsDir, ".tmp-*.jar")
+	tempFile, err := os.CreateTemp(targetDir, ".tmp-*")
 	if err != nil {
 		installErr = fmt.Errorf("create temporary download file: %w", err)
 		return nil, installErr
@@ -1615,7 +1751,7 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 		return nil, installErr
 	}
 
-	a.recordInstalledMod(req.InstanceID, req.ModID, fileName, source, fileToDownload, req.VersionID)
+	a.recordInstalledMod(req.InstanceID, req.ModID, fileName, source, fileToDownload, req.VersionID, req.ProjectType)
 
 	a.setInstallProgress(req.InstanceID, &ModInstallProgressDTO{
 		TaskID:     fmt.Sprintf("install-%s", req.ModID),
@@ -2072,8 +2208,12 @@ func (a *WailsAdapter) UpdateMod(req UpdateModRequest) (*InstallModResponse, err
 	}, nil
 }
 
-func (a *WailsAdapter) recordInstalledMod(instanceID, modID, fileName, source string, fileToDownload *content.ModFile, reqVersionID string) {
-	modsDir := a.getModsDir(instanceID)
+func (a *WailsAdapter) recordInstalledMod(instanceID, modID, fileName, source string, fileToDownload *content.ModFile, reqVersionID string, projectType ...string) {
+	pType := "mod"
+	if len(projectType) > 0 && projectType[0] != "" {
+		pType = projectType[0]
+	}
+	contentDir := a.getContentDir(instanceID, pType)
 	versionStr := reqVersionID
 	releaseTypeStr := ""
 	modTitle := modID
@@ -2087,7 +2227,7 @@ func (a *WailsAdapter) recordInstalledMod(instanceID, modID, fileName, source st
 		}
 	}
 
-	m, err := manifest.LoadManifest(modsDir)
+	m, err := manifest.LoadManifest(contentDir)
 	if err == nil {
 		m.AddOrUpdate(&manifest.ModRecord{
 			ModID:       modID,
@@ -2096,9 +2236,10 @@ func (a *WailsAdapter) recordInstalledMod(instanceID, modID, fileName, source st
 			Source:      source,
 			VersionID:   versionStr,
 			ReleaseType: releaseTypeStr,
+			Type:        pType,
 			InstalledAt: time.Now(),
 		})
-		_ = m.Save(modsDir) // errcheck:ok best effort manifest save on install
+		_ = m.Save(contentDir) // errcheck:ok best effort manifest save on install
 	}
 
 	a.mu.RLock()

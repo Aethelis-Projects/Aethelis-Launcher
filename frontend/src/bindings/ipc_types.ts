@@ -4,6 +4,8 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
+export type ProjectType = "mod" | "resourcepack" | "shader";
+
 
 export interface InstanceDTO {
   id: string;
@@ -79,6 +81,7 @@ export interface ModItemDTO {
   icon_url?: string;
   downloads: number;
   categories: string[];
+  project_type?: ProjectType;
 }
 
 export interface InstalledModDTO {
@@ -90,6 +93,7 @@ export interface InstalledModDTO {
   release_type?: string;
   enabled: boolean;
   size_bytes: number;
+  type?: ProjectType | string;
 }
 
 export interface CrashReportDTO {
@@ -110,6 +114,7 @@ export interface SearchModsRequest {
   offset: number;
   sort?: string;
   category?: string;
+  project_type?: ProjectType;
 }
 
 export interface SearchModsResultDTO {
@@ -219,6 +224,7 @@ export interface InstallModRequest {
   game_version: string;
   loader: string;
   version_id?: string;
+  project_type?: ProjectType;
 }
 
 export interface UpdateModRequest {

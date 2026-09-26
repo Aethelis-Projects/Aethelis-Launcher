@@ -76,15 +76,16 @@ type AccountDTO struct {
 }
 
 type ModItemDTO struct {
-	ID         string   ` + "`" + `json:"id"` + "`" + `
-	Slug       string   ` + "`" + `json:"slug"` + "`" + `
-	Source     string   ` + "`" + `json:"source"` + "`" + `
-	Name       string   ` + "`" + `json:"name"` + "`" + `
-	Author     string   ` + "`" + `json:"author"` + "`" + `
-	Summary    string   ` + "`" + `json:"summary"` + "`" + `
-	IconURL    string   ` + "`" + `json:"icon_url,omitempty"` + "`" + `
-	Downloads  int64    ` + "`" + `json:"downloads"` + "`" + `
-	Categories []string ` + "`" + `json:"categories"` + "`" + `
+	ID          string   ` + "`" + `json:"id"` + "`" + `
+	Slug        string   ` + "`" + `json:"slug"` + "`" + `
+	Source      string   ` + "`" + `json:"source"` + "`" + `
+	Name        string   ` + "`" + `json:"name"` + "`" + `
+	Author      string   ` + "`" + `json:"author"` + "`" + `
+	Summary     string   ` + "`" + `json:"summary"` + "`" + `
+	IconURL     string   ` + "`" + `json:"icon_url,omitempty"` + "`" + `
+	Downloads   int64    ` + "`" + `json:"downloads"` + "`" + `
+	Categories  []string ` + "`" + `json:"categories"` + "`" + `
+	ProjectType string   ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
 type InstalledModDTO struct {
@@ -96,6 +97,7 @@ type InstalledModDTO struct {
 	ReleaseType string ` + "`" + `json:"release_type,omitempty"` + "`" + `
 	Enabled     bool   ` + "`" + `json:"enabled"` + "`" + `
 	SizeBytes   int64  ` + "`" + `json:"size_bytes"` + "`" + `
+	Type        string ` + "`" + `json:"type,omitempty"` + "`" + `
 }
 
 type CrashReportDTO struct {
@@ -116,6 +118,7 @@ type SearchModsRequest struct {
 	Offset      int    ` + "`" + `json:"offset"` + "`" + `
 	Sort        string ` + "`" + `json:"sort,omitempty"` + "`" + `
 	Category    string ` + "`" + `json:"category,omitempty"` + "`" + `
+	ProjectType string ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
 type SearchModsResultDTO struct {
@@ -225,6 +228,7 @@ type InstallModRequest struct {
 	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
 	Loader      string ` + "`" + `json:"loader"` + "`" + `
 	VersionID   string ` + "`" + `json:"version_id,omitempty"` + "`" + `
+	ProjectType string ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
 type UpdateModRequest struct {
@@ -368,6 +372,8 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
+export type ProjectType = "mod" | "resourcepack" | "shader";
+
 
 export interface InstanceDTO {
   id: string;
@@ -443,6 +449,7 @@ export interface ModItemDTO {
   icon_url?: string;
   downloads: number;
   categories: string[];
+  project_type?: ProjectType;
 }
 
 export interface InstalledModDTO {
@@ -454,6 +461,7 @@ export interface InstalledModDTO {
   release_type?: string;
   enabled: boolean;
   size_bytes: number;
+  type?: ProjectType | string;
 }
 
 export interface CrashReportDTO {
@@ -474,6 +482,7 @@ export interface SearchModsRequest {
   offset: number;
   sort?: string;
   category?: string;
+  project_type?: ProjectType;
 }
 
 export interface SearchModsResultDTO {
@@ -583,6 +592,7 @@ export interface InstallModRequest {
   game_version: string;
   loader: string;
   version_id?: string;
+  project_type?: ProjectType;
 }
 
 export interface UpdateModRequest {

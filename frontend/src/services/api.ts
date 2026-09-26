@@ -6,6 +6,7 @@ import type {
   LaunchResponse,
   AccountDTO,
   ModSource,
+  ProjectType,
   ModItemDTO,
   InstalledModDTO,
   CrashReportDTO,
@@ -280,6 +281,7 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://cdn.modrinth.com/sodium.png",
     downloads: 18500000,
     categories: ["fabric", "optimization"],
+    project_type: "mod",
   },
   {
     id: "YL57xq9U",
@@ -291,6 +293,7 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://cdn.modrinth.com/iris.png",
     downloads: 12400000,
     categories: ["fabric", "shaders"],
+    project_type: "mod",
   },
   {
     id: "P7dR8mSH",
@@ -302,6 +305,7 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://cdn.modrinth.com/fabric-api.png",
     downloads: 45000000,
     categories: ["fabric", "library"],
+    project_type: "mod",
   },
   {
     id: "238222",
@@ -313,6 +317,31 @@ const mockModCatalog: ModItemDTO[] = [
     icon_url: "https://edge.forgecdn.net/jei.png",
     downloads: 150000000,
     categories: ["fabric", "utility"],
+    project_type: "mod",
+  },
+  {
+    id: "faithful32",
+    slug: "faithful-32x",
+    source: "modrinth",
+    name: "Faithful 32x",
+    author: "FaithfulTeam",
+    summary: "Classic high-resolution texture pack maintaining original Minecraft aesthetic",
+    icon_url: "https://cdn.modrinth.com/faithful.png",
+    downloads: 3200000,
+    categories: ["textures"],
+    project_type: "resourcepack",
+  },
+  {
+    id: "complementary",
+    slug: "complementary-reimagined",
+    source: "modrinth",
+    name: "Complementary Reimagined",
+    author: "EminGT",
+    summary: "Exceptional shaderpack with tailored performance and stunning lighting",
+    icon_url: "https://cdn.modrinth.com/complementary.png",
+    downloads: 8900000,
+    categories: ["shaders"],
+    project_type: "shader",
   },
 ];
 
@@ -583,7 +612,9 @@ export const launcherAPI = {
       () => {
         const q = req.query.toLowerCase().trim();
         const cat = req.category ? req.category.toLowerCase().trim() : "";
+        const targetType = req.project_type || "mod";
         const filtered = mockModCatalog.filter((m) => {
+          if ((m.project_type || "mod") !== targetType) return false;
           if (req.source && m.source !== req.source) return false;
           if (cat && !m.categories.some((c) => c.toLowerCase().includes(cat))) return false;
           if (!q) return true;
@@ -682,18 +713,21 @@ export const launcherAPI = {
 
   async installMod(
     instanceId: string,
-    mod: ModItemDTO | { id: string; source: ModSource; name?: string; slug?: string },
-    versionId?: string
+    mod: ModItemDTO | { id: string; source: ModSource; name?: string; slug?: string; project_type?: ProjectType | string },
+    versionId?: string,
+    overrideProjectType?: ProjectType
   ): Promise<InstallModResponse> {
     const modSlug = ("slug" in mod && mod.slug) ? mod.slug : mod.id;
     const modName = ("name" in mod && mod.name) ? mod.name : mod.id;
+    const projectType = overrideProjectType || (("project_type" in mod && mod.project_type) ? (mod.project_type as ProjectType) : undefined);
     const res = await invokeWails<InstallModResponse>(
       "InstallMod",
       () => {
         if (!mockInstalledMods[instanceId]) {
           mockInstalledMods[instanceId] = [];
         }
-        const fileName = `${modSlug}-1.0.0.jar`;
+        const ext = (projectType === "resourcepack" || projectType === "shader") ? "zip" : "jar";
+        const fileName = `${modSlug}-1.0.0.${ext}`;
         mockInstalledMods[instanceId].push({
           file_name: fileName,
           mod_id: modSlug,
@@ -701,18 +735,22 @@ export const launcherAPI = {
           version: versionId || "1.0.0",
           enabled: true,
           size_bytes: 1572864,
+          type: projectType,
         });
         return {
           success: true,
           file_name: fileName,
-          message: `Mod ${fileName} installed successfully`,
+          message: `Content ${fileName} installed successfully`,
         };
       },
       {
         instance_id: instanceId,
         mod_id: mod.id,
+        mod_slug: modSlug,
+        mod_name: modName,
         source: mod.source,
         version_id: versionId,
+        project_type: projectType,
       } as InstallModRequest
     );
     if (!res.success) {

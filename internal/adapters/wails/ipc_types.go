@@ -68,15 +68,16 @@ type AccountDTO struct {
 }
 
 type ModItemDTO struct {
-	ID         string   `json:"id"`
-	Slug       string   `json:"slug"`
-	Source     string   `json:"source"`
-	Name       string   `json:"name"`
-	Author     string   `json:"author"`
-	Summary    string   `json:"summary"`
-	IconURL    string   `json:"icon_url,omitempty"`
-	Downloads  int64    `json:"downloads"`
-	Categories []string `json:"categories"`
+	ID          string   `json:"id"`
+	Slug        string   `json:"slug"`
+	Source      string   `json:"source"`
+	Name        string   `json:"name"`
+	Author      string   `json:"author"`
+	Summary     string   `json:"summary"`
+	IconURL     string   `json:"icon_url,omitempty"`
+	Downloads   int64    `json:"downloads"`
+	Categories  []string `json:"categories"`
+	ProjectType string   `json:"project_type,omitempty"`
 }
 
 type InstalledModDTO struct {
@@ -88,6 +89,7 @@ type InstalledModDTO struct {
 	ReleaseType string `json:"release_type,omitempty"`
 	Enabled     bool   `json:"enabled"`
 	SizeBytes   int64  `json:"size_bytes"`
+	Type        string `json:"type,omitempty"`
 }
 
 type CrashReportDTO struct {
@@ -108,6 +110,7 @@ type SearchModsRequest struct {
 	Offset      int    `json:"offset"`
 	Sort        string `json:"sort,omitempty"`
 	Category    string `json:"category,omitempty"`
+	ProjectType string `json:"project_type,omitempty"`
 }
 
 type SearchModsResultDTO struct {
@@ -217,6 +220,7 @@ type InstallModRequest struct {
 	GameVersion string `json:"game_version"`
 	Loader      string `json:"loader"`
 	VersionID   string `json:"version_id,omitempty"`
+	ProjectType string `json:"project_type,omitempty"`
 }
 
 type UpdateModRequest struct {

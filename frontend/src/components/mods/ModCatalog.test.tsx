@@ -7,6 +7,7 @@ import type { ModItemDTO } from "../../bindings/ipc_types";
 describe("ModCatalog Component", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    localStorage.clear();
   });
 
   it("renders catalog header and source toggle buttons", async () => {
@@ -441,5 +442,149 @@ describe("ModCatalog Component", () => {
     // Click toggle again to collapse
     fireEvent.click(toggleChangelogBtn);
     expect(screen.queryByTestId("changelog-viewer-file-sodium-1")).toBeNull();
+  });
+
+  it("renders project type tabs and locks to modrinth on resourcepack selection (Feature A)", async () => {
+    const searchSpy = vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [
+        {
+          id: "faithful-32",
+          slug: "faithful",
+          source: "modrinth",
+          name: "Faithful 32x",
+          author: "FaithfulTeam",
+          summary: "Faithful resource pack",
+          downloads: 100000,
+          categories: ["textures"],
+          project_type: "resourcepack",
+        },
+      ],
+      total_count: 1,
+    });
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    expect(screen.getByTestId("project-type-mod")).toBeTruthy();
+    expect(screen.getByTestId("project-type-resourcepack")).toBeTruthy();
+    expect(screen.getByTestId("project-type-shader")).toBeTruthy();
+
+    const rpTab = screen.getByTestId("project-type-resourcepack");
+    fireEvent.click(rpTab);
+
+    expect(await screen.findByTestId("only-modrinth-badge")).toBeTruthy();
+    expect(screen.queryByText("CurseForge")).toBeNull();
+
+    expect(searchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_type: "resourcepack",
+        source: "modrinth",
+      })
+    );
+  });
+
+  it("switches to shader tab and searches shaders on modrinth (Feature A)", async () => {
+    const searchSpy = vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [
+        {
+          id: "bsl-shaders",
+          slug: "bsl",
+          source: "modrinth",
+          name: "BSL Shaders",
+          author: "CaptTatsu",
+          summary: "Bright, colorful shaders",
+          downloads: 200000,
+          categories: ["shaders"],
+          project_type: "shader",
+        },
+      ],
+      total_count: 1,
+    });
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    const shaderTab = screen.getByTestId("project-type-shader");
+    fireEvent.click(shaderTab);
+
+    expect(await screen.findByTestId("only-modrinth-badge")).toBeTruthy();
+    expect(searchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_type: "shader",
+        source: "modrinth",
+      })
+    );
+  });
+
+  it("installs resourcepack with project_type parameter (Feature A)", async () => {
+    const mockRP: ModItemDTO = {
+      id: "rp-test",
+      slug: "test-pack",
+      source: "modrinth",
+      name: "Test Pack",
+      author: "PackAuthor",
+      summary: "Test resource pack",
+      downloads: 500,
+      categories: ["textures"],
+      project_type: "resourcepack",
+    };
+
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [mockRP],
+      total_count: 1,
+    });
+
+    const installSpy = vi.spyOn(launcherAPI, "installMod").mockResolvedValue({
+      success: true,
+      file_name: "test-pack-1.0.0.zip",
+      message: "installed",
+    });
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    fireEvent.click(screen.getByTestId("project-type-resourcepack"));
+    await screen.findByText("Test Pack");
+
+    const installBtn = screen.getByText("Установить");
+    fireEvent.click(installBtn);
+
+    await screen.findByText("Установлен");
+    expect(installSpy).toHaveBeenCalledWith("test-inst", mockRP, undefined, "resourcepack");
+  });
+
+  it("persists catalog filter changes to localStorage (UX2)", async () => {
+    vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [],
+      total_count: 0,
+    });
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    fireEvent.click(screen.getByTestId("project-type-shader"));
+
+    const saved = JSON.parse(localStorage.getItem("nord_catalog_filters") || "{}");
+    expect(saved.project_type).toBe("shader");
   });
 });
