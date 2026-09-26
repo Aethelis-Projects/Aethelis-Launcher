@@ -2,6 +2,7 @@ package launch_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -274,3 +275,160 @@ iconKey = default
 		t.Errorf("expected mod copied to %s: %v", modFile, err)
 	}
 }
+
+func TestDefaultOfficialMinecraftPath(t *testing.T) {
+	p := launch.DefaultOfficialMinecraftPath()
+	if p == "" {
+		t.Errorf("expected non-empty default official minecraft path")
+	}
+}
+
+func TestInstanceImporter_ScanOfficialMinecraft_ErrorsAndEdgeCases(t *testing.T) {
+	_, importer, _ := setupImporterTest(t)
+
+	// Nonexistent dir
+	_, err := importer.ScanOfficialMinecraft(filepath.Join(t.TempDir(), "nonexistent"))
+	if err == nil {
+		t.Fatalf("expected error for nonexistent dir")
+	}
+
+	// Empty dir
+	emptyDir := t.TempDir()
+	summary, err := importer.ScanOfficialMinecraft(emptyDir)
+	if err != nil {
+		t.Fatalf("unexpected error on empty dir: %v", err)
+	}
+	if summary.WorldCount != 0 || summary.ResourcePacks != 0 || summary.Screenshots != 0 || summary.ModCount != 0 {
+		t.Errorf("expected 0 counts on empty dir, got %+v", summary)
+	}
+}
+
+func TestInstanceImporter_ImportOfficialMinecraft_AllComponentsAndErrors(t *testing.T) {
+	_, importer, instancesDir := setupImporterTest(t)
+
+	// 1. Error on nonexistent dir
+	_, err := importer.ImportOfficialMinecraft(context.Background(), launch.ImportOfficialRequest{
+		SourceDir: filepath.Join(t.TempDir(), "nonexistent"),
+	})
+	if err == nil {
+		t.Fatalf("expected error for nonexistent source dir")
+	}
+
+	// 2. All components copy
+	srcDir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(srcDir, "saves", "World1"), 0o755)
+	_ = os.WriteFile(filepath.Join(srcDir, "saves", "World1", "level.dat"), []byte("dat"), 0o644)
+	_ = os.MkdirAll(filepath.Join(srcDir, "resourcepacks", "Pack1"), 0o755)
+	_ = os.WriteFile(filepath.Join(srcDir, "resourcepacks", "Pack1.zip"), []byte("zip"), 0o644)
+	_ = os.MkdirAll(filepath.Join(srcDir, "screenshots"), 0o755)
+	_ = os.WriteFile(filepath.Join(srcDir, "screenshots", "shot.png"), []byte("png"), 0o644)
+	_ = os.MkdirAll(filepath.Join(srcDir, "mods"), 0o755)
+	_ = os.WriteFile(filepath.Join(srcDir, "mods", "test.jar"), []byte("jar"), 0o644)
+	_ = os.WriteFile(filepath.Join(srcDir, "options.txt"), []byte("opt"), 0o644)
+	_ = os.WriteFile(filepath.Join(srcDir, "servers.dat"), []byte("srv"), 0o644)
+
+	inst, err := importer.ImportOfficialMinecraft(context.Background(), launch.ImportOfficialRequest{
+		SourceDir:         srcDir,
+		CopySaves:         true,
+		CopyResourcePacks: true,
+		CopyScreenshots:   true,
+		CopyMods:          true,
+		CopyOptions:       true,
+		CopyServers:       true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected import error: %v", err)
+	}
+
+	destDir := filepath.Join(instancesDir, inst.ID)
+	if _, err := os.Stat(filepath.Join(destDir, "saves", "World1", "level.dat")); err != nil {
+		t.Errorf("expected level.dat copied")
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "resourcepacks", "Pack1.zip")); err != nil {
+		t.Errorf("expected Pack1.zip copied")
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "screenshots", "shot.png")); err != nil {
+		t.Errorf("expected shot.png copied")
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "mods", "test.jar")); err != nil {
+		t.Errorf("expected test.jar copied")
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "options.txt")); err != nil {
+		t.Errorf("expected options.txt copied")
+	}
+	if _, err := os.Stat(filepath.Join(destDir, "servers.dat")); err != nil {
+		t.Errorf("expected servers.dat copied")
+	}
+}
+
+func TestInstanceImporter_Prism_LoadersAndSubdirVariants(t *testing.T) {
+	_, importer, instancesDir := setupImporterTest(t)
+
+	// 1. Error on nonexistent dir
+	_, err := importer.ScanPrismInstance(filepath.Join(t.TempDir(), "nonexistent"))
+	if err == nil {
+		t.Fatalf("expected error on nonexistent prism dir")
+	}
+	_, err = importer.ImportPrismInstance(context.Background(), launch.ImportPrismRequest{
+		SourceDir: filepath.Join(t.TempDir(), "nonexistent"),
+	})
+	if err == nil {
+		t.Fatalf("expected error on nonexistent prism dir import")
+	}
+
+	// 2. Test Quilt and NeoForge and Forge components
+	loaders := []struct {
+		uid      string
+		expected string
+	}{
+		{"org.quiltmc.quilt-loader", "quilt"},
+		{"net.neoforged.neoforge", "neoforge"},
+		{"net.minecraftforge", "forge"},
+	}
+
+	for _, l := range loaders {
+		pDir := t.TempDir()
+		_ = os.WriteFile(filepath.Join(pDir, "instance.cfg"), []byte("name = Test\nIntendedVersion = 1.20.4\n"), 0o644)
+		pack := fmt.Sprintf(`{"components":[{"uid":"net.minecraft","version":"1.20.4"},{"uid":"%s","version":"1.0.0"}]}`, l.uid)
+		_ = os.WriteFile(filepath.Join(pDir, "mmc-pack.json"), []byte(pack), 0o644)
+
+		// Test using "minecraft" folder instead of ".minecraft"
+		mcDir := filepath.Join(pDir, "minecraft")
+		_ = os.MkdirAll(filepath.Join(mcDir, "resourcepacks"), 0o755)
+		_ = os.WriteFile(filepath.Join(mcDir, "resourcepacks", "pack.zip"), []byte("zip"), 0o644)
+		_ = os.MkdirAll(filepath.Join(mcDir, "screenshots"), 0o755)
+		_ = os.WriteFile(filepath.Join(mcDir, "screenshots", "screen.png"), []byte("png"), 0o644)
+		_ = os.WriteFile(filepath.Join(mcDir, "options.txt"), []byte("opt"), 0o644)
+		_ = os.WriteFile(filepath.Join(mcDir, "servers.dat"), []byte("srv"), 0o644)
+
+		summary, err := importer.ScanPrismInstance(pDir)
+		if err != nil {
+			t.Fatalf("failed scan: %v", err)
+		}
+		if summary.Loader != l.expected {
+			t.Errorf("expected loader %s, got %s", l.expected, summary.Loader)
+		}
+		if summary.ResourcePacks != 1 {
+			t.Errorf("expected 1 resource pack in minecraft/ dir, got %d", summary.ResourcePacks)
+		}
+
+		inst, err := importer.ImportPrismInstance(context.Background(), launch.ImportPrismRequest{
+			SourceDir:         pDir,
+			CopyResourcePacks: true,
+			CopyScreenshots:   true,
+			CopyOptions:       true,
+			CopyServers:       true,
+		})
+		if err != nil {
+			t.Fatalf("failed import: %v", err)
+		}
+		dest := filepath.Join(instancesDir, inst.ID)
+		if _, err := os.Stat(filepath.Join(dest, "options.txt")); err != nil {
+			t.Errorf("expected options.txt in dest")
+		}
+		if _, err := os.Stat(filepath.Join(dest, "servers.dat")); err != nil {
+			t.Errorf("expected servers.dat in dest")
+		}
+	}
+}
+
