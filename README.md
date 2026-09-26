@@ -161,7 +161,18 @@ Every push and pull request must pass the CI Quality Gate:
 - **v0.4.0** — Contextual mod management, deterministic version selection, sidecar manifest & reconcile.
 - **v0.5.0** — CurseForge resilience, SQLite content cache, startup update modal & honest 7-state badge.
 - **v0.6.0** — Modpack Round-trip (.mrpack), Mod Version Histories & Changelogs, Temurin update detection & runtime hygiene.
+- **v0.7.0** — Content around instance: Modrinth resource packs & shaders, screenshots gallery with clipboard integration, real-time log streaming console, 1-click import (.minecraft & Prism/MultiMC), instance groups & favorites, avatar presets, portable Windows zip.
 - **Later** — beta update channel, opt-in telemetry, macOS.
+
+---
+
+## Why Not: Security, Legal Integrity & Official APIs
+
+Nord Launcher intentionally omits third-party authentication services (such as Ely.by or custom authlib-injector servers) and unlicensed account bypasses. This architectural and product decision is guided by three principles:
+
+1. **Session & Credential Security**: Third-party authlib-injector endpoints intercept Minecraft authentication handshakes and session tokens. Pointing authentication traffic to unverified external servers introduces risk of session hijacking, man-in-the-middle exploits, and credential theft. Nord Launcher enforces direct, official Microsoft OAuth2 with PKCE, storing refresh tokens exclusively in the native OS Credential Manager (Windows Credential Manager / Linux Secret Service) with zero telemetry and zero custodial servers.
+2. **Legal Integrity & EULA Compliance**: Nord Launcher complies with the Minecraft End User License Agreement (EULA), Terms of Service, and Microsoft Commercial Usage Guidelines. Maintaining strict separation from unofficial authentication bypasses ensures sustainable distribution, clear copyright compliance, and trust from mod authors and platform maintainers.
+3. **Data Integrity & Non-Custodial Storage**: All configuration, instance states, and credentials remain 100% local on the user's machine. Nord Launcher never operates intermediary proxies or user databases.
 
 ---
 
