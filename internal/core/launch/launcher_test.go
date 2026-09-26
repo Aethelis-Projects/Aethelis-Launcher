@@ -884,3 +884,38 @@ func TestInstanceService_GetLogTail(t *testing.T) {
 		t.Fatalf("expected empty slice, got %+v", tail)
 	}
 }
+
+func TestInstanceService_SetInstanceFavorite_And_Group(t *testing.T) {
+	now := time.Now()
+	clk := clock.NewMockClock(now)
+	fileSys := fs.NewOSFileSystem()
+	mockProc := &mockProcessManager{handle: &mockProcessHandle{pid: 9999, exitCode: 0}}
+	kr := keyring.NewMemoryKeyring()
+
+	svc := launch.NewInstanceService(nil, fileSys, mockProc, kr, clk)
+	inst, err := svc.CreateInstance("Favorites Test", "1.21.1", domain.LoaderFabric)
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+
+	updated, err := svc.SetInstanceFavorite(context.Background(), inst.ID, true)
+	if err != nil {
+		t.Fatalf("SetInstanceFavorite failed: %v", err)
+	}
+	if !updated.IsFavorite {
+		t.Errorf("expected IsFavorite to be true")
+	}
+
+	updated, err = svc.SetInstanceGroup(context.Background(), inst.ID, "Speedrun")
+	if err != nil {
+		t.Fatalf("SetInstanceGroup failed: %v", err)
+	}
+	if updated.Group != "Speedrun" {
+		t.Errorf("expected Group to be Speedrun, got %s", updated.Group)
+	}
+
+	sup := svc.GetSupervisor(inst.ID)
+	if sup != nil {
+		t.Errorf("expected nil supervisor for idle instance")
+	}
+}
