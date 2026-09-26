@@ -2826,6 +2826,119 @@ func TestWailsAdapter_AddonsResourcePacksAndShaders(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_ImportOfficialAndPrism(t *testing.T) {
+	tempDir := t.TempDir()
+	db, err := storage.OpenDatabase(filepath.Join(tempDir, "adapter_test.db"))
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	instRepo := storage.NewInstanceRepository(db)
+	fileSys := fs.NewOSFileSystem()
+	procMgr := process.NewProcessManager()
+	kr := keyring.NewMemoryKeyring()
+	clk := clock.NewMockClock(time.Now())
+	svc := launch.NewInstanceService(instRepo, fileSys, procMgr, kr, clk)
+
+	instancesDir := filepath.Join(tempDir, "instances")
+	if err := os.MkdirAll(instancesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetFileSystem(fileSys, instancesDir)
+
+	// 1. Setup mock official .minecraft folder
+	mcDir := filepath.Join(tempDir, "official_minecraft")
+	if err := os.MkdirAll(filepath.Join(mcDir, "saves", "TestWorld"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcDir, "saves", "TestWorld", "level.dat"), []byte("level"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(mcDir, "options.txt"), []byte("fov:80.0"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(mcDir, "versions", "1.21.1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 2. Scan official
+	summary, err := adapter.ScanOfficialMinecraft(wails.ScanOfficialMinecraftRequest{DirPath: mcDir})
+	if err != nil {
+		t.Fatalf("ScanOfficialMinecraft error: %v", err)
+	}
+	if summary.WorldCount != 1 || !summary.HasOptions || summary.DefaultVersion != "1.21.1" {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+
+	// 3. Import official
+	instDTO, err := adapter.ImportOfficialMinecraft(wails.ImportOfficialMinecraftRequest{
+		SourceDir:    mcDir,
+		InstanceName: "Imported Official",
+		GameVersion:  "1.21.1",
+		Loader:       "vanilla",
+		CopySaves:    true,
+		CopyOptions:  true,
+	})
+	if err != nil {
+		t.Fatalf("ImportOfficialMinecraft error: %v", err)
+	}
+	if instDTO.Name != "Imported Official" {
+		t.Errorf("expected name 'Imported Official', got %s", instDTO.Name)
+	}
+	destLevel := filepath.Join(instancesDir, instDTO.ID, "saves", "TestWorld", "level.dat")
+	if _, err := os.Stat(destLevel); err != nil {
+		t.Errorf("expected level.dat at %s: %v", destLevel, err)
+	}
+
+	// 4. Setup mock Prism instance
+	prismDir := filepath.Join(tempDir, "prism_instance")
+	if err := os.MkdirAll(prismDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prismDir, "instance.cfg"), []byte("name = Speedrun Pack\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	packJSON := `{"components":[{"uid":"net.minecraft","version":"1.20.1"},{"uid":"net.fabricmc.fabric-loader","version":"0.16.5"}]}`
+	if err := os.WriteFile(filepath.Join(prismDir, "mmc-pack.json"), []byte(packJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(prismDir, ".minecraft", "mods"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(prismDir, ".minecraft", "mods", "sodium.jar"), []byte("jar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 5. Scan Prism
+	prismSummary, err := adapter.ScanPrismInstance(wails.ScanPrismInstanceRequest{DirPath: prismDir})
+	if err != nil {
+		t.Fatalf("ScanPrismInstance error: %v", err)
+	}
+	if prismSummary.InstanceName != "Speedrun Pack" || prismSummary.Loader != "fabric" || prismSummary.ModCount != 1 {
+		t.Fatalf("unexpected prism summary: %+v", prismSummary)
+	}
+
+	// 6. Import Prism
+	prismDTO, err := adapter.ImportPrismInstance(wails.ImportPrismInstanceRequest{
+		SourceDir:    prismDir,
+		InstanceName: "Imported Speedrun",
+		CopyMods:     true,
+	})
+	if err != nil {
+		t.Fatalf("ImportPrismInstance error: %v", err)
+	}
+	if prismDTO.Loader != "fabric" {
+		t.Errorf("expected loader fabric, got %s", prismDTO.Loader)
+	}
+	destMod := filepath.Join(instancesDir, prismDTO.ID, "mods", "sodium.jar")
+	if _, err := os.Stat(destMod); err != nil {
+		t.Errorf("expected mod at %s: %v", destMod, err)
+	}
+}
+
 
 
 

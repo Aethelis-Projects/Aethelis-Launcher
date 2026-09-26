@@ -40,6 +40,12 @@ import type {
   GetScreenshotDataResponse,
   SaveGameLogRequest,
   SaveGameLogResponse,
+  MinecraftImportSummaryDTO,
+  ScanOfficialMinecraftRequest,
+  ImportOfficialMinecraftRequest,
+  PrismImportSummaryDTO,
+  ScanPrismInstanceRequest,
+  ImportPrismInstanceRequest,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -90,6 +96,10 @@ interface WailsAdapterBindings {
   CheckJavaRuntimeUpdates?: () => Promise<JavaRuntimeUpdateDTO[]>;
   UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
   OpenPath?: (path: string) => Promise<void>;
+  ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
+  ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
+  ScanPrismInstance?: (req: ScanPrismInstanceRequest) => Promise<PrismImportSummaryDTO>;
+  ImportPrismInstance?: (req: ImportPrismInstanceRequest) => Promise<InstanceDTO>;
   [key: string]: unknown;
 }
 
@@ -1062,6 +1072,95 @@ export const launcherAPI = {
       () => ({
         data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
       }),
+      req
+    );
+  },
+
+  async scanOfficialMinecraft(req: ScanOfficialMinecraftRequest = {}): Promise<MinecraftImportSummaryDTO> {
+    return invokeWails<MinecraftImportSummaryDTO>(
+      "ScanOfficialMinecraft",
+      () => ({
+        path: req.dir_path || "C:\\Users\\Home\\AppData\\Roaming\\.minecraft",
+        versions: ["1.21.1", "1.20.4", "1.19.2"],
+        default_version: "1.21.1",
+        world_count: 3,
+        resource_packs: 2,
+        screenshots: 5,
+        mod_count: 0,
+        has_options: true,
+        has_servers: true,
+      }),
+      req
+    );
+  },
+
+  async importOfficialMinecraft(req: ImportOfficialMinecraftRequest): Promise<InstanceDTO> {
+    return invokeWails<InstanceDTO>(
+      "ImportOfficialMinecraft",
+      () => {
+        const newInst: InstanceDTO = {
+          id: `imported-mc-${Date.now()}`,
+          name: req.instance_name || "Official Minecraft",
+          game_version: req.game_version || "1.21.1",
+          loader: (req.loader as LoaderType) || "vanilla",
+          min_ram_mb: 2048,
+          max_ram_mb: 4096,
+          jvm_args: [],
+          skip_java_check: false,
+          group: "",
+          is_favorite: false,
+          state: "idle",
+          total_play_seconds: 0,
+        };
+        mockInstances.push(newInst);
+        return newInst;
+      },
+      req
+    );
+  },
+
+  async scanPrismInstance(req: ScanPrismInstanceRequest): Promise<PrismImportSummaryDTO> {
+    return invokeWails<PrismImportSummaryDTO>(
+      "ScanPrismInstance",
+      () => ({
+        path: req.dir_path,
+        instance_name: "Prism Modpack",
+        game_version: "1.20.1",
+        loader: "fabric",
+        loader_version: "0.15.11",
+        world_count: 1,
+        resource_packs: 1,
+        screenshots: 2,
+        mod_count: 14,
+        has_options: true,
+        has_servers: true,
+      }),
+      req
+    );
+  },
+
+  async importPrismInstance(req: ImportPrismInstanceRequest): Promise<InstanceDTO> {
+    return invokeWails<InstanceDTO>(
+      "ImportPrismInstance",
+      () => {
+        const newInst: InstanceDTO = {
+          id: `imported-prism-${Date.now()}`,
+          name: req.instance_name || "Imported Prism",
+          game_version: "1.20.1",
+          loader: "fabric",
+          loader_version: "0.15.11",
+          min_ram_mb: 2048,
+          max_ram_mb: 4096,
+          jvm_args: [],
+          skip_java_check: false,
+          group: "",
+          is_favorite: false,
+          state: "idle",
+          total_play_seconds: 0,
+        };
+        mockInstances.push(newInst);
+        return newInst;
+      },
       req
     );
   },
