@@ -594,7 +594,7 @@ describe("ModCatalog Component", () => {
       slug: "incendium",
       name: "Incendium",
       author: "Starmute",
-      description: "Nether overhaul",
+      summary: "Nether overhaul",
       downloads: 500000,
       icon_url: "",
       source: "modrinth",
