@@ -4,7 +4,7 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
-export type ProjectType = "mod" | "resourcepack" | "shader";
+export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack";
 
 
 export interface InstanceDTO {
@@ -416,4 +416,42 @@ export interface ImportPrismInstanceRequest {
   copy_mods: boolean;
   copy_options: boolean;
   copy_servers: boolean;
+}
+
+export interface WorldDTO {
+  name: string;
+  display_name: string;
+  last_played: number;
+  datapack_count: number;
+}
+
+export interface DatapackDTO {
+  file_name: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  size_bytes: number;
+  world_name: string;
+}
+
+export interface InstallDatapackRequest {
+  instance_id: string;
+  world_names: string[];
+  mod_id: string;
+  version_id?: string;
+  file_name?: string;
+  download_url?: string;
+}
+
+export interface ToggleDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
+  enabled: boolean;
+}
+
+export interface DeleteDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
 }

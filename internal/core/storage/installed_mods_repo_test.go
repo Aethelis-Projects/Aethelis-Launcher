@@ -111,4 +111,26 @@ func TestInstalledModsRepository_CRUDAndSync(t *testing.T) {
 	if len(listEmpty) != 0 {
 		t.Fatalf("expected 0 mods after empty sync, got %d", len(listEmpty))
 	}
+
+	// 6. Test NewInstalledModsRepositoryFromDB, NewContentCacheRepositoryFromDB and Delete
+	repoFromDB := storage.NewInstalledModsRepositoryFromDB(db.DB())
+	if repoFromDB == nil {
+		t.Fatalf("expected non-nil repoFromDB")
+	}
+	cacheFromDB := storage.NewContentCacheRepositoryFromDB(db.DB())
+	if cacheFromDB == nil {
+		t.Fatalf("expected non-nil cacheFromDB")
+	}
+	if err := repoFromDB.Save(ctx, rec1); err != nil {
+		t.Fatalf("failed to save mod via repoFromDB: %v", err)
+	}
+	if err := repoFromDB.Delete(ctx, instID, rec1.FileName); err != nil {
+		t.Fatalf("failed to delete mod via repoFromDB: %v", err)
+	}
+	// Nil repo safety check
+	var nilRepo *storage.InstalledModsRepository
+	if err := nilRepo.Delete(ctx, instID, "any"); err != nil {
+		t.Fatalf("expected nil error on nilRepo.Delete: %v", err)
+	}
 }
+

@@ -46,6 +46,11 @@ import type {
   PrismImportSummaryDTO,
   ScanPrismInstanceRequest,
   ImportPrismInstanceRequest,
+  WorldDTO,
+  DatapackDTO,
+  InstallDatapackRequest,
+  ToggleDatapackRequest,
+  DeleteDatapackRequest,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -101,6 +106,11 @@ interface WailsAdapterBindings {
   ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
   ScanPrismInstance?: (req: ScanPrismInstanceRequest) => Promise<PrismImportSummaryDTO>;
   ImportPrismInstance?: (req: ImportPrismInstanceRequest) => Promise<InstanceDTO>;
+  ListInstanceWorlds?: (instanceId: string) => Promise<WorldDTO[]>;
+  ListWorldDatapacks?: (instanceId: string, worldName: string) => Promise<DatapackDTO[]>;
+  SetDatapackEnabled?: (req: ToggleDatapackRequest) => Promise<void>;
+  DeleteDatapack?: (req: DeleteDatapackRequest) => Promise<void>;
+  InstallDatapack?: (req: InstallDatapackRequest) => Promise<void>;
   [key: string]: unknown;
 }
 
@@ -248,6 +258,29 @@ let mockScreenshots: Record<string, ScreenshotDTO[]> = {
       path: "instances/nord-opti-1/screenshots/2026-09-20_15.30.00.png",
       size: 1048576,
       created_at: new Date().toISOString(),
+    },
+  ],
+};
+
+let mockWorlds: Record<string, WorldDTO[]> = {
+  "nord-opti-1": [
+    {
+      name: "SurvivalWorld",
+      display_name: "SurvivalWorld",
+      last_played: Date.now(),
+      datapack_count: 1,
+    },
+  ],
+};
+
+let mockWorldDatapacks: Record<string, DatapackDTO[]> = {
+  "nord-opti-1:SurvivalWorld": [
+    {
+      file_name: "armor-statues.zip",
+      name: "armor-statues",
+      enabled: true,
+      size_bytes: 524288,
+      world_name: "SurvivalWorld",
     },
   ],
 };
@@ -737,7 +770,7 @@ export const launcherAPI = {
         if (!mockInstalledMods[instanceId]) {
           mockInstalledMods[instanceId] = [];
         }
-        const ext = (projectType === "resourcepack" || projectType === "shader") ? "zip" : "jar";
+        const ext = (projectType === "resourcepack" || projectType === "shader" || projectType === "datapack") ? "zip" : "jar";
         const fileName = `${modSlug}-1.0.0.${ext}`;
         mockInstalledMods[instanceId].push({
           file_name: fileName,
@@ -1189,5 +1222,91 @@ export const launcherAPI = {
 
   setMockJavaRuntimeUpdates(updates: JavaRuntimeUpdateDTO[]): void {
     mockJavaRuntimeUpdates = [...updates];
+  },
+
+  async listInstanceWorlds(instanceId: string): Promise<WorldDTO[]> {
+    return invokeWails<WorldDTO[]>(
+      "ListInstanceWorlds",
+      () => [...(mockWorlds[instanceId] || [])],
+      instanceId
+    );
+  },
+
+  async listWorldDatapacks(instanceId: string, worldName: string): Promise<DatapackDTO[]> {
+    const key = `${instanceId}:${worldName}`;
+    return invokeWails<DatapackDTO[]>(
+      "ListWorldDatapacks",
+      () => [...(mockWorldDatapacks[key] || [])],
+      instanceId,
+      worldName
+    );
+  },
+
+  async setDatapackEnabled(req: ToggleDatapackRequest): Promise<void> {
+    return invokeWails<void>(
+      "SetDatapackEnabled",
+      () => {
+        const key = `${req.instance_id}:${req.world_name}`;
+        if (mockWorldDatapacks[key]) {
+          const item = mockWorldDatapacks[key].find((dp) => dp.file_name === req.file_name);
+          if (item) {
+            item.enabled = req.enabled;
+          }
+        }
+      },
+      req
+    );
+  },
+
+  async deleteDatapack(req: DeleteDatapackRequest): Promise<void> {
+    return invokeWails<void>(
+      "DeleteDatapack",
+      () => {
+        const key = `${req.instance_id}:${req.world_name}`;
+        if (mockWorldDatapacks[key]) {
+          mockWorldDatapacks[key] = mockWorldDatapacks[key].filter(
+            (dp) => dp.file_name !== req.file_name
+          );
+        }
+      },
+      req
+    );
+  },
+
+  async installDatapack(req: InstallDatapackRequest): Promise<void> {
+    return invokeWails<void>(
+      "InstallDatapack",
+      () => {
+        const fileName = req.file_name || `${req.mod_id}.zip`;
+        const packName = fileName.replace(/\.zip$/i, "");
+        if (req.world_names && req.world_names.length > 0) {
+          for (const w of req.world_names) {
+            const key = `${req.instance_id}:${w}`;
+            if (!mockWorldDatapacks[key]) {
+              mockWorldDatapacks[key] = [];
+            }
+            if (!mockWorldDatapacks[key].some((dp) => dp.file_name === fileName)) {
+              mockWorldDatapacks[key].push({
+                file_name: fileName,
+                name: packName,
+                enabled: true,
+                size_bytes: 1024 * 1024,
+                world_name: w,
+              });
+            }
+          }
+        }
+      },
+      req
+    );
+  },
+
+  setMockWorlds(instanceId: string, list: WorldDTO[]): void {
+    mockWorlds[instanceId] = [...list];
+  },
+
+  setMockWorldDatapacks(instanceId: string, worldName: string, list: DatapackDTO[]): void {
+    const key = `${instanceId}:${worldName}`;
+    mockWorldDatapacks[key] = [...list];
   },
 };

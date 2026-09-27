@@ -408,15 +408,20 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetInstanceFavorite",
 		"SetInstanceGroup",
 		"EnsureInstanceDir",
+		"ListInstanceWorlds",
+		"ListWorldDatapacks",
+		"SetDatapackEnabled",
+		"DeleteDatapack",
+		"InstallDatapack",
 	}
 
 	// Architectural Decision (T-Gates Scope):
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (46 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 46 {
-		t.Fatalf("expected exactly 46 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (51 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 51 {
+		t.Fatalf("expected exactly 51 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -2992,6 +2997,188 @@ func TestWailsAdapter_ImportOfficialAndPrism(t *testing.T) {
 	destMod := filepath.Join(instancesDir, prismDTO.ID, "mods", "sodium.jar")
 	if _, err := os.Stat(destMod); err != nil {
 		t.Errorf("expected mod at %s: %v", destMod, err)
+	}
+}
+
+func TestWailsAdapter_Datapacks_PerWorldManagement(t *testing.T) {
+	tempDir := t.TempDir()
+	instancesDir := filepath.Join(tempDir, "instances")
+	if err := os.MkdirAll(instancesDir, 0o755); err != nil {
+		t.Fatalf("mkdir instancesDir: %v", err)
+	}
+
+	clk := clock.NewMockClock(time.Now())
+	fileSys := fs.NewOSFileSystem()
+	procMgr := &mockProcMgr{}
+	kr := keyring.NewMemoryKeyring()
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetFileSystem(fileSys, instancesDir)
+
+	instDTO, err := adapter.CreateInstance(wails.CreateInstanceRequest{
+		Name:        "DatapackInstance",
+		GameVersion: "1.21.1",
+		Loader:      "vanilla",
+	})
+	if err != nil {
+		t.Fatalf("CreateInstance error: %v", err)
+	}
+
+	instDir := filepath.Join(instancesDir, instDTO.ID)
+	w1Dir := filepath.Join(instDir, "saves", "SurvivalWorld")
+	w2Dir := filepath.Join(instDir, "saves", "CreativeWorld")
+	if err := os.MkdirAll(w1Dir, 0o755); err != nil {
+		t.Fatalf("mkdir w1: %v", err)
+	}
+	if err := os.MkdirAll(w2Dir, 0o755); err != nil {
+		t.Fatalf("mkdir w2: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w1Dir, "level.dat"), []byte("level1"), 0o644); err != nil {
+		t.Fatalf("write level1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w2Dir, "level.dat"), []byte("level2"), 0o644); err != nil {
+		t.Fatalf("write level2: %v", err)
+	}
+
+	// 1. ListInstanceWorlds
+	worlds, err := adapter.ListInstanceWorlds(instDTO.ID)
+	if err != nil {
+		t.Fatalf("ListInstanceWorlds error: %v", err)
+	}
+	if len(worlds) != 2 {
+		t.Fatalf("expected 2 worlds, got %d", len(worlds))
+	}
+
+	// 2. InstallDatapack using local file
+	dummyZip := filepath.Join(tempDir, "armor-statues.zip")
+	if err := os.WriteFile(dummyZip, []byte("fake-zip-data"), 0o644); err != nil {
+		t.Fatalf("write dummyZip: %v", err)
+	}
+
+	err = adapter.InstallDatapack(wails.InstallDatapackRequest{
+		InstanceID:  instDTO.ID,
+		WorldNames:  []string{"SurvivalWorld"},
+		ModID:       "armor-statues",
+		DownloadURL: dummyZip,
+		FileName:    "armor-statues.zip",
+	})
+	if err != nil {
+		t.Fatalf("InstallDatapack error: %v", err)
+	}
+
+	activePath := filepath.Join(w1Dir, "datapacks", "armor-statues.zip")
+	disabledPath := filepath.Join(w1Dir, "datapacks-disabled", "armor-statues.zip")
+	if _, err := os.Stat(activePath); err != nil {
+		t.Fatalf("expected installed datapack at %s: %v", activePath, err)
+	}
+
+	// 3. ListWorldDatapacks
+	dps, err := adapter.ListWorldDatapacks(instDTO.ID, "SurvivalWorld")
+	if err != nil {
+		t.Fatalf("ListWorldDatapacks error: %v", err)
+	}
+	if len(dps) != 1 {
+		t.Fatalf("expected 1 datapack, got %d", len(dps))
+	}
+	if !dps[0].Enabled || dps[0].Name != "armor-statues" {
+		t.Fatalf("unexpected datapack DTO: %+v", dps[0])
+	}
+
+	// 4. SetDatapackEnabled (disable -> physical move to datapacks-disabled/)
+	err = adapter.SetDatapackEnabled(wails.ToggleDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "armor-statues.zip",
+		Enabled:    false,
+	})
+	if err != nil {
+		t.Fatalf("SetDatapackEnabled disable error: %v", err)
+	}
+	if _, err := os.Stat(activePath); err == nil {
+		t.Errorf("active file should not exist after disable")
+	}
+	if _, err := os.Stat(disabledPath); err != nil {
+		t.Errorf("disabled file should exist at %s: %v", disabledPath, err)
+	}
+
+	dpsDisabled, err := adapter.ListWorldDatapacks(instDTO.ID, "SurvivalWorld")
+	if err != nil {
+		t.Fatalf("ListWorldDatapacks error: %v", err)
+	}
+	if len(dpsDisabled) != 1 || dpsDisabled[0].Enabled {
+		t.Fatalf("expected 1 disabled datapack, got: %+v", dpsDisabled)
+	}
+
+	// 5. SetDatapackEnabled (enable -> physical move back to datapacks/)
+	err = adapter.SetDatapackEnabled(wails.ToggleDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "armor-statues.zip",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatalf("SetDatapackEnabled enable error: %v", err)
+	}
+	if _, err := os.Stat(activePath); err != nil {
+		t.Errorf("active file should exist after enable: %v", err)
+	}
+	if _, err := os.Stat(disabledPath); err == nil {
+		t.Errorf("disabled file should not exist after enable")
+	}
+
+	// 6. DeleteDatapack
+	err = adapter.DeleteDatapack(wails.DeleteDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "armor-statues.zip",
+	})
+	if err != nil {
+		t.Fatalf("DeleteDatapack error: %v", err)
+	}
+	if _, err := os.Stat(activePath); err == nil {
+		t.Errorf("active file should not exist after delete")
+	}
+
+	dpsEmpty, err := adapter.ListWorldDatapacks(instDTO.ID, "SurvivalWorld")
+	if err != nil {
+		t.Fatalf("ListWorldDatapacks error: %v", err)
+	}
+	if len(dpsEmpty) != 0 {
+		t.Fatalf("expected 0 datapacks, got %d", len(dpsEmpty))
+	}
+
+	// 7. Install to instance root when WorldNames is empty
+	err = adapter.InstallDatapack(wails.InstallDatapackRequest{
+		InstanceID:  instDTO.ID,
+		WorldNames:  nil,
+		ModID:       "global-pack",
+		DownloadURL: dummyZip,
+		FileName:    "global-pack.zip",
+	})
+	if err != nil {
+		t.Fatalf("InstallDatapack unassigned error: %v", err)
+	}
+	instPack := filepath.Join(instDir, "datapacks", "global-pack.zip")
+	if _, err := os.Stat(instPack); err != nil {
+		t.Errorf("expected global pack at %s: %v", instPack, err)
+	}
+
+	// 8. Path traversal attack checks
+	if err := adapter.SetDatapackEnabled(wails.ToggleDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "../../etc/passwd",
+		Enabled:    true,
+	}); err == nil {
+		t.Errorf("expected error for traversal fileName")
+	}
+
+	if err := adapter.DeleteDatapack(wails.DeleteDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "../malicious.zip",
+	}); err == nil {
+		t.Errorf("expected error for traversal delete")
 	}
 }
 

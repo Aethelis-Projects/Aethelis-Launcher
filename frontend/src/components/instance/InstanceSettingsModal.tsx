@@ -1,9 +1,10 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
 import { ModCatalog } from "../mods/ModCatalog";
+import { DatapackManager } from "./DatapackManager";
 import { PRESET_AVATARS, getRandomAvatar } from "../../assets/avatars";
 
 export function getRecommendedJavaMajor(version: string, manifestMajor?: number): number {
@@ -44,7 +45,7 @@ export function getRecommendedJavaMajor(version: string, manifestMajor?: number)
   return 21;
 }
 
-export type SettingsTab = "general" | "java" | "memory" | "args" | "mods";
+export type SettingsTab = "general" | "java" | "memory" | "args" | "mods" | "datapacks";
 
 interface InstanceSettingsModalProps {
   instance: InstanceDTO;
@@ -180,7 +181,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
         data-testid="instance-settings-modal"
       >
-        <div class={`w-full ${activeTab() === "mods" ? "max-w-4xl" : "max-w-2xl"} bg-nord-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-all`}>
+        <div class={`w-full ${activeTab() === "mods" || activeTab() === "datapacks" ? "max-w-4xl" : "max-w-2xl"} bg-nord-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-all`}>
           {/* Header */}
           <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-nord-dark/40">
             <div class="flex items-center gap-3">
@@ -273,6 +274,19 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             >
               <Package class="w-4 h-4" />
               <span>Моды</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("datapacks")}
+              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                activeTab() === "datapacks"
+                  ? "border-nord-cyan text-nord-cyan font-semibold"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+              data-testid="tab-datapacks"
+            >
+              <Database class="w-4 h-4" />
+              <span>Датапаки</span>
             </button>
           </div>
 
@@ -771,11 +785,16 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                 </Show>
               </div>
             </Show>
+
+            {/* TAB 6: Datapacks */}
+            <Show when={activeTab() === "datapacks"}>
+              <DatapackManager instanceId={props.instance.id} />
+            </Show>
           </div>
 
           {/* Footer Actions */}
           <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/5 bg-nord-dark/40">
-            <Show when={activeTab() !== "mods"}>
+            <Show when={activeTab() !== "mods" && activeTab() !== "datapacks"}>
               <button
                 type="button"
                 onClick={props.onClose}
@@ -796,7 +815,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                 <span>{saving() ? "Сохранение..." : "Сохранить настройки"}</span>
               </button>
             </Show>
-            <Show when={activeTab() === "mods"}>
+            <Show when={activeTab() === "mods" || activeTab() === "datapacks"}>
               <button
                 type="button"
                 onClick={props.onClose}

@@ -587,4 +587,72 @@ describe("ModCatalog Component", () => {
     const saved = JSON.parse(localStorage.getItem("nord_catalog_filters") || "{}");
     expect(saved.project_type).toBe("shader");
   });
+
+  it("renders datapack tab, locks to modrinth and opens install-to-world modal (Feature E)", async () => {
+    const mockDatapack: ModItemDTO = {
+      id: "incendium",
+      slug: "incendium",
+      name: "Incendium",
+      author: "Starmute",
+      description: "Nether overhaul",
+      downloads: 500000,
+      icon_url: "",
+      source: "modrinth",
+      categories: ["adventure"],
+      project_type: "datapack",
+    };
+
+    const searchSpy = vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({
+      items: [mockDatapack],
+      total_count: 1,
+    });
+
+    vi.spyOn(launcherAPI, "listInstanceWorlds").mockResolvedValue([
+      { name: "SurvivalWorld", display_name: "SurvivalWorld", last_played: Date.now(), datapack_count: 0 },
+    ]);
+
+    const installSpy = vi.spyOn(launcherAPI, "installDatapack").mockResolvedValue();
+
+    render(() => (
+      <ModCatalog
+        activeInstanceId="test-inst"
+        gameVersion="1.21.1"
+        loader="fabric"
+      />
+    ));
+
+    expect(screen.getByTestId("project-type-datapack")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("project-type-datapack"));
+
+    expect(searchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        project_type: "datapack",
+        source: "modrinth",
+      })
+    );
+    expect(screen.getByTestId("only-modrinth-badge")).toBeTruthy();
+
+    await screen.findByText("Incendium");
+    const installBtn = screen.getByText("Установить");
+    fireEvent.click(installBtn);
+
+    // Modal opens
+    await screen.findByTestId("datapack-install-modal");
+    expect(screen.getByTestId("datapack-world-checkbox-SurvivalWorld")).toBeTruthy();
+
+    // Confirm install
+    const confirmBtn = screen.getByTestId("datapack-confirm-install-btn");
+    fireEvent.click(confirmBtn);
+
+    await vi.waitFor(() => {
+      expect(installSpy).toHaveBeenCalledWith({
+        instance_id: "test-inst",
+        world_names: ["SurvivalWorld"],
+        mod_id: "incendium",
+        version_id: undefined,
+      });
+    });
+
+    await screen.findByText("Установлен");
+  });
 });

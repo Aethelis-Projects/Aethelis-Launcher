@@ -1244,6 +1244,8 @@ func (a *WailsAdapter) getContentDir(instanceID string, projectType string) stri
 		folder = "resourcepacks"
 	case "shader", "shaders", "shaderpacks":
 		folder = "shaderpacks"
+	case "datapack", "datapacks":
+		folder = "datapacks"
 	}
 	if a.instancesDir != "" {
 		return filepath.Join(a.instancesDir, instanceID, folder)
@@ -1252,7 +1254,7 @@ func (a *WailsAdapter) getContentDir(instanceID string, projectType string) stri
 }
 
 func (a *WailsAdapter) findContentFile(instanceID string, fileName string) (dir string, fullPath string) {
-	for _, folder := range []string{"mods", "resourcepacks", "shaderpacks"} {
+	for _, folder := range []string{"mods", "resourcepacks", "shaderpacks", "datapacks"} {
 		var p string
 		if a.instancesDir != "" {
 			p = filepath.Join(a.instancesDir, instanceID, folder, fileName)
@@ -1600,13 +1602,13 @@ func (a *WailsAdapter) InstallMod(req InstallModRequest) (*InstallModResponse, e
 	}
 	if fileName == "" || fileName == "." || fileName == "/" {
 		ext := ".jar"
-		if req.ProjectType == "resourcepack" || req.ProjectType == "shader" {
+		if req.ProjectType == "resourcepack" || req.ProjectType == "shader" || req.ProjectType == "datapack" {
 			ext = ".zip"
 		}
 		fileName = fmt.Sprintf("%s%s", req.ModID, ext)
 	}
 	if !strings.HasSuffix(fileName, ".jar") && !strings.HasSuffix(fileName, ".zip") {
-		if req.ProjectType == "resourcepack" || req.ProjectType == "shader" {
+		if req.ProjectType == "resourcepack" || req.ProjectType == "shader" || req.ProjectType == "datapack" {
 			fileName = fileName + ".zip"
 		} else {
 			fileName = fileName + ".jar"
@@ -3066,5 +3068,438 @@ func (a *WailsAdapter) ImportPrismInstance(req ImportPrismInstanceRequest) (*Ins
 	}
 	dto := toInstanceDTO(inst)
 	return &dto, nil
+}
+
+func copyFileContents(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+// ListInstanceWorlds returns a list of worlds saved in the instance's saves/ directory.
+func (a *WailsAdapter) ListInstanceWorlds(instanceID string) ([]WorldDTO, error) {
+	trimmed := strings.TrimSpace(instanceID)
+	if trimmed == "" {
+		return nil, errors.New("empty instance id provided")
+	}
+	cleanInst := filepath.Clean(trimmed)
+	if strings.HasPrefix(cleanInst, "..") || filepath.IsAbs(cleanInst) {
+		return nil, errors.New("invalid instance id")
+	}
+	baseDir := a.instancesDir
+	if baseDir == "" {
+		baseDir = "instances"
+	}
+	savesDir := filepath.Join(baseDir, cleanInst, "saves")
+	entries, err := os.ReadDir(savesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []WorldDTO{}, nil
+		}
+		return nil, fmt.Errorf("failed to read saves directory: %w", err)
+	}
+
+	var worlds []WorldDTO
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		worldName := e.Name()
+		if strings.HasPrefix(worldName, ".") {
+			continue
+		}
+		worldDir := filepath.Join(savesDir, worldName)
+		levelDat := filepath.Join(worldDir, "level.dat")
+		info, err := os.Stat(levelDat)
+		if err != nil {
+			continue
+		}
+
+		datapackCount := 0
+		dpDir := filepath.Join(worldDir, "datapacks")
+		if dpEntries, err := os.ReadDir(dpDir); err == nil {
+			for _, dpe := range dpEntries {
+				if strings.HasPrefix(dpe.Name(), ".") {
+					continue
+				}
+				datapackCount++
+			}
+		}
+
+		worlds = append(worlds, WorldDTO{
+			Name:          worldName,
+			DisplayName:   worldName,
+			LastPlayed:    info.ModTime().UnixMilli(),
+			DatapackCount: datapackCount,
+		})
+	}
+
+	sort.Slice(worlds, func(i, j int) bool {
+		return worlds[i].LastPlayed > worlds[j].LastPlayed
+	})
+
+	if worlds == nil {
+		worlds = []WorldDTO{}
+	}
+	return worlds, nil
+}
+
+// ListWorldDatapacks returns active and disabled datapacks for the specified instance world.
+func (a *WailsAdapter) ListWorldDatapacks(instanceID string, worldName string) ([]DatapackDTO, error) {
+	trimmedInst := strings.TrimSpace(instanceID)
+	trimmedWorld := strings.TrimSpace(worldName)
+	if trimmedInst == "" || trimmedWorld == "" {
+		return nil, errors.New("instance_id and world_name are required")
+	}
+	cleanInst := filepath.Clean(trimmedInst)
+	cleanWorld := filepath.Clean(trimmedWorld)
+	if strings.HasPrefix(cleanInst, "..") || filepath.IsAbs(cleanInst) ||
+		strings.HasPrefix(cleanWorld, "..") || filepath.IsAbs(cleanWorld) {
+		return nil, errors.New("invalid instance id or world name")
+	}
+
+	baseDir := a.instancesDir
+	if baseDir == "" {
+		baseDir = "instances"
+	}
+	worldDir := filepath.Join(baseDir, cleanInst, "saves", cleanWorld)
+	if _, err := os.Stat(worldDir); os.IsNotExist(err) {
+		return []DatapackDTO{}, nil
+	}
+
+	activeDir := filepath.Join(worldDir, "datapacks")
+	disabledDir := filepath.Join(worldDir, "datapacks-disabled")
+
+	var result []DatapackDTO
+
+	if entries, err := os.ReadDir(activeDir); err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			info, err := e.Info()
+			size := int64(0)
+			if err == nil {
+				size = info.Size()
+			}
+			cleanName := strings.TrimSuffix(e.Name(), ".zip")
+			result = append(result, DatapackDTO{
+				FileName:  e.Name(),
+				Name:      cleanName,
+				Enabled:   true,
+				SizeBytes: size,
+				WorldName: cleanWorld,
+			})
+		}
+	}
+
+	if entries, err := os.ReadDir(disabledDir); err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), ".") {
+				continue
+			}
+			info, err := e.Info()
+			size := int64(0)
+			if err == nil {
+				size = info.Size()
+			}
+			cleanName := strings.TrimSuffix(e.Name(), ".zip")
+			result = append(result, DatapackDTO{
+				FileName:  e.Name(),
+				Name:      cleanName,
+				Enabled:   false,
+				SizeBytes: size,
+				WorldName: cleanWorld,
+			})
+		}
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return strings.ToLower(result[i].Name) < strings.ToLower(result[j].Name)
+	})
+
+	if result == nil {
+		result = []DatapackDTO{}
+	}
+	return result, nil
+}
+
+// SetDatapackEnabled enables or disables a datapack by physically moving it between datapacks/ and datapacks-disabled/.
+func (a *WailsAdapter) SetDatapackEnabled(req ToggleDatapackRequest) error {
+	trimmedInst := strings.TrimSpace(req.InstanceID)
+	trimmedWorld := strings.TrimSpace(req.WorldName)
+	trimmedFile := strings.TrimSpace(req.FileName)
+	if trimmedInst == "" || trimmedWorld == "" || trimmedFile == "" {
+		return errors.New("instance_id, world_name, and file_name are required")
+	}
+	cleanInst := filepath.Clean(trimmedInst)
+	cleanWorld := filepath.Clean(trimmedWorld)
+	cleanFile := filepath.Clean(trimmedFile)
+	if strings.HasPrefix(cleanInst, "..") || filepath.IsAbs(cleanInst) ||
+		strings.HasPrefix(cleanWorld, "..") || filepath.IsAbs(cleanWorld) ||
+		strings.HasPrefix(cleanFile, "..") || filepath.IsAbs(cleanFile) ||
+		filepath.Base(cleanFile) != cleanFile {
+		return errors.New("invalid path parameter in request")
+	}
+
+	baseDir := a.instancesDir
+	if baseDir == "" {
+		baseDir = "instances"
+	}
+	worldDir := filepath.Join(baseDir, cleanInst, "saves", cleanWorld)
+	activeDir := filepath.Join(worldDir, "datapacks")
+	disabledDir := filepath.Join(worldDir, "datapacks-disabled")
+
+	activePath := filepath.Join(activeDir, cleanFile)
+	disabledPath := filepath.Join(disabledDir, cleanFile)
+
+	if req.Enabled {
+		if _, err := os.Stat(activePath); err == nil {
+			return nil
+		}
+		if _, err := os.Stat(disabledPath); err != nil {
+			return fmt.Errorf("datapack file not found: %s", cleanFile)
+		}
+		if err := os.MkdirAll(activeDir, 0o755); err != nil {
+			return fmt.Errorf("create datapacks directory: %w", err)
+		}
+		if err := os.Rename(disabledPath, activePath); err != nil {
+			return fmt.Errorf("enable datapack: %w", err)
+		}
+	} else {
+		if _, err := os.Stat(disabledPath); err == nil {
+			return nil
+		}
+		if _, err := os.Stat(activePath); err != nil {
+			return fmt.Errorf("datapack file not found: %s", cleanFile)
+		}
+		if err := os.MkdirAll(disabledDir, 0o755); err != nil {
+			return fmt.Errorf("create datapacks-disabled directory: %w", err)
+		}
+		if err := os.Rename(activePath, disabledPath); err != nil {
+			return fmt.Errorf("disable datapack: %w", err)
+		}
+	}
+	return nil
+}
+
+// DeleteDatapack removes the datapack file from active or disabled directory.
+func (a *WailsAdapter) DeleteDatapack(req DeleteDatapackRequest) error {
+	trimmedInst := strings.TrimSpace(req.InstanceID)
+	trimmedWorld := strings.TrimSpace(req.WorldName)
+	trimmedFile := strings.TrimSpace(req.FileName)
+	if trimmedInst == "" || trimmedWorld == "" || trimmedFile == "" {
+		return errors.New("instance_id, world_name, and file_name are required")
+	}
+	cleanInst := filepath.Clean(trimmedInst)
+	cleanWorld := filepath.Clean(trimmedWorld)
+	cleanFile := filepath.Clean(trimmedFile)
+	if strings.HasPrefix(cleanInst, "..") || filepath.IsAbs(cleanInst) ||
+		strings.HasPrefix(cleanWorld, "..") || filepath.IsAbs(cleanWorld) ||
+		strings.HasPrefix(cleanFile, "..") || filepath.IsAbs(cleanFile) ||
+		filepath.Base(cleanFile) != cleanFile {
+		return errors.New("invalid path parameter in request")
+	}
+
+	baseDir := a.instancesDir
+	if baseDir == "" {
+		baseDir = "instances"
+	}
+	worldDir := filepath.Join(baseDir, cleanInst, "saves", cleanWorld)
+	activePath := filepath.Join(worldDir, "datapacks", cleanFile)
+	disabledPath := filepath.Join(worldDir, "datapacks-disabled", cleanFile)
+
+	var lastErr error
+	if _, err := os.Stat(activePath); err == nil {
+		if err := os.RemoveAll(activePath); err != nil {
+			lastErr = err
+		}
+	}
+	if _, err := os.Stat(disabledPath); err == nil {
+		if err := os.RemoveAll(disabledPath); err != nil {
+			lastErr = err
+		}
+	}
+	return lastErr
+}
+
+// InstallDatapack downloads or copies a datapack into selected world(s) or instance datapacks directory.
+func (a *WailsAdapter) InstallDatapack(req InstallDatapackRequest) error {
+	trimmedInst := strings.TrimSpace(req.InstanceID)
+	trimmedModID := strings.TrimSpace(req.ModID)
+	if trimmedInst == "" || trimmedModID == "" {
+		return errors.New("instance_id and mod_id are required")
+	}
+	cleanInst := filepath.Clean(trimmedInst)
+	if strings.HasPrefix(cleanInst, "..") || filepath.IsAbs(cleanInst) {
+		return errors.New("invalid instance id")
+	}
+
+	downloadURL := strings.TrimSpace(req.DownloadURL)
+	fileName := strings.TrimSpace(req.FileName)
+
+	baseDir := a.instancesDir
+	if baseDir == "" {
+		baseDir = "instances"
+	}
+	instDir := filepath.Join(baseDir, cleanInst)
+
+	// If local file path provided
+	if downloadURL != "" && (filepath.IsAbs(downloadURL) || strings.HasPrefix(downloadURL, "file://")) {
+		localPath := downloadURL
+		if strings.HasPrefix(localPath, "file://") {
+			localPath = strings.TrimPrefix(localPath, "file://")
+		}
+		cleanLocal := filepath.Clean(localPath)
+		if _, err := os.Stat(cleanLocal); err == nil {
+			if fileName == "" {
+				fileName = filepath.Base(cleanLocal)
+			}
+			if !strings.HasSuffix(strings.ToLower(fileName), ".zip") {
+				fileName += ".zip"
+			}
+			return a.distributeDatapack(instDir, cleanLocal, fileName, cleanInst, trimmedModID, req.VersionID, req.WorldNames)
+		}
+	}
+
+	if downloadURL == "" {
+		ctx := context.Background()
+		versions, err := a.modrinth.GetProjectVersions(ctx, trimmedModID, "", "")
+		if err != nil {
+			return fmt.Errorf("resolve datapack versions: %w", err)
+		}
+		if len(versions) == 0 {
+			return fmt.Errorf("no versions found for datapack: %s", trimmedModID)
+		}
+		var selVer *content.ModVersion
+		var selFile *content.ModFile
+		if req.VersionID != "" {
+			for i := range versions {
+				if versions[i].ID == req.VersionID {
+					selVer = &versions[i]
+					if len(versions[i].Files) > 0 {
+						selFile = &versions[i].Files[0]
+					}
+					break
+				}
+			}
+		}
+		if selFile == nil {
+			selVer = &versions[0]
+			if len(selVer.Files) > 0 {
+				selFile = &selVer.Files[0]
+			}
+		}
+		if selFile == nil || selFile.URL == "" {
+			return errors.New("no download file found for datapack")
+		}
+		downloadURL = selFile.URL
+		if fileName == "" {
+			fileName = selFile.FileName
+		}
+	}
+
+	if fileName == "" {
+		fileName = filepath.Base(downloadURL)
+	}
+	if fileName == "" || fileName == "." || fileName == "/" {
+		fileName = fmt.Sprintf("%s.zip", trimmedModID)
+	}
+	fileName = filepath.Base(filepath.Clean(fileName))
+	if !strings.HasSuffix(strings.ToLower(fileName), ".zip") {
+		fileName += ".zip"
+	}
+
+	parsedURL, err := url.Parse(downloadURL)
+	if err != nil {
+		return fmt.Errorf("invalid download url: %w", err)
+	}
+	if !a.isAllowedDownloadHost(parsedURL.Host) {
+		return fmt.Errorf("download host not allowed: %s", parsedURL.Host)
+	}
+
+	tempFile, err := os.CreateTemp(instDir, ".datapack-tmp-*")
+	if err != nil {
+		tempFile, err = os.CreateTemp("", ".datapack-tmp-*")
+		if err != nil {
+			return fmt.Errorf("create temporary download file: %w", err)
+		}
+	}
+	tempPath := tempFile.Name()
+	defer func() {
+		_ = tempFile.Close()    // errcheck:ok best effort close
+		_ = os.Remove(tempPath) // errcheck:ok best effort temp cleanup
+	}()
+
+	client := a.getHTTPClient()
+	httpReq, err := http.NewRequestWithContext(context.Background(), http.MethodGet, downloadURL, nil)
+	if err != nil {
+		return fmt.Errorf("create download request: %w", err)
+	}
+	if httpReq.Header.Get("User-Agent") == "" {
+		httpReq.Header.Set("User-Agent", netutil.FormatUserAgent(a.GetCurrentVersion()))
+	}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("download datapack: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
+	}
+
+	if _, err := io.Copy(tempFile, resp.Body); err != nil {
+		return fmt.Errorf("write datapack download: %w", err)
+	}
+	_ = tempFile.Close() // errcheck:ok close before copying
+
+	return a.distributeDatapack(instDir, tempPath, fileName, cleanInst, trimmedModID, req.VersionID, req.WorldNames)
+}
+
+func (a *WailsAdapter) distributeDatapack(instDir, srcPath, fileName, cleanInst, modID, versionID string, worldNames []string) error {
+	if len(worldNames) > 0 {
+		for _, wName := range worldNames {
+			cleanW := filepath.Clean(strings.TrimSpace(wName))
+			if cleanW == "" || strings.HasPrefix(cleanW, "..") || filepath.IsAbs(cleanW) {
+				continue
+			}
+			targetDir := filepath.Join(instDir, "saves", cleanW, "datapacks")
+			if err := os.MkdirAll(targetDir, 0o755); err != nil {
+				return fmt.Errorf("create target datapacks dir for world %s: %w", cleanW, err)
+			}
+			targetPath := filepath.Join(targetDir, fileName)
+			if err := copyFileContents(srcPath, targetPath); err != nil {
+				return fmt.Errorf("copy datapack to world %s: %w", cleanW, err)
+			}
+		}
+	} else {
+		targetDir := filepath.Join(instDir, "datapacks")
+		if err := os.MkdirAll(targetDir, 0o755); err != nil {
+			return fmt.Errorf("create instance datapacks dir: %w", err)
+		}
+		targetPath := filepath.Join(targetDir, fileName)
+		if err := copyFileContents(srcPath, targetPath); err != nil {
+			return fmt.Errorf("copy datapack to instance dir: %w", err)
+		}
+	}
+
+	a.recordInstalledMod(cleanInst, modID, fileName, "modrinth", &content.ModFile{
+		FileName: fileName,
+	}, versionID, "datapack")
+
+	return nil
 }
 

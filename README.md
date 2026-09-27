@@ -162,7 +162,7 @@ Every push and pull request must pass the CI Quality Gate:
 - **Bundle budget** — frontend ≤ 250 KB gzip.
 - **Binary budget** — release binary ≤ 40 MB.
 - **Latency SLA** — in-process IPC dispatch p95 ≤ 5,000 ns.
-- **Wails binding registry** — forward registration parity enforced for all 46 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
+- **Wails binding registry** — forward registration parity enforced for all 51 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
 
 ---
 

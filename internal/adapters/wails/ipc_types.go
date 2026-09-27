@@ -413,3 +413,41 @@ type ImportPrismInstanceRequest struct {
 	CopyOptions       bool   `json:"copy_options"`
 	CopyServers       bool   `json:"copy_servers"`
 }
+
+type WorldDTO struct {
+	Name          string `json:"name"`
+	DisplayName   string `json:"display_name"`
+	LastPlayed    int64  `json:"last_played"`
+	DatapackCount int    `json:"datapack_count"`
+}
+
+type DatapackDTO struct {
+	FileName    string `json:"file_name"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	SizeBytes   int64  `json:"size_bytes"`
+	WorldName   string `json:"world_name"`
+}
+
+type InstallDatapackRequest struct {
+	InstanceID  string   `json:"instance_id"`
+	WorldNames  []string `json:"world_names"`
+	ModID       string   `json:"mod_id"`
+	VersionID   string   `json:"version_id,omitempty"`
+	FileName    string   `json:"file_name,omitempty"`
+	DownloadURL string   `json:"download_url,omitempty"`
+}
+
+type ToggleDatapackRequest struct {
+	InstanceID string `json:"instance_id"`
+	WorldName  string `json:"world_name"`
+	FileName   string `json:"file_name"`
+	Enabled    bool   `json:"enabled"`
+}
+
+type DeleteDatapackRequest struct {
+	InstanceID string `json:"instance_id"`
+	WorldName  string `json:"world_name"`
+	FileName   string `json:"file_name"`
+}

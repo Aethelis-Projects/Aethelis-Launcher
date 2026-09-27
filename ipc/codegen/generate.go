@@ -421,6 +421,44 @@ type ImportPrismInstanceRequest struct {
 	CopyOptions       bool   ` + "`" + `json:"copy_options"` + "`" + `
 	CopyServers       bool   ` + "`" + `json:"copy_servers"` + "`" + `
 }
+
+type WorldDTO struct {
+	Name          string ` + "`" + `json:"name"` + "`" + `
+	DisplayName   string ` + "`" + `json:"display_name"` + "`" + `
+	LastPlayed    int64  ` + "`" + `json:"last_played"` + "`" + `
+	DatapackCount int    ` + "`" + `json:"datapack_count"` + "`" + `
+}
+
+type DatapackDTO struct {
+	FileName    string ` + "`" + `json:"file_name"` + "`" + `
+	Name        string ` + "`" + `json:"name"` + "`" + `
+	Description string ` + "`" + `json:"description,omitempty"` + "`" + `
+	Enabled     bool   ` + "`" + `json:"enabled"` + "`" + `
+	SizeBytes   int64  ` + "`" + `json:"size_bytes"` + "`" + `
+	WorldName   string ` + "`" + `json:"world_name"` + "`" + `
+}
+
+type InstallDatapackRequest struct {
+	InstanceID  string   ` + "`" + `json:"instance_id"` + "`" + `
+	WorldNames  []string ` + "`" + `json:"world_names"` + "`" + `
+	ModID       string   ` + "`" + `json:"mod_id"` + "`" + `
+	VersionID   string   ` + "`" + `json:"version_id,omitempty"` + "`" + `
+	FileName    string   ` + "`" + `json:"file_name,omitempty"` + "`" + `
+	DownloadURL string   ` + "`" + `json:"download_url,omitempty"` + "`" + `
+}
+
+type ToggleDatapackRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	WorldName  string ` + "`" + `json:"world_name"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+	Enabled    bool   ` + "`" + `json:"enabled"` + "`" + `
+}
+
+type DeleteDatapackRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	WorldName  string ` + "`" + `json:"world_name"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+}
 `
 
 
@@ -430,7 +468,7 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
-export type ProjectType = "mod" | "resourcepack" | "shader";
+export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack";
 
 
 export interface InstanceDTO {
@@ -842,6 +880,44 @@ export interface ImportPrismInstanceRequest {
   copy_mods: boolean;
   copy_options: boolean;
   copy_servers: boolean;
+}
+
+export interface WorldDTO {
+  name: string;
+  display_name: string;
+  last_played: number;
+  datapack_count: number;
+}
+
+export interface DatapackDTO {
+  file_name: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  size_bytes: number;
+  world_name: string;
+}
+
+export interface InstallDatapackRequest {
+  instance_id: string;
+  world_names: string[];
+  mod_id: string;
+  version_id?: string;
+  file_name?: string;
+  download_url?: string;
+}
+
+export interface ToggleDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
+  enabled: boolean;
+}
+
+export interface DeleteDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
 }
 `
 

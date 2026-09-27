@@ -326,6 +326,27 @@ describe("InstanceSettingsModal (J2)", () => {
       );
     });
   });
+
+  it("renders Datapacks tab and switches to DatapackManager (Feature E)", async () => {
+    vi.spyOn(launcherAPI, "listInstanceWorlds").mockResolvedValue([
+      { name: "Survival", display_name: "Survival", last_played: Date.now(), datapack_count: 0 },
+    ]);
+    vi.spyOn(launcherAPI, "listWorldDatapacks").mockResolvedValue([]);
+
+    render(() => (
+      <InstanceSettingsModal
+        instance={mockInstance}
+        isOpen={true}
+        initialTab="datapacks"
+        onClose={vi.fn()}
+        onSaved={vi.fn()}
+      />
+    ));
+
+    expect(screen.getByTestId("tab-datapacks")).toBeTruthy();
+    expect(screen.getByTestId("datapack-manager")).toBeTruthy();
+    expect(screen.getByTestId("settings-close-mods-button")).toBeTruthy();
+  });
 });
 
 
