@@ -196,13 +196,13 @@ type ModFileDTO struct {
 }
 
 type ModUpdateItemDTO struct {
-	FileName        string ` + "`" + `json:"file_name"` + "`" + `
-	ModID           string ` + "`" + `json:"mod_id"` + "`" + `
-	Source          string ` + "`" + `json:"source"` + "`" + `
-	CurrentVersion  string ` + "`" + `json:"current_version"` + "`" + `
-	LatestVersion   string ` + "`" + `json:"latest_version"` + "`" + `
-	LatestVersionID string ` + "`" + `json:"latest_version_id"` + "`" + `
-	ReleaseType     string ` + "`" + `json:"release_type"` + "`" + `
+	FileName        string   ` + "`" + `json:"file_name"` + "`" + `
+	ModID           string   ` + "`" + `json:"mod_id"` + "`" + `
+	Source          string   ` + "`" + `json:"source"` + "`" + `
+	CurrentVersion  string   ` + "`" + `json:"current_version"` + "`" + `
+	LatestVersion   string   ` + "`" + `json:"latest_version"` + "`" + `
+	LatestVersionID string   ` + "`" + `json:"latest_version_id"` + "`" + `
+	ReleaseType     string   ` + "`" + `json:"release_type"` + "`" + `
 	Dependencies    []string ` + "`" + `json:"dependencies,omitempty"` + "`" + `
 	Changelog       string   ` + "`" + `json:"changelog,omitempty"` + "`" + `
 }
