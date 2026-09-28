@@ -10,9 +10,6 @@ on:
 jobs:
   core-and-frontend:
     name: Build & Test (${{ matrix.os }})
-    id: quality
-    outputs:
-      core_coverage: ${{ steps.covgate.outputs.total }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
