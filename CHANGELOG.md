@@ -3,6 +3,17 @@
 All notable changes to Nord Launcher are documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.7.1] - 2026-09-28
+
+### Added
+- Per-world datapack management: catalog tab pinned to Modrinth, install into selected worlds (or unassigned instance storage), enable/disable by physical move between `datapacks/` and `datapacks-disabled/`, delete, world picker with last-played and pack counts (Feature E).
+- Performance preset API: `GetPerformancePreset` (physical-RAM heuristic clamped to 1-4 GB + canonical Aikar G1GC flag set) and `ListOptimizationMods` (curated per-loader optimization catalog resolved against the instance version); Optimization tab in Instance Settings with apply/reset and one-click curated installs (Feature B).
+- Wails method registry expanded to 52 methods (`EnsureInstanceDir`, `GetPerformancePreset`, datapack/world management).
+
+### Fixed
+- `OpenPath` no longer mutates the filesystem: directory creation moved to explicit `EnsureInstanceDir` with strict allowlist and traversal guards (T1).
+- Java 16 wording corrected from "LTS" to "required by 1.17-1.17.1" across matrix, UI and docs (T2).
+
 ## [0.7.0] - 2026-09-26
 
 ### Added

@@ -455,3 +455,13 @@ export interface DeleteDatapackRequest {
   world_name: string;
   file_name: string;
 }
+
+export interface PerformancePresetDTO {
+  suggested_ram_mb: number;
+  aikar_args: string[];
+}
+
+export interface ListOptimizationModsRequest {
+  game_version: string;
+  loader: string;
+}

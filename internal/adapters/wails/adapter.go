@@ -593,7 +593,6 @@ func (a *WailsAdapter) SetOnLogBatch(fn func(instanceID string, lines []string))
 	a.onLogBatch = fn
 }
 
-
 func (a *WailsAdapter) ListAccounts() ([]AccountDTO, error) {
 	if a.accountRepo == nil {
 		return []AccountDTO{}, nil
@@ -717,12 +716,12 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 		dtos := make([]ModItemDTO, 0, len(items))
 		for _, it := range items {
 			dtos = append(dtos, ModItemDTO{
-				ID:         it.ID,
-				Slug:       it.Slug,
-				Source:     string(it.Source),
-				Name:       it.Name,
-				Author:     it.Author,
-				Summary:    it.Summary,
+				ID:          it.ID,
+				Slug:        it.Slug,
+				Source:      string(it.Source),
+				Name:        it.Name,
+				Author:      it.Author,
+				Summary:     it.Summary,
 				IconURL:     it.IconURL,
 				Downloads:   it.Downloads,
 				Categories:  it.Categories,
@@ -778,6 +777,60 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 		Items:      dtos,
 		TotalCount: int64(total),
 	}, nil
+}
+
+// GetPerformancePreset returns the RAM heuristic suggestion for the current
+// machine and the canonical Aikar G1GC flag preset (Feature B, v0.7.1).
+// It is stateless: applying it is a normal UpdateInstance with
+// min/max_ram_mb and jvm_args the user can still edit.
+func (a *WailsAdapter) GetPerformancePreset() (*PerformancePresetDTO, error) {
+	total, err := launch.PhysicalMemoryMB()
+	suggested := launch.SuggestRAMMB(total)
+	if err != nil && total <= 0 {
+		suggested = launch.SuggestRAMMB(0)
+	}
+	return &PerformancePresetDTO{
+		SuggestedRAMMB: suggested,
+		AikarArgs:      launch.AikarArgs(suggested),
+	}, nil
+}
+
+// ListOptimizationMods resolves the curated optimization set for a loader
+// family via Modrinth search pinned to the instance game version, so every
+// returned item is installable through the existing version matcher.
+// Missing curated entries are skipped (no fake rows); a loader without a
+// curated set yields an empty result the UI renders as "nothing vetted yet".
+func (a *WailsAdapter) ListOptimizationMods(req ListOptimizationModsRequest) (*SearchModsResultDTO, error) {
+	slugs := launch.CuratedOptimizationSlugs(req.Loader)
+	if len(slugs) == 0 {
+		return &SearchModsResultDTO{Items: []ModItemDTO{}, TotalCount: 0}, nil
+	}
+	if a.modrinth == nil {
+		return nil, fmt.Errorf("modrinth client not initialized")
+	}
+	seen := map[string]bool{}
+	out := make([]ModItemDTO, 0, len(slugs))
+	for _, slug := range slugs {
+		res, err := a.SearchMods(SearchModsRequest{
+			Query:       slug,
+			GameVersion: req.GameVersion,
+			Loader:      req.Loader,
+			Source:      "modrinth",
+			Limit:       10,
+			ProjectType: "mod",
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, it := range res.Items {
+			if it.Slug == slug && !seen[slug] {
+				seen[slug] = true
+				out = append(out, it)
+				break
+			}
+		}
+	}
+	return &SearchModsResultDTO{Items: out, TotalCount: int64(len(out))}, nil
 }
 
 func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO, error) {
@@ -1184,11 +1237,11 @@ func (a *WailsAdapter) DeleteMod(req DeleteModRequest) error {
 	zipDisabledPath := filepath.Join(contentDir, rawClean+".zip.disabled")
 
 	// Remove candidate filenames (.jar, .jar.disabled, .zip, .zip.disabled) as well as explicit target
-	_ = os.Remove(jarPath)          // errcheck:ok best effort candidate removal
-	_ = os.Remove(disabledPath)     // errcheck:ok best effort candidate removal
-	_ = os.Remove(zipPath)          // errcheck:ok best effort candidate removal
-	_ = os.Remove(zipDisabledPath)  // errcheck:ok best effort candidate removal
-	_ = os.Remove(targetPath)       // errcheck:ok best effort target removal
+	_ = os.Remove(jarPath)         // errcheck:ok best effort candidate removal
+	_ = os.Remove(disabledPath)    // errcheck:ok best effort candidate removal
+	_ = os.Remove(zipPath)         // errcheck:ok best effort candidate removal
+	_ = os.Remove(zipDisabledPath) // errcheck:ok best effort candidate removal
+	_ = os.Remove(targetPath)      // errcheck:ok best effort target removal
 
 	// Remove from manifest
 	m, err := manifest.LoadManifest(contentDir)
@@ -3502,4 +3555,3 @@ func (a *WailsAdapter) distributeDatapack(instDir, srcPath, fileName, cleanInst,
 
 	return nil
 }
-

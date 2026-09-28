@@ -162,7 +162,8 @@ Every push and pull request must pass the CI Quality Gate:
 - **Bundle budget** — frontend ≤ 250 KB gzip.
 - **Binary budget** — release binary ≤ 40 MB.
 - **Latency SLA** — in-process IPC dispatch p95 ≤ 5,000 ns.
-- **Wails binding registry** — forward registration parity enforced for all 51 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
+- **Wails binding registry** — forward registration parity enforced for all 52 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
+- **Optimization set** — curated per-loader list (Fabric: sodium/lithium/ferrite-core/modernfix; Quilt: sodium/ferrite-core; Forge/NeoForge: oculus/ferrite-core/modernfix). Entries are resolved live against the instance game version; anything unvetted (e.g. Forge sodium ports, which are not on Modrinth) is intentionally omitted rather than guessed. Aikar flags follow the canonical G1GC set (aikar.co/mcflags); the preset never mixes with ZGC and never overrides -Xms/-Xmx (instance RAM fields own those).
 
 ---
 

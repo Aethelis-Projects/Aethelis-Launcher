@@ -38,6 +38,8 @@ import type {
   DeleteScreenshotRequest,
   GetScreenshotDataRequest,
   GetScreenshotDataResponse,
+  PerformancePresetDTO,
+  ListOptimizationModsRequest,
   SaveGameLogRequest,
   SaveGameLogResponse,
   MinecraftImportSummaryDTO,
@@ -102,6 +104,9 @@ interface WailsAdapterBindings {
   UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
   OpenPath?: (path: string) => Promise<void>;
   EnsureInstanceDir?: (instanceId: string, dirType: string) => Promise<string>;
+  GetPerformancePreset?: () => Promise<PerformancePresetDTO>;
+  ListOptimizationMods?: (req: ListOptimizationModsRequest) => Promise<SearchModsResultDTO>;
+
   ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
   ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
   ScanPrismInstance?: (req: ScanPrismInstanceRequest) => Promise<PrismImportSummaryDTO>;
@@ -1085,6 +1090,20 @@ export const launcherAPI = {
       instanceId,
       dirType
     );
+  },
+
+  async getPerformancePreset(): Promise<PerformancePresetDTO> {
+    return invokeWails<PerformancePresetDTO>("GetPerformancePreset", () => ({
+      suggested_ram_mb: 2048,
+      aikar_args: [],
+    }));
+  },
+
+  async listOptimizationMods(req: ListOptimizationModsRequest): Promise<SearchModsResultDTO> {
+    return invokeWails<SearchModsResultDTO>("ListOptimizationMods", () => ({
+      items: [],
+      total_count: 0,
+    }), req);
   },
 
   async listScreenshots(instanceId: string): Promise<ScreenshotDTO[]> {

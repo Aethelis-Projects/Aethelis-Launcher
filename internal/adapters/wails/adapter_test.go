@@ -408,6 +408,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetInstanceFavorite",
 		"SetInstanceGroup",
 		"EnsureInstanceDir",
+		"GetPerformancePreset",
 		"ListInstanceWorlds",
 		"ListWorldDatapacks",
 		"SetDatapackEnabled",
@@ -420,7 +421,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
 	// parity is strictly enforced via expectedMethods (51 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 51 {
+	if len(expectedMethods) != 52 {
 		t.Fatalf("expected exactly 51 Wails methods, got %d", len(expectedMethods))
 	}
 
@@ -1928,13 +1929,13 @@ func TestWailsAdapter_ListModVersions(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{
-					"id":          555123,
-					"modId":       123,
-					"fileName":    "jei-1.21.1.jar",
-					"downloadUrl": "https://edge.forgecdn.net/jei.jar",
-					"fileLength":  2097152,
-					"releaseType": 1,
-					"fileDate":    time.Now().Format(time.RFC3339),
+					"id":           555123,
+					"modId":        123,
+					"fileName":     "jei-1.21.1.jar",
+					"downloadUrl":  "https://edge.forgecdn.net/jei.jar",
+					"fileLength":   2097152,
+					"releaseType":  1,
+					"fileDate":     time.Now().Format(time.RFC3339),
 					"gameVersions": []string{"1.21.1", "Fabric"},
 				},
 			},
@@ -3182,6 +3183,102 @@ func TestWailsAdapter_Datapacks_PerWorldManagement(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_GetPerformancePreset(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+	res, err := adapter.GetPerformancePreset()
+	if err != nil {
+		t.Fatalf("GetPerformancePreset failed: %v", err)
+	}
+	if res.SuggestedRAMMB < 1024 || res.SuggestedRAMMB > 4096 {
+		t.Errorf("suggested RAM %d outside clamp [1024,4096]", res.SuggestedRAMMB)
+	}
+	if len(res.AikarArgs) == 0 {
+		t.Fatal("empty Aikar preset")
+	}
+	joined := strings.Join(res.AikarArgs, " ")
+	if !strings.Contains(joined, "-XX:+UseG1GC") || !strings.Contains(joined, "-XX:MaxGCPauseMillis=200") {
+		t.Error("preset missing canonical G1 anchors")
+	}
+	if strings.Contains(joined, "-Xm") {
+		t.Error("preset must not carry -Xms/-Xmx (owned by instance RAM fields)")
+	}
+}
 
+func TestWailsAdapter_ListOptimizationMods(t *testing.T) {
+	hits := map[string]string{
+		"sodium":       "Sodium",
+		"lithium":      "Lithium",
+		"ferrite-core": "FerriteCore",
+	}
+	var mu sync.Mutex
+	var seenQueries []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		mu.Lock()
+		seenQueries = append(seenQueries, query)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if title, ok := hits[query]; ok {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"hits": []map[string]interface{}{
+					{
+						"project_id":   "proj-" + query,
+						"slug":         query,
+						"title":        title,
+						"description":  "curated optimization entry",
+						"author":       "curated-author",
+						"downloads":    1000,
+						"categories":   []string{"fabric", "performance"},
+						"project_type": "mod",
+					},
+					{
+						"project_id":   "noise-" + query,
+						"slug":         query + "-unofficial-fork",
+						"title":        "Noise Fork",
+						"downloads":    5,
+						"project_type": "mod",
+					},
+				},
+				"total_hits": 2,
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"hits": []interface{}{}, "total_hits": 0})
+	}))
+	defer ts.Close()
 
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetContent(modrinth.NewClient(ts.URL, ts.Client()), nil)
 
+	res, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "fabric"})
+	if err != nil {
+		t.Fatalf("ListOptimizationMods failed: %v", err)
+	}
+	if len(res.Items) != len(hits) {
+		t.Fatalf("expected %d curated items (modernfix has no hit -> skipped), got %d: %+v", len(hits), len(res.Items), res.Items)
+	}
+	for _, it := range res.Items {
+		if _, ok := hits[it.Slug]; !ok {
+			t.Errorf("unexpected slug returned: %q", it.Slug)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seenQueries) != 4 {
+		t.Errorf("expected one lookup per curated slug (4), got %d: %v", len(seenQueries), seenQueries)
+	}
+
+	empty, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "vanilla"})
+	if err != nil {
+		t.Fatalf("vanilla must not error: %v", err)
+	}
+	if len(empty.Items) != 0 {
+		t.Fatalf("vanilla must return empty curated set, got %d", len(empty.Items))
+	}
+
+	// A loader with a curated set but no content client must fail loudly, not fake data.
+	bare := wails.NewWailsAdapter(nil)
+	if _, err := bare.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "forge"}); err == nil {
+		t.Fatal("expected error when modrinth client is not initialized")
+	}
+}

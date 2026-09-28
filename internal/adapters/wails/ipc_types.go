@@ -451,3 +451,13 @@ type DeleteDatapackRequest struct {
 	WorldName  string `json:"world_name"`
 	FileName   string `json:"file_name"`
 }
+
+type PerformancePresetDTO struct {
+	SuggestedRAMMB int      `json:"suggested_ram_mb"`
+	AikarArgs      []string `json:"aikar_args"`
+}
+
+type ListOptimizationModsRequest struct {
+	GameVersion string `json:"game_version"`
+	Loader      string `json:"loader"`
+}

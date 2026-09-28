@@ -1,7 +1,8 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database, Gauge, ChevronDown } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
+import type { ModItemDTO, PerformancePresetDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
 import { ModCatalog } from "../mods/ModCatalog";
 import { DatapackManager } from "./DatapackManager";
@@ -45,7 +46,7 @@ export function getRecommendedJavaMajor(version: string, manifestMajor?: number)
   return 21;
 }
 
-export type SettingsTab = "general" | "java" | "memory" | "args" | "mods" | "datapacks";
+export type SettingsTab = "general" | "java" | "memory" | "args" | "mods" | "datapacks" | "optimization";
 
 interface InstanceSettingsModalProps {
   instance: InstanceDTO;
@@ -72,6 +73,11 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const [availableRuntimes, setAvailableRuntimes] = createSignal<JavaInstallationDTO[]>([]);
   const [installingJava, setInstallingJava] = createSignal(false);
   const [installedJavaToast, setInstalledJavaToast] = createSignal("");
+  const [perfPreset, setPerfPreset] = createSignal<PerformancePresetDTO | null>(null);
+  const [optimizationMods, setOptimizationMods] = createSignal<ModItemDTO[]>([]);
+  const [optimizationLoaded, setOptimizationLoaded] = createSignal(false);
+  const [installedOptimizationIds, setInstalledOptimizationIds] = createSignal<Set<string>>(new Set());
+  const [installingOptimizationId, setInstallingOptimizationId] = createSignal("");
 
   const recommendedJava = () => getRecommendedJavaMajor(props.instance.game_version);
 
@@ -113,6 +119,9 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
       setMaxMemoryMb(props.instance.max_ram_mb || 4096);
       setCustomJvmArgs(props.instance.jvm_args ? props.instance.jvm_args.join(" ") : "");
       setError("");
+      setOptimizationMods([]);
+      setOptimizationLoaded(false);
+      launcherAPI.getPerformancePreset().then(setPerfPreset).catch(() => setPerfPreset(null));
 
       // Fetch runtimes for easy selection in Java tab
       loadRuntimes();
@@ -167,6 +176,74 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
       setError(msg);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const AIKAR_PREFIXES = [
+    "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis", "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch", "-XX:G1NewSizePercent", "-XX:G1MaxNewSizePercent",
+    "-XX:G1HeapRegionSize", "-XX:G1ReservePercent", "-XX:G1HeapWastePercent", "-XX:G1MixedGCCountTarget",
+    "-XX:InitiatingHeapOccupancyPercent", "-XX:G1MixedGCLiveThresholdPercent", "-XX:G1RSetUpdatingPauseTimePercent",
+    "-XX:SurvivorRatio", "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold",
+  ];
+
+  const currentJvmArgList = (): string[] => (customJvmArgs().trim() ? customJvmArgs().trim().split(/\s+/) : []);
+
+  const isAikarPresetActive = (): boolean => {
+    const preset = perfPreset();
+    if (!preset || preset.aikar_args.length === 0) return false;
+    const current = new Set(currentJvmArgList());
+    return preset.aikar_args.every((flag) => current.has(flag));
+  };
+
+  const handleApplyAikarPreset = () => {
+    const preset = perfPreset();
+    if (!preset) return;
+    const rest = currentJvmArgList().filter((a) => !AIKAR_PREFIXES.some((p) => a.startsWith(p)));
+    const merged = [...preset.aikar_args, ...rest];
+    setCustomJvmArgs(merged.join(" "));
+    const suggested = preset.suggested_ram_mb;
+    if (minMemoryMb() === 0 || maxMemoryMb() === 0) {
+      applyMemoryPreset(suggested, suggested);
+    }
+    setError("");
+  };
+
+  const handleResetAikarPreset = () => {
+    const rest = currentJvmArgList().filter((a) => !AIKAR_PREFIXES.some((p) => a.startsWith(p)));
+    setCustomJvmArgs(rest.join(" "));
+  };
+
+  const loadOptimizationMods = async () => {
+    if (optimizationLoaded() || !props.instance?.game_version) return;
+    setOptimizationLoaded(true);
+    try {
+      const res = await launcherAPI.listOptimizationMods({
+        game_version: props.instance.game_version,
+        loader: props.instance.loader,
+      });
+      setOptimizationMods(res.items || []);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Не удалось загрузить список оптимизации");
+    }
+  };
+
+  const handleInstallOptimizationMod = async (mod: ModItemDTO) => {
+    setInstallingOptimizationId(mod.id);
+    try {
+      await launcherAPI.installMod(props.instance.id, {
+        id: mod.id,
+        slug: mod.slug,
+        name: mod.name,
+        source: mod.source,
+      });
+      setInstalledOptimizationIds((prev) => new Set([...prev, mod.id]));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Не удалось установить мод");
+    } finally {
+      setInstallingOptimizationId("");
     }
   };
 
@@ -287,6 +364,20 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             >
               <Database class="w-4 h-4" />
               <span>Датапаки</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("optimization")}
+              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                activeTab() === "optimization"
+                  ? "border-nord-cyan text-nord-cyan font-semibold"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+              data-testid="tab-optimization"
+            >
+              <Gauge class="w-4 h-4" />
+              <span>Оптимизация</span>
             </button>
           </div>
 
@@ -789,6 +880,97 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             {/* TAB 6: Datapacks */}
             <Show when={activeTab() === "datapacks"}>
               <DatapackManager instanceId={props.instance.id} />
+            </Show>
+            {/* TAB 7: Optimization (Feature B) */}
+            <Show when={activeTab() === "optimization"}>
+              <div class="space-y-4">
+                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-zinc-200 font-semibold text-sm">Пресеты производительности</span>
+                    <Show when={isAikarPresetActive()}>
+                      <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium" data-testid="aikar-active-badge">
+                        Применён
+                      </span>
+                    </Show>
+                  </div>
+                  <Show when={perfPreset()}>
+                    <p class="text-xs text-zinc-400 leading-relaxed">
+                      Рекомендация по памяти для этого ПК: <span class="font-mono text-nord-cyan">{perfPreset()!.suggested_ram_mb} МБ</span>. Флаги Aikar G1GC — канонический набор настройки сборщика мусора (источник: aikar.co/mcflags); применять только с G1, не совмещать с -XX:+UseZGC.
+                    </p>
+                  </Show>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleApplyAikarPreset}
+                      disabled={!perfPreset() || perfPreset()!.aikar_args.length === 0}
+                      class="py-2 px-4 rounded-lg bg-[#00D4B2] text-zinc-950 text-xs font-semibold hover:bg-[#00e6c3] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      data-testid="aikar-apply-btn"
+                    >
+                      Применить Aikar G1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetAikarPreset}
+                      class="py-2 px-4 rounded-lg bg-zinc-800 border border-white/10 text-zinc-300 text-xs font-medium hover:bg-zinc-700 transition-colors cursor-pointer"
+                      data-testid="aikar-reset-btn"
+                    >
+                      Сбросить флаги
+                    </button>
+                  </div>
+                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                    Флаги добавляются в пользовательские аргументы JVM — итог виден на вкладке «Аргументы JVM» и сохраняется кнопкой «Сохранить».
+                  </p>
+                </div>
+
+                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
+                  <button
+                    type="button"
+                    onClick={loadOptimizationMods}
+                    class="w-full flex items-center justify-between cursor-pointer group"
+                    data-testid="optimization-catalog-toggle"
+                  >
+                    <span class="text-zinc-200 font-semibold text-sm">Каталог оптимизации (проверенный набор)</span>
+                    <ChevronDown class="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+                  </button>
+                  <Show when={optimizationLoaded() && optimizationMods().length === 0}>
+                    <p class="text-xs text-zinc-500 leading-relaxed">
+                      Для {props.instance.loader} {props.instance.game_version} проверенного набора нет — установите нужное вручную через вкладку «Моды» → «Каталог».
+                    </p>
+                  </Show>
+                  <Show when={optimizationMods().length > 0}>
+                    <div class="space-y-2">
+                      <For each={optimizationMods()}>
+                        {(mod) => (
+                          <div class="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-zinc-950/60 border border-white/5">
+                            <div class="min-w-0">
+                              <p class="text-xs font-semibold text-zinc-100 truncate">{mod.name}</p>
+                              <p class="text-[10px] text-zinc-500 truncate">{mod.summary || mod.slug}</p>
+                            </div>
+                            <Show
+                              when={!installedOptimizationIds().has(mod.id)}
+                              fallback={
+                                <span class="shrink-0 text-[11px] px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium">
+                                  Установлено
+                                </span>
+                              }
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleInstallOptimizationMod(mod)}
+                                disabled={installingOptimizationId() === mod.id}
+                                class="shrink-0 py-1.5 px-3 rounded-md bg-zinc-800 border border-white/10 text-zinc-200 text-[11px] font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors cursor-pointer"
+                                data-testid={`optimization-install-${mod.slug}`}
+                              >
+                                {installingOptimizationId() === mod.id ? "Установка..." : "Установить"}
+                              </button>
+                            </Show>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </div>
             </Show>
           </div>
 
