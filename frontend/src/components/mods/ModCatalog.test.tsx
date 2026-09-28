@@ -477,8 +477,10 @@ describe("ModCatalog Component", () => {
     const rpTab = screen.getByTestId("project-type-resourcepack");
     fireEvent.click(rpTab);
 
-    expect(await screen.findByTestId("only-modrinth-badge")).toBeTruthy();
-    expect(screen.queryByText("CurseForge")).toBeNull();
+    // v0.7.2 G4: CurseForge now serves resource packs (UISP class 12) - the
+    // provider toggle stays, no Modrinth lock for this type.
+    expect(screen.queryByTestId("only-modrinth-badge")).toBeNull();
+    expect(screen.getByText("CurseForge")).toBeTruthy();
 
     expect(searchSpy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -517,7 +519,8 @@ describe("ModCatalog Component", () => {
     const shaderTab = screen.getByTestId("project-type-shader");
     fireEvent.click(shaderTab);
 
-    expect(await screen.findByTestId("only-modrinth-badge")).toBeTruthy();
+    // v0.7.2 G4: shaders ride the CF class 65536 too - no lock on this tab.
+    expect(screen.queryByTestId("only-modrinth-badge")).toBeNull();
     expect(searchSpy).toHaveBeenCalledWith(
       expect.objectContaining({
         project_type: "shader",
@@ -630,7 +633,9 @@ describe("ModCatalog Component", () => {
         source: "modrinth",
       })
     );
-    expect(screen.getByTestId("only-modrinth-badge")).toBeTruthy();
+    // v0.7.2 G4: datapacks are Modrinth-only, but the provider control itself
+    // stays visible (the lock card appears only in the CF combination).
+    expect(screen.queryByTestId("only-modrinth-badge")).toBeNull();
 
     await screen.findByText("Incendium");
     const installBtn = screen.getByText("Установить");
@@ -654,5 +659,39 @@ describe("ModCatalog Component", () => {
     });
 
     await screen.findByText("Установлен");
+  });
+
+  it("curseforge datapacks show the honest gate, version/loader filters are sent (v0.7.2 G4)", async () => {
+    const searchSpy = vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [], total_count: 0 });
+    vi.spyOn(launcherAPI, "listProjectTags").mockResolvedValue([
+      { id: "617", label: "Combat", searchable: true },
+    ]);
+
+    render(() => <ModCatalog activeInstanceId="test-inst" gameVersion="1.21.1" loader="fabric" />);
+
+    // Switch to CurseForge, then to the datapack tab: gate instead of fake results.
+    fireEvent.click(await screen.findByText("CurseForge"));
+    fireEvent.click(screen.getByTestId("project-type-datapack"));
+
+    expect(await screen.findByTestId("catalog-cf-datapack-gate")).toBeTruthy();
+    expect(await screen.findByTestId("only-modrinth-badge")).toBeTruthy();
+    // Honest gate: the provider endpoint is never queried for datapacks on CF.
+    expect(searchSpy.mock.calls.every((c) => !(c[0].source === "curseforge" && c[0].project_type === "datapack"))).toBe(true);
+
+    // Loader + version filters are part of every request (server-side).
+    expect(screen.getByTestId("catalog-loader-filter")).toBeTruthy();
+    expect(screen.getByTestId("catalog-version-filter")).toBeTruthy();
+
+    // One click back to a working provider.
+    fireEvent.click(screen.getByTestId("catalog-cf-datapack-switch"));
+    expect(screen.queryByTestId("catalog-cf-datapack-gate")).toBeNull();
+
+    // And with a real query, filters are forwarded verbatim.
+    fireEvent.input(screen.getByPlaceholderText(/Поиск в/), { target: { value: "sodium" } });
+    await vi.waitFor(() => expect(searchSpy).toHaveBeenCalled());
+    const lastCall = searchSpy.mock.calls[searchSpy.mock.calls.length - 1][0];
+    expect(lastCall.source).toBe("modrinth");
+    expect(lastCall.game_version).toBe("1.21.1");
+    expect(lastCall.loader).toBe("fabric");
   });
 });

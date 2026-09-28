@@ -390,6 +390,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"RemoveJavaRuntime",
 		"AddJavaRuntime",
 		"ListModVersions",
+		"ListProjectTags",
 		"GetModInstallStatus",
 		"CheckModUpdates",
 		"GetDiagnosticReport",
@@ -427,9 +428,9 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (59 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 59 {
-		t.Fatalf("expected exactly 59 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (60 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 60 {
+		t.Fatalf("expected exactly 60 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -3211,7 +3212,6 @@ func TestWailsAdapter_GetPerformancePreset(t *testing.T) {
 	}
 }
 
-
 type stubIntegrityVerifier struct {
 	checkCalls int
 	fixCalls   int
@@ -3247,5 +3247,123 @@ func TestWailsAdapter_IntegrityWiring(t *testing.T) {
 	bare := wails.NewWailsAdapter(svc)
 	if _, err := bare.CheckInstanceFiles(wails.InstanceIDRequest{InstanceID: "missing-inst"}); err == nil || !strings.Contains(err.Error(), "integrity verifier not initialized") {
 		t.Fatalf("expected 'verifier not initialized' error, got %v", err)
+	}
+}
+
+// v0.7.2 G4: catalog provider semantics at the adapter boundary.
+func TestWailsAdapter_CatalogProvidersV072(t *testing.T) {
+	var mu sync.Mutex
+	var seenClassIDs []string
+
+	mrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/v2/tag/category") {
+			_ = json.NewEncoder(w).Encode([]map[string]any{ // errcheck:ok test server best effort
+				{"id": "optimization", "name": "Optimization", "project_type": ""},
+				{"id": "shaders", "name": "Shaders", "project_type": "resourcepack"},
+				{"id": "fabric", "name": "Fabric", "project_type": ""},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{ // errcheck:ok test server best effort
+			"hits":       []map[string]any{},
+			"total_hits": 0,
+		})
+	}))
+	defer mrServer.Close()
+
+	cfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seenClassIDs = append(seenClassIDs, r.URL.Query().Get("classId"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{ // errcheck:ok test server best effort
+			"data": []map[string]any{
+				{
+					"id":         999,
+					"slug":       "cf-item",
+					"name":       "CF Item",
+					"categories": []map[string]string{{"name": "Performance"}},
+				},
+			},
+			"pagination": map[string]any{"totalCount": 1},
+		})
+	}))
+	defer cfServer.Close()
+
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetContent(modrinth.NewClient(mrServer.URL, mrServer.Client()), curseforge.NewClient(cfServer.URL, "dummy-cf-key", cfServer.Client()))
+
+	// CF datapack/modpack: honest capability gate, endpoint never queried.
+	for _, pt := range []string{"datapack", "modpack"} {
+		res, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", ProjectType: pt, Limit: 20})
+		if err != nil {
+			t.Fatalf("SearchMods(%s) err: %v", pt, err)
+		}
+		if res.Reason != "unsupported_type" || len(res.Items) != 0 {
+			t.Fatalf("expected unsupported_type for CF %s, got %+v", pt, res)
+		}
+	}
+
+	// CF resourcepacks ride class 12, shaders class 65536, mods class 6.
+	type cfCase struct {
+		pt   string
+		want string
+	}
+	for _, c := range []cfCase{{"resourcepack", "12"}, {"shader", "65536"}, {"", "6"}} {
+		res, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", ProjectType: c.pt, Limit: 20})
+		if err != nil {
+			t.Fatalf("SearchMods(cf %s): %v", c.pt, err)
+		}
+		mu.Lock()
+		got := seenClassIDs[len(seenClassIDs)-1]
+		mu.Unlock()
+		if got != c.want {
+			t.Fatalf("CF classId for %q = %s, want %s", c.pt, got, c.want)
+		}
+		wantPT := c.pt
+		if wantPT == "" {
+			wantPT = "mod"
+		}
+		if res.Items[0].ProjectType != wantPT {
+			t.Fatalf("item ProjectType = %q, want %q", res.Items[0].ProjectType, wantPT)
+		}
+	}
+
+	// CF client-side tag filter drops non-matching categories.
+	dropped, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", Category: "Magic", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped.Items) != 0 {
+		t.Fatalf("client-side category filter must drop non-matching items, got %+v", dropped.Items)
+	}
+	kept, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", Category: "performance", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept.Items) != 1 {
+		t.Fatalf("case-insensitive name match should keep the item, got %d", len(kept.Items))
+	}
+
+	// ListProjectTags: CF = mirrored UISP table, Modrinth = live curated feed.
+	cfTags, err := adapter.ListProjectTags(wails.ListProjectTagsRequest{Provider: "curseforge", ProjectType: "mod"})
+	if err != nil {
+		t.Fatalf("ListProjectTags(cf): %v", err)
+	}
+	if len(cfTags) == 0 || cfTags[0].Label != "Combat" {
+		t.Fatalf("unexpected CF tag table: %+v", cfTags)
+	}
+	mrTags, err := adapter.ListProjectTags(wails.ListProjectTagsRequest{ProjectType: "resourcepack"})
+	if err != nil {
+		t.Fatalf("ListProjectTags(modrinth): %v", err)
+	}
+	// project_type narrowing: only tags explicitly qualified for the type
+	// apply to non-mod catalogues (unqualified Modrinth tags are mod-only).
+	if len(mrTags) != 1 || mrTags[0].ID != "shaders" {
+		t.Fatalf("expected 2 resourcepack-relevant tags, got %+v", mrTags)
+	}
+	if _, err := adapter.ListProjectTags(wails.ListProjectTagsRequest{ProjectType: "mod"}); err != nil {
+		t.Fatalf("ListProjectTags(mod): %v", err)
 	}
 }

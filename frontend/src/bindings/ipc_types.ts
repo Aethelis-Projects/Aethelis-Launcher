@@ -117,6 +117,17 @@ export interface SearchModsRequest {
   project_type?: ProjectType;
 }
 
+export interface ProjectTagDTO {
+  id: string;
+  label: string;
+  searchable: boolean;
+}
+
+export interface ListProjectTagsRequest {
+  provider?: string;
+  project_type?: string;
+}
+
 export interface SearchModsResultDTO {
   items: ModItemDTO[];
   total_count: number;

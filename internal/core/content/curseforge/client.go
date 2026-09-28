@@ -267,19 +267,19 @@ func LoaderToType(loader string) int {
 type cfSearchResponse struct {
 	Data       []cfMod `json:"data"`
 	Pagination struct {
-		Index       int   `json:"index"`
-		PageSize    int   `json:"pageSize"`
-		TotalCount  int64 `json:"totalCount"`
+		Index      int   `json:"index"`
+		PageSize   int   `json:"pageSize"`
+		TotalCount int64 `json:"totalCount"`
 	} `json:"pagination"`
 }
 
 type cfMod struct {
-	ID          int64     `json:"id"`
-	Slug        string    `json:"slug"`
-	Name        string    `json:"name"`
-	Summary     string    `json:"summary"`
+	ID            int64   `json:"id"`
+	Slug          string  `json:"slug"`
+	Name          string  `json:"name"`
+	Summary       string  `json:"summary"`
 	DownloadCount float64 `json:"downloadCount"`
-	Logo        *struct {
+	Logo          *struct {
 		URL string `json:"url"`
 	} `json:"logo"`
 	Authors []struct {
@@ -415,15 +415,33 @@ func (c *Client) SearchMods(
 		return nil, 0, errors.New("curseforge: API key is not configured (set CURSEFORGE_API_KEY environment variable)")
 	}
 
-	var sort, category string
+	var sort, category, projectType string
 	if len(opts) > 0 {
 		sort = opts[0]
 	}
 	if len(opts) > 1 {
 		category = opts[1]
 	}
+	if len(opts) > 2 {
+		projectType = opts[2]
+	}
+	projectType = strings.ToLower(strings.TrimSpace(projectType))
 
-	cacheKey := fmt.Sprintf("%s|%s|%s|%d|%d|%s|%s", query, gameVersion, loader, pageSize, index, sort, category)
+	// v0.7.2 G4: CurseForge splits mod/resource pack/shader pack into UISP
+	// classes (gameVersionTypeId); datapacks have no class at all -> the
+	// adapter refuses that combination before calling here.
+	classID := "6"
+	switch projectType {
+	case "", "mod", "modpack":
+	case "resourcepack", "resourcepacks":
+		classID = "12"
+	case "shader", "shaders":
+		classID = "65536"
+	default:
+		return nil, 0, fmt.Errorf("curseforge: unsupported project type %q", projectType)
+	}
+
+	cacheKey := fmt.Sprintf("%s|%s|%s|%d|%d|%s|%s|%s", query, gameVersion, loader, pageSize, index, sort, category, projectType)
 	now := c.now()
 
 	c.mu.RLock()
@@ -460,7 +478,7 @@ func (c *Client) SearchMods(
 
 	q := u.Query()
 	q.Set("gameId", strconv.Itoa(MinecraftGameID))
-	q.Set("classId", "6") // 6 = Mods
+	q.Set("classId", classID) // 6=mods, 12=resource packs, 65536=shaders
 	if query != "" {
 		q.Set("searchFilter", query)
 	}
@@ -567,17 +585,17 @@ type cfFilesResponse struct {
 }
 
 type cfFile struct {
-	ID           int64         `json:"id"`
-	ModID        int64         `json:"modId"`
-	DisplayName  string        `json:"displayName"`
-	FileName     string        `json:"fileName"`
-	FileDate     time.Time     `json:"fileDate"`
-	FileLength   int64         `json:"fileLength"`
-	ReleaseType  int           `json:"releaseType"` // 1 = Release, 2 = Beta, 3 = Alpha
-	DownloadURL  string        `json:"downloadUrl"`
-	GameVersions []string      `json:"gameVersions"`
-	Hashes       []cfHash      `json:"hashes"`
-	Dependencies []cfFileDep   `json:"dependencies"`
+	ID           int64       `json:"id"`
+	ModID        int64       `json:"modId"`
+	DisplayName  string      `json:"displayName"`
+	FileName     string      `json:"fileName"`
+	FileDate     time.Time   `json:"fileDate"`
+	FileLength   int64       `json:"fileLength"`
+	ReleaseType  int         `json:"releaseType"` // 1 = Release, 2 = Beta, 3 = Alpha
+	DownloadURL  string      `json:"downloadUrl"`
+	GameVersions []string    `json:"gameVersions"`
+	Hashes       []cfHash    `json:"hashes"`
+	Dependencies []cfFileDep `json:"dependencies"`
 }
 
 type cfHash struct {

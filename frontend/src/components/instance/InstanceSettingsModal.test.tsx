@@ -44,11 +44,13 @@ describe("InstanceSettingsModal (J2)", () => {
     vi.spyOn(launcherAPI, "listInstalledMods").mockResolvedValue([]);
     vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [], total_count: 0 });
 
+    const onCatalog = vi.fn();
     render(() => (
       <InstanceSettingsModal
         instance={mockInstance}
         isOpen={true}
         initialTab="performance"
+        onOpenCatalog={onCatalog}
         onClose={vi.fn()}
         onSaved={vi.fn()}
       />
@@ -71,11 +73,12 @@ describe("InstanceSettingsModal (J2)", () => {
     expect(screen.getByTestId("aikar-apply-btn")).toBeTruthy();
     expect(screen.getByTestId("perf-discord-toggle")).toBeTruthy();
 
-    // Mods subtabs still work.
+    // Mods tab = installed manager only; catalog lives on its own page now.
     fireEvent.click(screen.getByTestId("tab-mods"));
-    expect(screen.getByTestId("mods-subtab-installed")).toBeTruthy();
-    fireEvent.click(screen.getByTestId("mods-subtab-catalog"));
-    expect(await screen.findByText(/Каталог модификаций/)).toBeTruthy();
+    expect(screen.queryByTestId("mods-subtab-catalog")).toBeNull();
+    const catLink = screen.getByTestId("settings-open-catalog-link");
+    fireEvent.click(catLink);
+    expect(onCatalog).toHaveBeenCalled();
   });
 
   it("saves updated settings with expanded DTO parameters", async () => {

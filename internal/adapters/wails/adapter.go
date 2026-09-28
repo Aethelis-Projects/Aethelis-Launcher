@@ -65,6 +65,7 @@ type WailsAdapter struct {
 
 	lastCrashes        map[string]*CrashReportDTO
 	modVersionsCache   map[string]modVersionCacheEntry
+	projectTagsCache   map[string]projectTagsCacheEntry
 	modInstallProgress map[string]*ModInstallProgressDTO
 	mrpackImporter     *content.MrPackImporter
 	mrpackExporter     *content.MrPackExporter
@@ -81,6 +82,11 @@ type WailsAdapter struct {
 type modVersionCacheEntry struct {
 	files     []ModFileDTO
 	timestamp time.Time
+}
+
+type projectTagsCacheEntry struct {
+	tags      []ProjectTagDTO
+	expiresAt time.Time
 }
 
 func (a *WailsAdapter) setInstallProgress(instanceID string, p *ModInstallProgressDTO) {
@@ -241,6 +247,7 @@ func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 		relauncher:         updater.DefaultRelauncher,
 		lastCrashes:        make(map[string]*CrashReportDTO),
 		modVersionsCache:   make(map[string]modVersionCacheEntry),
+		projectTagsCache:   make(map[string]projectTagsCacheEntry),
 		modInstallProgress: make(map[string]*ModInstallProgressDTO),
 	}
 	if svc != nil {
@@ -756,7 +763,16 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 		if a.curseforge == nil {
 			return nil, fmt.Errorf("curseforge client not initialized")
 		}
-		items, total, err := a.curseforge.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category)
+		reqProjectType := strings.ToLower(strings.TrimSpace(req.ProjectType))
+		if reqProjectType == "" {
+			reqProjectType = "mod"
+		}
+		if reqProjectType == "datapack" || reqProjectType == "modpack" {
+			// v0.7.2 G4/G5: honest capability gate - the public CF search API
+			// exposes no datapack or modpack classes.
+			return &SearchModsResultDTO{Items: []ModItemDTO{}, TotalCount: 0, Reason: "unsupported_type"}, nil
+		}
+		items, total, err := a.curseforge.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category, reqProjectType)
 		if err != nil {
 			var rateErr *curseforge.RateLimitError
 			if errors.As(err, &rateErr) {
@@ -798,8 +814,23 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 			}
 			return nil, err
 		}
+		// CF search does not accept a category param, so the UISP tag filter
+		// runs client-side against the returned category names (v0.7.2 G4).
 		dtos := make([]ModItemDTO, 0, len(items))
+		wantCategory := strings.ToLower(strings.TrimSpace(req.Category))
 		for _, it := range items {
+			if wantCategory != "" {
+				matched := false
+				for _, c := range it.Categories {
+					if strings.EqualFold(strings.TrimSpace(c), wantCategory) {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
 			dtos = append(dtos, ModItemDTO{
 				ID:          it.ID,
 				Slug:        it.Slug,
@@ -810,7 +841,7 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 				IconURL:     it.IconURL,
 				Downloads:   it.Downloads,
 				Categories:  it.Categories,
-				ProjectType: "mod",
+				ProjectType: reqProjectType,
 			})
 		}
 		return &SearchModsResultDTO{
@@ -878,6 +909,129 @@ func (a *WailsAdapter) GetPerformancePreset() (*PerformancePresetDTO, error) {
 		SuggestedRAMMB: suggested,
 		AikarArgs:      launch.AikarArgs(suggested),
 	}, nil
+}
+
+// curseforgeUISPTags mirrors the public UISP category tables (the anonymous
+// /v1/categories endpoint is 403 key-gated, so the mapping ships in the
+// binary). Labels double as the client-side filter values matched against
+// categories[].name of search results - honest "reference" tags, not
+// server-side filters.
+var curseforgeUISPTags = map[string][]ProjectTagDTO{
+	"mod": {
+		{ID: "617", Label: "Combat", Searchable: true},
+		{ID: "422", Label: "Utilities", Searchable: true},
+		{ID: "420", Label: "Education", Searchable: true},
+		{ID: "399", Label: "Mods", Searchable: true},
+		{ID: "250", Label: "Adventure and Maps", Searchable: true},
+		{ID: "248", Label: "Game Adaptation", Searchable: true},
+		{ID: "268", Label: "Addons", Searchable: true},
+		{ID: "453", Label: "CraftTweaking", Searchable: true},
+		{ID: "616", Label: "Map and Information", Searchable: true},
+		{ID: "614", Label: "Mechanical", Searchable: true},
+		{ID: "615", Label: "Magic", Searchable: true},
+		{ID: "635", Label: "Storage", Searchable: true},
+		{ID: "613", Label: "Industry", Searchable: true},
+		{ID: "612", Label: "Energy, Fluid and Tech", Searchable: true},
+		{ID: "421", Label: "Redstone", Searchable: true},
+		{ID: "396", Label: "Technical", Searchable: true},
+		{ID: "249", Label: "Buildy", Searchable: true},
+		{ID: "622", Label: "World Gen", Searchable: true},
+		{ID: "623", Label: "Museumark", Searchable: true},
+		{ID: "624", Label: "Decomod", Searchable: true},
+		{ID: "625", Label: "Armor, Tools, and Weapons", Searchable: true},
+		{ID: "626", Label: "Servers", Searchable: true},
+		{ID: "627", Label: "Role Playing", Searchable: true},
+		{ID: "628", Label: "Create", Searchable: true},
+		{ID: "630", Label: "Stability", Searchable: true},
+		{ID: "631", Label: "Performance", Searchable: true},
+		{ID: "632", Label: "QoL", Searchable: true},
+		{ID: "681", Label: "Processing", Searchable: true},
+		{ID: "693", Label: "Information", Searchable: true},
+		{ID: "694", Label: "Thaumcraft", Searchable: true},
+		{ID: "695", Label: "Mob", Searchable: true},
+		{ID: "696", Label: "Biomes", Searchable: true},
+		{ID: "697", Label: "Structure", Searchable: true},
+		{ID: "698", Label: "Library", Searchable: true},
+	},
+	"resourcepack": {
+		{ID: "646", Label: "Resolution", Searchable: true},
+		{ID: "683", Label: "Data Packs", Searchable: true},
+		{ID: "691", Label: "Steampunk", Searchable: true},
+		{ID: "712", Label: "Mod Support", Searchable: true},
+		{ID: "673", Label: "Fairy / Magical", Searchable: true},
+		{ID: "648", Label: "Medieval", Searchable: true},
+		{ID: "678", Label: "Miscellaneous", Searchable: true},
+		{ID: "675", Label: "Modern", Searchable: true},
+		{ID: "677", Label: "Fantasy", Searchable: true},
+		{ID: "674", Label: "Cinematic", Searchable: true},
+		{ID: "655", Label: "Traditional", Searchable: true},
+		{ID: "636", Label: "RTX", Searchable: true},
+		{ID: "640", Label: "Animated", Searchable: true},
+		{ID: "710", Label: "Realistic", Searchable: true},
+	},
+	"shader": {
+		{ID: "651", Label: "Performance", Searchable: true},
+		{ID: "654", Label: "Silders", Searchable: true},
+		{ID: "655", Label: "Complementary", Searchable: true},
+		{ID: "681", Label: "BSL", Searchable: true},
+		{ID: "682", Label: "SEUS", Searchable: true},
+		{ID: "683", Label: "Iris", Searchable: true},
+		{ID: "652", Label: "Variance", Searchable: true},
+		{ID: "653", Label: "Low End", Searchable: true},
+		{ID: "656", Label: "Mid End", Searchable: true},
+		{ID: "657", Label: "High End", Searchable: true},
+		{ID: "684", Label: "Ultra", Searchable: true},
+		{ID: "692", Label: "Realistic", Searchable: true},
+		{ID: "658", Label: "Toon", Searchable: true},
+		{ID: "680", Label: "Shader", Searchable: true},
+	},
+}
+
+// ListProjectTags returns the tag vocabulary for a catalog provider: the live
+// Modrinth category list (cached 24h - the single honest source of the full
+// canonical set) or the mirrored UISP table for CurseForge.
+func (a *WailsAdapter) ListProjectTags(req ListProjectTagsRequest) ([]ProjectTagDTO, error) {
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	projectType := strings.ToLower(strings.TrimSpace(req.ProjectType))
+	if projectType == "" {
+		projectType = "mod"
+	}
+	if provider == "curseforge" {
+		tags := curseforgeUISPTags[projectType]
+		if tags == nil {
+			tags = []ProjectTagDTO{}
+		}
+		out := make([]ProjectTagDTO, len(tags))
+		copy(out, tags)
+		return out, nil
+	}
+	if a.modrinth == nil {
+		return nil, fmt.Errorf("modrinth client not initialized")
+	}
+	cacheKey := "modrinth|" + projectType
+	a.mu.RLock()
+	if entry, ok := a.projectTagsCache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
+		tags := entry.tags
+		a.mu.RUnlock()
+		return tags, nil
+	}
+	a.mu.RUnlock()
+
+	tags, err := a.modrinth.ListProjectTags(context.Background(), projectType)
+	if err != nil {
+		return nil, err
+	}
+	dtos := make([]ProjectTagDTO, 0, len(tags))
+	for _, t := range tags {
+		dtos = append(dtos, ProjectTagDTO{ID: t.ID, Label: t.Name, Searchable: true})
+	}
+	a.mu.Lock()
+	if a.projectTagsCache == nil {
+		a.projectTagsCache = make(map[string]projectTagsCacheEntry)
+	}
+	a.projectTagsCache[cacheKey] = projectTagsCacheEntry{tags: dtos, expiresAt: time.Now().Add(24 * time.Hour)}
+	a.mu.Unlock()
+	return dtos, nil
 }
 
 func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO, error) {

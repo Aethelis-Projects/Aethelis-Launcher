@@ -208,18 +208,65 @@ func (c *Client) SearchMods(
 }
 
 type projectResponse struct {
-	ID          string    `json:"id"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Body        string    `json:"body"`
-	IconURL     string    `json:"icon_url"`
-	Downloads   int64     `json:"downloads"`
-	Follows     int64     `json:"follows"`
-	Categories  []string  `json:"categories"`
-	Loaders     []string  `json:"loaders"`
-	GameVersions []string `json:"game_versions"`
-	Updated     time.Time `json:"updated"`
+	ID           string    `json:"id"`
+	Slug         string    `json:"slug"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	Body         string    `json:"body"`
+	IconURL      string    `json:"icon_url"`
+	Downloads    int64     `json:"downloads"`
+	Follows      int64     `json:"follows"`
+	Categories   []string  `json:"categories"`
+	Loaders      []string  `json:"loaders"`
+	GameVersions []string  `json:"game_versions"`
+	Updated      time.Time `json:"updated"`
+}
+
+// ProjectTag is a canonical Modrinth category/tag (GET /v2/tag/category).
+type ProjectTag struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Icon        string `json:"icon"`
+	ProjectType string `json:"project_type"`
+}
+
+// ListProjectTags returns the full curated category list (126 tags as of
+// 2026-09). When projectType is non-empty the list is narrowed to tags that
+// Modrinth actually applies to that project type (plus the shared ones).
+func (c *Client) ListProjectTags(ctx context.Context, projectType string) ([]ProjectTag, error) {
+	reqURL := fmt.Sprintf("%s/v2/tag/category", c.baseURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", c.userAgent)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch modrinth tags: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("modrinth tags HTTP %d", resp.StatusCode)
+	}
+
+	var tags []ProjectTag
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
+		return nil, fmt.Errorf("decode modrinth tags: %w", err)
+	}
+	projectType = strings.ToLower(strings.TrimSpace(projectType))
+	if projectType != "" && projectType != "mod" {
+		filtered := make([]ProjectTag, 0, len(tags))
+		for _, t := range tags {
+			// Unqualified tags on Modrinth are mod-oriented; for non-mod
+			// project types only the explicitly qualified ones apply.
+			if t.ProjectType == projectType {
+				filtered = append(filtered, t)
+			}
+		}
+		tags = filtered
+	}
+	return tags, nil
 }
 
 // GetProject fetches full project details for a slug or ID.
@@ -272,7 +319,7 @@ type versionResponse struct {
 	Changelog     string         `json:"changelog"`
 	GameVersions  []string       `json:"game_versions"`
 	Loaders       []string       `json:"loaders"`
-	DatePublished time.Time     `json:"date_published"`
+	DatePublished time.Time      `json:"date_published"`
 	Files         []fileResponse `json:"files"`
 	Dependencies  []depResponse  `json:"dependencies"`
 }

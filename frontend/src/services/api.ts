@@ -59,7 +59,8 @@ import type {
   InstallDatapackRequest,
   ToggleDatapackRequest,
   DeleteDatapackRequest,
-} from "../bindings/ipc_types";
+  ListProjectTagsRequest,
+  ProjectTagDTO,} from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
   GetCurrentVersion?: () => Promise<string>;
@@ -667,6 +668,10 @@ export const launcherAPI = {
       mockAccounts.push(newAcc);
       return newAcc;
     });
+  },
+
+  async listProjectTags(req: ListProjectTagsRequest): Promise<ProjectTagDTO[]> {
+    return invokeWails<ProjectTagDTO[]>("ListProjectTags", () => [], req);
   },
 
   async searchMods(req: SearchModsRequest): Promise<SearchModsResultDTO> {

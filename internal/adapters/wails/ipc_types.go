@@ -113,6 +113,17 @@ type SearchModsRequest struct {
 	ProjectType string `json:"project_type,omitempty"`
 }
 
+type ProjectTagDTO struct {
+	ID         string `json:"id"`
+	Label      string `json:"label"`
+	Searchable bool   `json:"searchable"`
+}
+
+type ListProjectTagsRequest struct {
+	Provider    string `json:"provider,omitempty"`
+	ProjectType string `json:"project_type,omitempty"`
+}
+
 type SearchModsResultDTO struct {
 	Items             []ModItemDTO `json:"items"`
 	TotalCount        int64        `json:"total_count"`

@@ -4,7 +4,6 @@ import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
 import type { IntegrityResultDTO, PerformancePresetDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
-import { ModCatalog } from "../mods/ModCatalog";
 import { DatapackManager } from "./DatapackManager";
 import { PRESET_AVATARS, getRandomAvatar } from "../../assets/avatars";
 
@@ -54,12 +53,12 @@ interface InstanceSettingsModalProps {
   onClose: () => void;
   onSaved: (updated: InstanceDTO) => void;
   onOpenJavaManager?: () => void;
+  onOpenCatalog?: () => void;
   initialTab?: SettingsTab;
 }
 
 export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (props) => {
   const [activeTab, setActiveTab] = createSignal<SettingsTab>(props.initialTab || "general");
-  const [modSubTab, setModSubTab] = createSignal<"installed" | "catalog">("installed");
   const [name, setName] = createSignal("");
   const [group, setGroup] = createSignal("");
   const [iconPath, setIconPath] = createSignal("");
@@ -636,7 +635,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
 
                 <div class="p-3.5 rounded-xl bg-black/20 border border-white/5 flex items-center justify-between gap-3">
                   <div>
-                    <span class="text-xs font-semibold text-white">Discord Rich Presence</span>
+                    <span class="text-xs font-semibold text-white">Показывать статус в Discord</span>
                     <p class="text-[11px] text-zinc-400">
                       Локальный показ статуса игры в Discord (launch-local IPC, без сетевых запросов).
                     </p>
@@ -797,48 +796,26 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
               </div>
             </Show>
 
-            {/* TAB 5: Mods (Installed vs Catalog) */}
+            {/* TAB 5: Mods - installed manager only (catalog moved to its own page, v0.7.2 G3) */}
             <Show when={activeTab() === "mods"}>
               <div class="space-y-4">
-                {/* Segmented Control */}
-                <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 w-fit">
-                  <button
-                    type="button"
-                    onClick={() => setModSubTab("installed")}
-                    class={`px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                      modSubTab() === "installed"
-                        ? "bg-[#00D4B2] text-zinc-950 font-semibold shadow"
-                        : "text-zinc-400 hover:text-zinc-100"
-                    }`}
-                    data-testid="mods-subtab-installed"
-                  >
-                    Установленные
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModSubTab("catalog")}
-                    class={`px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                      modSubTab() === "catalog"
-                        ? "bg-[#00D4B2] text-zinc-950 font-semibold shadow"
-                        : "text-zinc-400 hover:text-zinc-100"
-                    }`}
-                    data-testid="mods-subtab-catalog"
-                  >
-                    Каталог
-                  </button>
+                <div class="flex items-center justify-between">
+                  <span class="text-zinc-200 font-semibold text-sm">Управление установленными модификациями</span>
+                  <Show when={props.onOpenCatalog}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        props.onClose();
+                        props.onOpenCatalog?.();
+                      }}
+                      class="text-[11px] text-nord-cyan hover:underline cursor-pointer"
+                      data-testid="settings-open-catalog-link"
+                    >
+                      Открыть каталог
+                    </button>
+                  </Show>
                 </div>
-
-                <Show when={modSubTab() === "installed"}>
-                  <InstalledModsManager instanceId={props.instance.id} />
-                </Show>
-
-                <Show when={modSubTab() === "catalog"}>
-                  <ModCatalog
-                    activeInstanceId={props.instance.id}
-                    gameVersion={props.instance.game_version}
-                    loader={props.instance.loader}
-                  />
-                </Show>
+                <InstalledModsManager instanceId={props.instance.id} />
               </div>
             </Show>
 

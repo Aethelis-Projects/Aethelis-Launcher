@@ -1,5 +1,5 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image, FolderDown } from "lucide-solid";
+import { LayoutGrid, Package, Library, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image, FolderDown } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
 import { InstanceCard } from "./components/instance/InstanceCard";
@@ -10,6 +10,7 @@ import { MrPackExportModal } from "./components/instance/MrPackExportModal";
 import { ImportInstanceModal } from "./components/instance/ImportInstanceModal";
 import { JavaManager } from "./components/java/JavaManager";
 import { AccountManager } from "./components/accounts/AccountManager";
+import { ModCatalog } from "./components/mods/ModCatalog";
 import { CrashModal } from "./components/console/CrashModal";
 import { GameConsoleModal } from "./components/console/GameConsoleModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
@@ -27,7 +28,7 @@ export type UpdateBadgeState =
   | "snoozed-visible"
   | "unknown";
 
-type NavTab = "instances" | "accounts" | "settings" | "java_manager";
+type NavTab = "instances" | "catalog" | "accounts" | "settings" | "java_manager";
 
 export const App: Component = () => {
   // Navigation
@@ -398,6 +399,20 @@ export const App: Component = () => {
               data-testid="nav-instances"
             >
               <LayoutGrid class="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrentNav("catalog")}
+              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                currentNav() === "catalog"
+                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+              title="Каталог (моды, ресурспаки, шейдеры, датапаки)"
+              data-testid="nav-catalog"
+            >
+              <Library class="w-5 h-5" />
             </button>
 
             <button
@@ -834,6 +849,29 @@ export const App: Component = () => {
           </Show>
 
           {/* VIEW 2: Accounts Management */}
+          <Show when={currentNav() === "catalog"}>
+            <div class="max-w-6xl mx-auto">
+              <Show
+                when={activeInstance().id}
+                fallback={
+                  <div
+                    class="p-6 rounded-2xl bg-nord-surface border border-white/10 text-sm text-zinc-400"
+                    data-testid="catalog-no-instance"
+                  >
+                    Каталог устанавливает файлы только в конкретную сборку — выберите сборку на
+                    главной, затем повторите. Витрина доступна и сейчас: поиск, теги и фильтры работают.
+                  </div>
+                }
+              >
+                <ModCatalog
+                  activeInstanceId={activeInstance().id}
+                  gameVersion={activeInstance().game_version}
+                  loader={activeInstance().loader}
+                />
+              </Show>
+            </div>
+          </Show>
+
           <Show when={currentNav() === "accounts"}>
             <div class="max-w-3xl mx-auto">
               <AccountManager />
@@ -878,6 +916,10 @@ export const App: Component = () => {
           );
         }}
         onOpenJavaManager={() => setCurrentNav("java_manager")}
+        onOpenCatalog={() => {
+          setIsSettingsOpen(false);
+          setCurrentNav("catalog");
+        }}
       />
 
       {/* MrPack Import Modal (v0.6.0) */}
