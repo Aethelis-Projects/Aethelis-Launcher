@@ -299,3 +299,106 @@ func TestCFPack_NotAPack(t *testing.T) {
 		t.Fatal("plain zip must be rejected as non-pack")
 	}
 }
+
+// --- C6 security audit: credential blocklist + traversal, repeated for the
+// zip pipeline with the same rigor as the v0.7.0 D'4a importer audit strings.
+
+func TestCFPack_CredentialBlocklist_UppercaseVariant(t *testing.T) {
+	zipPath := writeCFPackZip(t, map[string]string{
+		"manifest.json":               cfManifestJSON(false),
+		"overrides/LAUNCHER_ACCOUNTS.JSON": "{\"accessToken\":\"leak\"}",
+		"overrides/Config/MSA_Credentials.BIN": "x",
+		"overrides/MyPack.TOKEN":       "tok",
+	})
+	imp, instancesDir := setupCFPackImporter(t, nil, "")
+	plan, err := imp.ScanCurseForgeZip(context.Background(), zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.BlockedNames) != 3 || len(plan.OverrideNames) != 0 {
+		t.Fatalf("case-insensitive blocklist failed: blocked=%+v allowed=%+v", plan.BlockedNames, plan.OverrideNames)
+	}
+	// Commit path (no downloads needed: resolver-less plan has 0 files but is manifest-format).
+	res, err := imp.ImportCurseForgeZip(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.OverrideFiles != 0 || len(res.SkippedCred) != 3 {
+		t.Fatalf("extraction must skip all three, got %+v", res)
+	}
+	entries, _ := os.ReadDir(filepath.Join(instancesDir, res.InstanceID))
+	for _, e := range entries {
+		if strings.Contains(strings.ToUpper(e.Name()), "ACCOUNTS") || strings.Contains(strings.ToUpper(e.Name()), "TOKEN") {
+			t.Fatalf("SECURITY LEAK: credential-named entry %q written to instance dir", e.Name())
+		}
+	}
+}
+
+func TestCFPack_Traversal_NestedDotDotRejected(t *testing.T) {
+	zipPath := writeCFPackZip(t, map[string]string{
+		"manifest.json":            cfManifestJSON(false),
+		"overrides/config/../../escape.txt": "outside",
+		"overrides/./relative-ok.txt":       "inside",
+	})
+	imp, _ := setupCFPackImporter(t, nil, "")
+	if _, err := imp.ScanCurseForgeZip(context.Background(), zipPath); err == nil {
+		t.Fatal("nested '..' component must be rejected at scan time")
+	} else if !strings.Contains(err.Error(), "parent-directory") {
+		t.Fatalf("expected explicit parent-directory traversal error, got %v", err)
+	}
+}
+
+func TestCFPack_TamperedZipAfterScan_SkipsInjectedCredential(t *testing.T) {
+	// TOCTOU-style guard: blocklist is re-applied at extraction, not only at scan.
+	zipPath := writeCFPackZip(t, map[string]string{
+		"manifest.json":         cfManifestJSON(false),
+		"overrides/options.txt": "fov:90.0\n",
+	})
+	imp, instancesDir := setupCFPackImporter(t, nil, "")
+	plan, err := imp.ScanCurseForgeZip(context.Background(), zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.BlockedNames) != 0 {
+		t.Fatalf("initial zip must be clean: %+v", plan.BlockedNames)
+	}
+	// Mutate the archive on disk: inject a credential override.
+	if err := os.Remove(zipPath); err != nil {
+		t.Fatal(err)
+	}
+	tampered := writeCFPackZipAt(t, filepath.Dir(zipPath), "pack.zip", map[string]string{
+		"manifest.json":                    cfManifestJSON(false),
+		"overrides/options.txt":            "fov:90.0\n",
+		"overrides/usercache.json":         "{\"evil\":1}",
+	})
+	plan.ZipPath = tampered
+	res, err := imp.ImportCurseForgeZip(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.OverrideFiles != 1 {
+		t.Fatalf("only options.txt may be extracted, got %+v", res)
+	}
+	if len(res.SkippedCred) != 1 || res.SkippedCred[0] != "usercache.json" {
+		t.Fatalf("injected credential must be skipped at extraction time: %+v", res.SkippedCred)
+	}
+	if _, err := os.Stat(filepath.Join(instancesDir, res.InstanceID, "usercache.json")); !os.IsNotExist(err) {
+		t.Fatal("SECURITY LEAK: usercache.json written despite mid-import tampering")
+	}
+}
+
+func writeCFPackZipAt(t *testing.T, dir, name string, entries map[string]string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for n, c := range entries {
+		w, _ := zw.Create(n)
+		_, _ = w.Write([]byte(c))
+	}
+	_ = zw.Close()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}

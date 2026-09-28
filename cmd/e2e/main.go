@@ -199,7 +199,7 @@ func main() {
 	_, _ = fIndex.Write([]byte(indexJSON)) // errcheck:ok write test index
 	fOverride, _ := zw.Create("overrides/config/nord-test.txt")
 	_, _ = fOverride.Write([]byte("custom config value")) // errcheck:ok write test override
-	_ = zw.Close() // errcheck:ok close zip writer
+	_ = zw.Close()                                        // errcheck:ok close zip writer
 
 	mrpackFile := filepath.Join(tempDir, "test.mrpack")
 	_ = os.WriteFile(mrpackFile, mrpackBuf.Bytes(), 0644) // errcheck:ok write test mrpack
@@ -1462,8 +1462,123 @@ func main() {
 	}
 	logf("PASS: Round-trip import verified: mod SHA-1 exact match, overrides/configs preserved.")
 
+	// =========================================================================
+	// 14. CurseForge .zip Modpack Import Contract E2E (offline, D'4b/C6)
+	// =========================================================================
+	logf("\n--- STEP 14: CurseForge .zip Import Contract E2E ---")
+	step14Tmp := filepath.Join(os.TempDir(), fmt.Sprintf("nord-e2e-step14-%d", time.Now().UnixNano()))
+	_ = os.MkdirAll(step14Tmp, 0755) // errcheck:ok create temp dir
+	defer func() {
+		_ = os.RemoveAll(step14Tmp) // errcheck:ok cleanup step 14 temp dir
+	}()
+	step14DBPath := filepath.Join(step14Tmp, "nord-e2e-14.db")
+	step14DB, err := storage.OpenDatabase(step14DBPath)
+	if err != nil {
+		logf("FAIL: Step 14 SQLite init failed: %v", err)
+		os.Exit(1)
+	}
+	defer func() { _ = step14DB.Close() }() // errcheck:ok close db
+	if err := step14DB.Migrate(); err != nil {
+		logf("FAIL: Step 14 migrations failed: %v", err)
+		os.Exit(1)
+	}
+	step14Repo := storage.NewInstanceRepository(step14DB)
+	step14InstancesDir := filepath.Join(step14Tmp, "instances")
+	step14Svc := launch.NewInstanceService(step14Repo, nil, nil, nil, e2eClock)
+
+	// Offline download stand-in with real SHA-1 enforcement.
+	step14ModBytes := []byte("E2E-CF-MODPAYLOAD-000111222333")
+	step14DL := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/cf/file/10.jar" {
+			_, _ = w.Write(step14ModBytes) // errcheck:ok e2e stub response body
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer step14DL.Close()
+
+	// Build the pack zip in-memory: manifest + overrides incl. one credential
+	// file that must NEVER reach the instance dir.
+	step14Manifest := `{"manifestType":"minecraftModpack","manifestVersion":1,"name":"E2E Vault","version":1,"minecraft":{"version":"1.20.1","modLoaders":[{"id":"forge-14.23.5.2847"}]},"files":[{"projectID":1,"fileID":10},{"projectID":9,"fileID":99}]}`
+	step14ZipPath := filepath.Join(step14Tmp, "e2epack.zip")
+	{
+		var zbuf bytes.Buffer
+		zw := zip.NewWriter(&zbuf)
+		entries := map[string]string{
+			"manifest.json":                    step14Manifest,
+			"overrides/options.txt":            "fov:110.0\n",
+			"overrides/launcher_accounts.json": `{"accessToken":"never-copy"}`,
+		}
+		for name, contentStr := range entries {
+			w, zerr := zw.Create(name)
+			if zerr != nil {
+				logf("FAIL: Step 14 zip create: %v", zerr)
+				os.Exit(1)
+			}
+			if _, werr := w.Write([]byte(contentStr)); werr != nil {
+				logf("FAIL: Step 14 zip write: %v", werr)
+				os.Exit(1)
+			}
+		}
+		if zerr := zw.Close(); zerr != nil {
+			logf("FAIL: Step 14 zip close: %v", zerr)
+			os.Exit(1)
+		}
+		if werr := os.WriteFile(step14ZipPath, zbuf.Bytes(), 0o644); werr != nil {
+			logf("FAIL: Step 14 zip write file: %v", werr)
+			os.Exit(1)
+		}
+	}
+
+	step14Importer := launch.NewCurseForgePackImporter(step14Svc, &e2eSimpleHTTPClient{client: step14DL.Client()}, step14InstancesDir, &e2eCFPackResolver{server: step14DL.URL})
+	step14Plan, err := step14Importer.ScanCurseForgeZip(context.Background(), step14ZipPath)
+	if err != nil {
+		logf("FAIL: Step 14 scan: %v", err)
+		os.Exit(1)
+	}
+	if step14Plan.Format != "manifest" || step14Plan.GameVersion != "1.20.1" || step14Plan.Loader != "forge" {
+		logf("FAIL: Step 14 plan metadata: %+v", step14Plan)
+		os.Exit(1)
+	}
+	if len(step14Plan.Files) != 1 || len(step14Plan.Unresolved) != 1 {
+		logf("FAIL: Step 14 plan split wrong (want 1 resolvable + 1 unresolved): %+v", step14Plan)
+		os.Exit(1)
+	}
+	if len(step14Plan.BlockedNames) != 1 || step14Plan.BlockedNames[0] != "launcher_accounts.json" {
+		logf("FAIL: Step 14 credential override not blocked at scan: %+v", step14Plan.BlockedNames)
+		os.Exit(1)
+	}
+	step14Res, err := step14Importer.ImportCurseForgeZip(context.Background(), step14Plan)
+	if err != nil {
+		logf("FAIL: Step 14 import: %v", err)
+		os.Exit(1)
+	}
+	if step14Res.Downloaded != 1 || step14Res.OverrideFiles != 1 || len(step14Res.SkippedCred) != 1 || len(step14Res.Unresolved) != 1 {
+		logf("FAIL: Step 14 result counters wrong: %+v", step14Res)
+		os.Exit(1)
+	}
+	modPath := filepath.Join(step14InstancesDir, step14Res.InstanceID, "mods", "e2e-cf-10.jar")
+	gotMod, err := os.ReadFile(modPath)
+	if err != nil || !bytes.Equal(gotMod, step14ModBytes) {
+		logf("FAIL: Step 14 downloaded mod missing/mismatched: %v", err)
+		os.Exit(1)
+	}
+	if _, err := os.Stat(filepath.Join(step14InstancesDir, step14Res.InstanceID, "launcher_accounts.json")); !os.IsNotExist(err) {
+		logf("FAIL: SECURITY LEAK: Step 14 credential file landed in instance dir")
+		os.Exit(1)
+	}
+	if optData, err := os.ReadFile(filepath.Join(step14InstancesDir, step14Res.InstanceID, "options.txt")); err != nil || string(optData) != "fov:110.0\n" {
+		logf("FAIL: Step 14 overrides extraction wrong: %v", err)
+		os.Exit(1)
+	}
+	if step14Inst, err := step14Repo.GetByID(context.Background(), step14Res.InstanceID); err != nil || step14Inst == nil || step14Inst.GameVersion != "1.20.1" {
+		logf("FAIL: Step 14 instance not persisted correctly: %v", err)
+		os.Exit(1)
+	}
+	logf("PASS: CF .zip contract verified: plan split (1 dl + 1 unresolved), credential blocked, override extracted, instance persisted.")
+
 	logf("\n=================================================================")
-	logf(" ALL 13 E2E STAGES PASSED")
+	logf(" ALL 14 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt
@@ -1475,4 +1590,53 @@ func main() {
 	} else {
 		logf("Evidence trace recorded in: %s", traceFile)
 	}
+}
+
+// e2eSimpleHTTPClient implements ports.HTTPClient against a fixed client.
+type e2eSimpleHTTPClient struct{ client *http.Client }
+
+func (c *e2eSimpleHTTPClient) Get(_ context.Context, url string, _ map[string]string) ([]byte, error) {
+	resp, err := c.client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close() // errcheck:ok defer close in e2e helper
+	return io.ReadAll(resp.Body)
+}
+
+func (c *e2eSimpleHTTPClient) DownloadFile(_ context.Context, url string, dest string, expectedSHA1 string, _ func(int64, int64)) error {
+	resp, err := c.client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close() // errcheck:ok defer close in e2e helper
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download status %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if expectedSHA1 != "" {
+		sum := sha1.Sum(data)
+		if hex.EncodeToString(sum[:]) != expectedSHA1 {
+			return fmt.Errorf("download sha1 mismatch for %s", url)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(dest, data, 0o644)
+}
+
+// e2eCFPackResolver resolves exactly project 1/file 10 offline; everything
+// else surfaces the same error text as the production resolver.
+type e2eCFPackResolver struct{ server string }
+
+func (r *e2eCFPackResolver) ResolvePackFile(_ context.Context, projectID, fileID int64) (string, string, int64, string, error) {
+	if projectID == 1 && fileID == 10 {
+		sum := sha1.Sum([]byte("E2E-CF-MODPAYLOAD-000111222333"))
+		return r.server + "/cf/file/10.jar", hex.EncodeToString(sum[:]), int64(len("E2E-CF-MODPAYLOAD-000111222333")), "e2e-cf-10.jar", nil
+	}
+	return "", "", 0, "", fmt.Errorf("file %d not found under project %d (removed or renamed)", fileID, projectID)
 }

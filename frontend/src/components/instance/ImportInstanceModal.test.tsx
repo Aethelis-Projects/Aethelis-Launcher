@@ -189,6 +189,8 @@ describe("ImportInstanceModal CurseForge .zip tab (Feature D'4b)", () => {
     expect(scanSpy).toHaveBeenCalledWith({ zip_path: "C:\\Downloads\\Vault.zip" });
     expect(screen.getByTestId("cf-import-warning-banner").textContent).toContain("1 файл(ов) не удалось разрешить");
     expect(screen.getByTestId("cf-blocked-note").textContent).toContain("учётных файл(ов)");
+    expect(screen.getByTestId("cf-unresolved-list").textContent).toContain("cf:3/30");
+    expect(screen.getByTestId("cf-unresolved-list").textContent).toContain("curseforge API key unavailable");
     expect(screen.getByTestId("cf-plan-card").textContent).toContain("Vault Hunters");
     expect(screen.getByTestId("cf-plan-card").textContent).toContain("1.20.1");
     expect(screen.getByTestId("start-import-btn").hasAttribute("disabled")).toBe(false);
@@ -218,6 +220,8 @@ describe("ImportInstanceModal CurseForge .zip tab (Feature D'4b)", () => {
     await waitFor(() => expect(importSpy).toHaveBeenCalledWith({ zip_path: "C:\\Downloads\\Vault.zip" }));
     await screen.findByTestId("import-complete-view");
     expect(screen.getByTestId("import-complete-view").textContent).toContain("Загружено модов: 2");
+    expect(screen.getByTestId("cf-manual-list").textContent).toContain("cf:3/30");
+    expect(screen.getByTestId("cf-skipped-cred-list").textContent).toContain("overrides/launcher_accounts.json");
     expect(onImported).toHaveBeenCalledWith({ id: "cf-inst-1", name: "cf-inst-1" });
   });
 

@@ -6,6 +6,7 @@ import type {
   MinecraftImportSummaryDTO,
   PrismImportSummaryDTO,
   CFPackPlanDTO,
+  CFPackImportResultDTO,
 } from "../../bindings/ipc_types";
 
 interface ImportInstanceModalProps {
@@ -38,6 +39,7 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
   // CurseForge modpack .zip (D'4b)
   const [cfZipPath, setCfZipPath] = createSignal("");
   const [cfPlan, setCfPlan] = createSignal<CFPackPlanDTO | null>(null);
+  const [cfResult, setCfResult] = createSignal<CFPackImportResultDTO | null>(null);
   const [cfWarning, setCfWarning] = createSignal("");
 
   const [isImporting, setIsImporting] = createSignal(false);
@@ -56,6 +58,7 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
     setImportNote("");
     setCfZipPath("");
     setCfPlan(null);
+    setCfResult(null);
     setCfWarning("");
     setIsScanning(false);
     setIsImporting(false);
@@ -206,6 +209,7 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
         });
       } else if (sourceType() === "curseforge") {
         const result = await launcherAPI.importCurseForgePackZip({ zip_path: cfZipPath() });
+        setCfResult(result);
         setImportNote(
           result
             ? `Загружено модов: ${result.downloaded}; overrides: ${result.override_files}` +
@@ -285,6 +289,30 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                   {importNote() ||
                     "Все выбранные миры, ресурспаки, моды и настройки скопированы в изолированную директорию."}
                 </p>
+                <Show when={cfResult()}>
+                  <div class="w-full max-w-md space-y-2 pt-2 text-left" data-testid="cf-result-details">
+                    <Show when={(cfResult()!.failed_files ?? []).length > 0}>
+                      <div class="text-[11px] font-mono text-red-400" data-testid="cf-failed-list">
+                        Сбои загрузки (обязательные прервали импорт):
+                        <For each={cfResult()!.failed_files.slice(0, 5)}>{(f) => <div class="truncate">{f}</div>}</For>
+                      </div>
+                    </Show>
+                    <Show when={(cfResult()!.unresolved ?? []).length > 0}>
+                      <div class="text-[11px] font-mono text-amber-300" data-testid="cf-manual-list">
+                        Требуется ручная доустановка:
+                        <For each={cfResult()!.unresolved.slice(0, 10)}>{(u) => <div class="truncate">{u}</div>}</For>
+                        <Show when={cfResult()!.unresolved.length > 10}>
+                          <div class="text-zinc-500">…и ещё {cfResult()!.unresolved.length - 10}</div>
+                        </Show>
+                      </div>
+                    </Show>
+                    <Show when={(cfResult()!.skipped_credentials ?? []).length > 0}>
+                      <div class="text-[11px] font-mono text-zinc-500" data-testid="cf-skipped-cred-list">
+                        Пропущено по credential-блоклисту: {cfResult()!.skipped_credentials.join(", ")}
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
                 <button
                   type="button"
                   onClick={handleClose}
@@ -461,6 +489,20 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                       Overrides: <span class="text-white font-medium">{cfPlan()!.override_names.length}</span>
                     </div>
                   </div>
+                  <Show when={cfPlan()!.unresolved.length > 0}>
+                    <div class="text-[11px] font-mono text-zinc-400 space-y-0.5" data-testid="cf-unresolved-list">
+                      <For each={cfPlan()!.unresolved.slice(0, 5)}>
+                        {(u) => (
+                          <div class="truncate">
+                            {u.file_name || `cf:${u.project_id}/${u.file_id}`} — {u.resolve_error || "не разрешён"}
+                          </div>
+                        )}
+                      </For>
+                      <Show when={cfPlan()!.unresolved.length > 5}>
+                        <div class="text-zinc-500">…и ещё {cfPlan()!.unresolved.length - 5}</div>
+                      </Show>
+                    </div>
+                  </Show>
                   <Show when={cfPlan()!.blocked_names.length > 0}>
                     <div class="text-[11px] font-mono text-red-400" data-testid="cf-blocked-note">
                       Безопасность: {cfPlan()!.blocked_names.length} учётных файл(ов) из overrides будут пропущены (политика credential-блока)
