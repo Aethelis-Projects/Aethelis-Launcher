@@ -231,7 +231,8 @@ func main() {
 			application.NewService(adapter),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assetsSub),
+			Handler:    application.AssetFileServerFS(assetsSub),
+			Middleware: wails.CSPMiddleware,
 		},
 	})
 

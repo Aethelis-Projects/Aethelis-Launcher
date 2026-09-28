@@ -503,8 +503,18 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	if len(expected) != len(exported) {
 		t.Errorf("registry size %d != exported webview-facing method set size %d", len(expected), len(exported))
 	}
-	if _, ok := rt.MethodByName("SetGameManifestURL"); ok {
-		t.Error("SetGameManifestURL is still exported on the bound adapter - wiring belongs on wails.Host")
+	// Every method on the wiring facade must be ABSENT from the bound
+	// receiver, asserted off the facade's own reflection (self-maintaining:
+	// adding a wiring method to Host auto-adds it to this prohibition).
+	hostRT := reflect.TypeOf(&wails.Host{})
+	for i := 0; i < hostRT.NumMethod(); i++ {
+		name := hostRT.Method(i).Name
+		if _, ok := rt.MethodByName(name); ok {
+			t.Errorf("%s is exported on the bound WailsAdapter AND on wails.Host - wiring leaked back into the webview surface", name)
+		}
+	}
+	if n := hostRT.NumMethod(); n < 23 {
+		t.Errorf("wails.Host exposes only %d wiring methods; the v0.7.2 audit moved 22 setters + RecordCrash off the adapter - check for silently dropped facades", n)
 	}
 }
 
@@ -3453,7 +3463,9 @@ func TestWailsAdapter_WizardAndModpacksV072(t *testing.T) {
 	defer manifestSrv.Close()
 
 	versionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.RawQuery, "1.21.4") || !strings.Contains(r.URL.RawQuery, "fabric") {
+		// ListMrPackVersions queries filtered (game_versions+loaders); the
+		// Go-side import resolution queries UNfiltered (version id decides).
+		if strings.Contains(r.URL.RawQuery, "game_versions") && !strings.Contains(r.URL.RawQuery, "1.21.4") {
 			t.Errorf("unexpected version query: %s", r.URL.RawQuery)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -3531,14 +3543,11 @@ func TestWailsAdapter_WizardAndModpacksV072(t *testing.T) {
 	}
 
 	// --- ImportMrPackFromURL validation ------------------------------------
-	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://evil.test/p.mrpack", InstanceName: "x", SHA1: "aa"}); err == nil {
-		t.Fatal("expected https-only rejection")
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: "x"}); err == nil {
+		t.Fatal("expected identifiers-required rejection (no url fallback exists anymore)")
 	}
-	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://ok.test/p.mrpack", InstanceName: " ../../etc ", SHA1: "aa"}); err == nil {
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: " ../../etc ", ProjectSlug: "p", VersionID: "v"}); err == nil {
 		t.Fatal("expected name validation error after path-traversal sanitize")
-	}
-	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://ok.test/p.mrpack", InstanceName: "ok"}); err == nil {
-		t.Fatal("expected untrusted-origin rejection (download-host allowlist runs before the hash check)")
 	}
 
 	// --- GetMrPackURLImportStatus ------------------------------------------

@@ -1715,12 +1715,8 @@ func main() {
 	// A compromised webview sends url+hashes; none of it is trusted. Fallback
 	// mode (no slug/version_id) refuses any origin outside the CDN allowlist
 	// before touching the network, and non-https stays refused outright.
-	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://insecure.test/p.mrpack", InstanceName: "Nope", SHA1: "beef"}); err == nil {
-		logf("FAIL: Step 15 accepted an http:// mrpack URL")
-		os.Exit(1)
-	}
-	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://cdn.evil.test/p.mrpack", InstanceName: "Evil", SHA1: "beef"}); err == nil || !strings.Contains(err.Error(), "not an allowed download host") {
-		logf("FAIL: Step 15 URL import dialled an untrusted host: %v", err)
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: "No Identifiers"}); err == nil || !strings.Contains(err.Error(), "requires project_slug and version_id") {
+		logf("FAIL: Step 15 accepted a bare url-less import request: %v", err)
 		os.Exit(1)
 	}
 	// Tampered integrity hint in resolution mode is rejected before any dial,
@@ -1732,8 +1728,10 @@ func main() {
 	// Resolution mode end-to-end: a *malicious* url from the client must be
 	// ignored - the adapter re-fetches url+hashes from the API. If the client
 	// URL were dialed, the loopback black-hole would fail the import.
+	// The request type has no url field at all any more (a compile-time
+	// guarantee); identifiers-only resolution still imports the real TLS
+	// payload with both hashes verified.
 	if instID, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
-		URL:          "https://127.0.0.1:9/attacker.mrpack",
 		InstanceName: "URL Resolved Pack",
 		ProjectSlug:  "p1",
 		VersionID:    "verMR",

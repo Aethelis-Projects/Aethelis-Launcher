@@ -1138,6 +1138,9 @@ func firstOr(list []string, fallback string) string {
 // carrying the attacker's hash.
 // resolveMrpackFile returns the authoritative (url, sha1, sha512, size) for a
 // Modrinth version, straight from the API the core itself trusts.
+// The query is deliberately unfiltered (no game_version/loader): those values
+// would come from the untrusted client and are unnecessary - the record is
+// picked by immutable version id.
 func (a *WailsAdapter) resolveMrpackFile(slug, versionID string) (dlURL, sha1sum, sha512sum string, size int64, err error) {
 	vers, err := a.modrinth.GetProjectVersions(context.Background(), slug, "", "")
 	if err != nil {
@@ -1156,10 +1159,6 @@ func (a *WailsAdapter) resolveMrpackFile(slug, versionID string) (dlURL, sha1sum
 		return "", "", "", 0, errors.New("resolved version has no .mrpack file")
 	}
 	return "", "", "", 0, errors.New("mrpack version not found on Modrinth")
-}
-
-func (a *WailsAdapter) mrpackHostAllowed(host string) bool {
-	return a.isAllowedDownloadHost(host)
 }
 
 func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, error) {
@@ -1191,24 +1190,10 @@ func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, 
 		}
 		dlURL, sha1sum, sha512sum, size = resolvedURL, rSHA1, rSHA512, rSize
 	} else {
-		// Fallback mode: only the official Modrinth CDN is accepted, https
-		// end-to-end, and a hash must still be supplied by the caller.
-		u, err := url.Parse(strings.TrimSpace(req.URL))
-		if err != nil || u.Scheme != "https" || u.Hostname() == "" {
-			return "", errors.New("mrpack download requires an https URL")
-		}
-		if !a.mrpackHostAllowed(u.Hostname()) {
-			return "", fmt.Errorf("mrpack download origin %q is not an allowed download host", u.Hostname())
-		}
-		sha1sum = strings.ToLower(strings.TrimSpace(req.SHA1))
-		sha512sum = strings.ToLower(strings.TrimSpace(req.SHA512))
-		if sha1sum == "" && sha512sum == "" {
-			return "", errors.New("mrpack download requires the sha1 or sha512 advertised by Modrinth")
-		}
-		dlURL = u.String()
+		return "", errors.New("mrpack import requires project_slug and version_id (the url+hash pair is never taken from the webview)")
 	}
 	u, err := url.Parse(dlURL)
-	if err != nil || u.Scheme != "https" || !a.mrpackHostAllowed(u.Hostname()) {
+	if err != nil || u.Scheme != "https" || !a.isAllowedDownloadHost(u.Hostname()) {
 		return "", errors.New("mrpack download requires an https URL on an allowed download host")
 	}
 	if name == "" {
@@ -1276,7 +1261,7 @@ func (a *WailsAdapter) mrpackDownloadClient() *http.Client {
 		if req.URL.Scheme != "https" {
 			return errors.New("mrpack download redirected away from https")
 		}
-		if !a.mrpackHostAllowed(req.URL.Hostname()) {
+		if !a.isAllowedDownloadHost(req.URL.Hostname()) {
 			return fmt.Errorf("mrpack download redirected to untrusted host %q", req.URL.Hostname())
 		}
 		if len(via) >= 5 {

@@ -5,6 +5,16 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag (vX.Y.Z) to dry-run; empty = current HEAD (release-candidate rehearsal, never publishes)"
+        required: false
+        default: ""
+      publish:
+        description: "Publish the GitHub Release (only honoured on tag pushes)"
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: write
@@ -16,6 +26,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -158,10 +170,21 @@ jobs:
 
   build-linux:
     name: Build & Package Linux (x64)
+    id: build-linux
+    outputs:
+      release_tag: ${{ steps.tag.outputs.tag }}
+      bundle_gzip_kb: ${{ steps.assetmeta.outputs.bundle_gzip_kb }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve Release Tag
+        id: tag
+        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+        shell: bash
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -235,10 +258,18 @@ jobs:
     name: Publish GitHub Release
     needs: [build-windows, build-linux]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    # Tag pushes publish; workflow_dispatch runs the FULL rehearsal (builds
+    # already ran against the tag's code) and stops before publication - this
+    # is the dry-run coverage for installer/SHA256SUMS/Ed25519 the owner asked
+    # for, and it can only exist because dispatch sits BESIDE on: push: tags.
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    env:
+      RELEASE_TAG: ${{ needs.build-linux.outputs.release_tag }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -274,7 +305,7 @@ jobs:
       - name: Determine Channel & Prerelease Status
         id: meta
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ env.RELEASE_TAG }}"
           if [[ "$TAG" =~ -(beta|alpha|rc) ]]; then
             echo "channel=beta" >> $GITHUB_OUTPUT
             echo "prerelease=true" >> $GITHUB_OUTPUT
@@ -298,9 +329,28 @@ jobs:
           echo "PASS: CI status verified on release commit."
         shell: bash
 
+      - name: Release Placement Gate (tag must be reachable from master)
+        # Mechanically enforces docs/RELEASE.md: tags belong on the merged
+        # default-branch commit (a tag on a branch head differs from the
+        # squash-merge result and silently escapes master).
+        run: |
+          git fetch -q --no-tags origin master
+          if git fetch -q origin "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}" 2>/dev/null; then
+            TAG_SHA=$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")
+          else
+            echo "DRY-NOTE: tag ${RELEASE_TAG} not fetchable; using HEAD sha for the ancestor check."
+            TAG_SHA="${GITHUB_SHA}"
+          fi
+          if ! git merge-base --is-ancestor "${TAG_SHA}" origin/master; then
+            echo "CRITICAL ERROR: ${RELEASE_TAG} (${TAG_SHA}) is NOT an ancestor of origin/master (see docs/RELEASE.md)."
+            exit 1
+          fi
+          echo "PASS: ${TAG_SHA} is reachable from master."
+        shell: bash
+
       - name: Verify Changelog Entry Exists for Version (DEFECT-3 Gate)
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ env.RELEASE_TAG }}"
           CLEAN_VER="${TAG#v}"
           echo "Checking CHANGELOG.md for version $CLEAN_VER..."
           if ! grep -q "^## \[$CLEAN_VER\]" CHANGELOG.md; then
@@ -312,10 +362,11 @@ jobs:
         shell: bash
 
       - name: Version Single-Source Gate (tag == VERSION == package.json == wails.json)
-        run: node scripts/check_version_consistency.js "${{ github.ref_name }}"
+        run: node scripts/check_version_consistency.js "${{ env.RELEASE_TAG }}"
         shell: bash
 
       - name: Validate Ed25519 Secret Guard
+        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         run: |
           if [ -z "${{ secrets.ED25519_PRIVATE_KEY }}" ]; then
             echo "CRITICAL ERROR: ED25519_PRIVATE_KEY repository secret is not configured!"
@@ -325,17 +376,19 @@ jobs:
         shell: bash
 
       - name: Generate Signed Ed25519 Update Manifest
+        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         env:
           ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
         run: |
           go run scripts/generate_manifest.go \
-            -version "${{ github.ref_name }}" \
+            -version "${{ env.RELEASE_TAG }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
             -dist release-assets \
             -strict-changelog \
             -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json"
 
       - name: Generate Checksums
+        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         working-directory: release-assets
         run: |
           sha256sum * > SHA256SUMS.txt
@@ -343,7 +396,7 @@ jobs:
       - name: Generate Release Body with Complete 6-Row Artifact Table (DEFECT-2 Fix)
         run: |
           go run scripts/generate_manifest.go \
-            -version "${{ github.ref_name }}" \
+            -version "${{ env.RELEASE_TAG }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
             -dist release-assets \
             -strict-changelog \
@@ -351,6 +404,7 @@ jobs:
             -body-only
 
       - name: Verify Release Body Length & Content
+        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         run: |
           if [ ! -f "release-body.md" ]; then
             echo "ERROR: release-body.md was not generated!"
@@ -383,20 +437,46 @@ jobs:
           echo "PASS: Release body verified ($BODY_LEN bytes, $TABLE_DATA_ROWS data rows)."
         shell: bash
 
+      - name: Compile metrics.json (single source for the README perf story)
+        run: |
+          TAR=$(ls release-assets/*.tar.gz | head -1)
+          WIN=$(ls release-assets/*.exe | head -1)
+          BUNDLE_KB="${{ needs.build-linux.outputs.bundle_gzip_kb }}"
+          [ -n "$BUNDLE_KB" ] || BUNDLE_KB=null
+          COV=null
+          for f in coverage/core-and-frontend-ubuntu-latest/coverage.txt; do
+            [ -f "$f" ] && COV=$(cat "$f") && break
+          done
+          mkdir -p /tmp/metrics-extract
+          tar -xzf "$TAR" -C /tmp/metrics-extract
+          BIN=$(find /tmp/metrics-extract -type f -name "nord-launcher*" ! -name "*.sh" ! -name "*.desktop" ! -name "*.png" | head -1)
+          go run ./scripts/release_metrics.go \
+            --version "$RELEASE_TAG" \
+            --tar-bytes "$(wc -c < "$TAR")" \
+            --linux-binary-bytes "$(wc -c < "$BIN")" \
+            --windows-installer-bytes "$(wc -c < "$WIN")" \
+            --bundle-gzip-kb "$BUNDLE_KB" \
+            --core-coverage "$COV" \
+            --out release-assets/metrics.json
+          cat release-assets/metrics.json
+        shell: bash
+
       - name: Create GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*
           draft: false
           prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-          name: ${{ github.ref_name }}
+          name: ${{ env.RELEASE_TAG }}
           body_path: release-body.md
 
       - name: Ensure GitHub Release Body Matches (DEFECT-2 Sync)
+        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "${{ github.ref_name }}" --notes-file release-body.md
+          gh release edit "${{ env.RELEASE_TAG }}" --notes-file release-body.md
           echo "PASS: GitHub release notes synced from release-body.md."
         shell: bash
 
@@ -404,7 +484,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ASSETS=$(gh release view "${{ github.ref_name }}" --json assets --jq '.assets.[].name')
+          ASSETS=$(gh release view "${{ env.RELEASE_TAG }}" --json assets --jq '.assets.[].name')
           echo "Published assets: $ASSETS"
           if echo "$ASSETS" | grep -qi "^cf\.key$"; then
             echo "CRITICAL SECURITY ERROR: cf.key published as public release asset!"

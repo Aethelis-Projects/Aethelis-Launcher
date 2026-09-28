@@ -1,11 +1,9 @@
 package wails_test
 
-// v0.7.2 review (owner point 2): the url+sha1 pair must not be trusted from
-// the webview. These tests pin the resolution-first contract: with
-// project_slug+version_id the adapter re-fetches the file record from the
-// Modrinth API and rejects disagreeing client hints; without them only https
-// on an allowed CDN host is dialed, redirects included (see e2e STEP 15 for
-// the full download+import path over the TLS fixture).
+// v0.7.2 review (owner): the transport record must never come from the
+// webview. ImportMrPackFromURL only accepts project_slug + version_id and
+// re-fetches url/sha1/sha512/size from the Modrinth API itself; client hints
+// are optional cross-checks; anything else is rejected before the dial.
 
 import (
 	"crypto/sha1"
@@ -54,16 +52,13 @@ func TestWailsAdapter_MrpackURLImport_GoSideResolution(t *testing.T) {
 	adapter := wails.NewWailsAdapter(nil)
 	wails.NewHost(adapter).SetContent(modrinth.NewClient(api.URL, api.Client()), nil)
 
-	// 1. Resolution mode ignores the client URL entirely: the error must come
-	// from the *resolved* record (http origin), not from the pristine https
-	// URL the (hypothetically compromised) webview supplied.
-	_, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
-		URL:          "https://cdn.modrinth.com/data/x/versions/v/p.mrpack",
+	// 1. The resolved record itself is validated (https + download-host
+	// allowlist): an http origin from the API is refused.
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
 		InstanceName: "TrustTest",
 		ProjectSlug:  "fabric-skyblocks",
 		VersionID:    "verXYZ",
-	})
-	if err == nil || !strings.Contains(err.Error(), "allowed download host") {
+	}); err == nil || !strings.Contains(err.Error(), "allowed download host") {
 		t.Fatalf("expected resolved-origin https/allowlist enforcement, got: %v", err)
 	}
 
@@ -77,20 +72,10 @@ func TestWailsAdapter_MrpackURLImport_GoSideResolution(t *testing.T) {
 		t.Fatalf("expected sha1 mismatch rejection, got: %v", err)
 	}
 
-	// 3. Fallback mode: untrusted origin rejected even with a valid hash.
+	// 3. There is no url-fallback any more at all.
 	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
-		URL:          "https://cdn.evil.test/pack.mrpack",
 		InstanceName: "TrustTest",
-		SHA1:         sha1hex,
-	}); err == nil || !strings.Contains(err.Error(), "not an allowed download host") {
-		t.Fatalf("expected host-allowlist rejection, got: %v", err)
-	}
-
-	// 4. Fallback mode without any hash is refused (no unverifiable downloads).
-	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
-		URL:          "https://cdn.modrinth.com/pack.mrpack",
-		InstanceName: "TrustTest",
-	}); err == nil || !strings.Contains(err.Error(), "sha1 or sha512") {
-		t.Fatalf("expected hash-mandatory rejection, got: %v", err)
+	}); err == nil || !strings.Contains(err.Error(), "requires project_slug and version_id") {
+		t.Fatalf("expected identifiers-required rejection, got: %v", err)
 	}
 }

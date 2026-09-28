@@ -3,6 +3,7 @@ package discordrpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -365,4 +366,42 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	n := copy(p, r.b[r.i:])
 	r.i += n
 	return n, nil
+}
+
+func TestManagerOptionsAndAppIDSwap(t *testing.T) {
+	clocked := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m := NewManager("appid-1",
+		WithClock(func() time.Time { return clocked }),
+		WithDialer(func(ctx context.Context, candidates []string) (net.Conn, error) {
+			return nil, errors.New("no discord")
+		}),
+	)
+	if m.nowFn() != clocked {
+		t.Error("WithClock not applied")
+	}
+	if m.dialer == nil {
+		t.Fatal("WithDialer not applied")
+	}
+	m.SetEnabled(true)
+	if err := m.SetActivity(&Activity{Details: "Playing"}); !errors.Is(err, ErrNotConnected) {
+		t.Errorf("enabled manager without a connection must report ErrNotConnected, got %v", err)
+	}
+	st := m.Status()
+	if !st.Enabled || !st.AppIDSet {
+		t.Errorf("status after wiring: %+v", st)
+	}
+	m.SetAppID("appid-2")
+	m.mu.Lock()
+	got := m.appID
+	m.mu.Unlock()
+	if got != "appid-2" {
+		t.Errorf("SetAppID: %s", got)
+	}
+	m.SetAppID("appid-3") // nil conn: must drop nothing and not panic
+	m.mu.Lock()
+	got = m.appID
+	m.mu.Unlock()
+	if got != "appid-3" {
+		t.Errorf("SetAppID(nil-conn): %s", got)
+	}
 }

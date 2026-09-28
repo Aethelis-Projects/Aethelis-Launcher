@@ -172,12 +172,10 @@ type MrPackVersionDTO struct {
 }
 
 type ImportMrPackURLRequest struct {
-	URL string ` + "`" + `json:"url,omitempty"` + "`" + `
 	InstanceName string ` + "`" + `json:"instance_name"` + "`" + `
-	ProjectSlug string ` + "`" + `json:"project_slug,omitempty"` + "`" + `
-	VersionID string ` + "`" + `json:"version_id,omitempty"` + "`" + `
+	ProjectSlug string ` + "`" + `json:"project_slug"` + "`" + `
+	VersionID string ` + "`" + `json:"version_id"` + "`" + `
 	SHA1 string ` + "`" + `json:"sha1,omitempty"` + "`" + `
-	SHA512 string ` + "`" + `json:"sha512,omitempty"` + "`" + `
 	Size int64 ` + "`" + `json:"size,omitempty"` + "`" + `
 }
 
@@ -780,12 +778,10 @@ export interface MrPackVersionDTO {
 }
 
 export interface ImportMrPackURLRequest {
-  url?: string;
   instance_name: string;
-  project_slug?: string;
-  version_id?: string;
+  project_slug: string;
+  version_id: string;
   sha1?: string;
-  sha512?: string;
   size?: number;
 }
 

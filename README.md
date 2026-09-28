@@ -35,17 +35,7 @@
 
 Most Minecraft launchers are Electron appliances: megabytes of overhead, background noise, and opaque update pipelines. Nord Launcher is built the other way around — a pure Go core, an ~81 KB gzipped embedded UI, and a small native shell. Every update is cryptographically signed, every secret lives in the OS credential manager, and nothing is phoned home.
 
-**Measured on v0.7.2 (2026-09-28; CI + headless reruns, Linux amd64 / cross-Windows):**
-
-| Metric | Result | Budget |
-|---|---|---|
-| Core init (`--idle-test`, headless) | 9 ms | < 100 ms |
-| IPC dispatch | ~109 ns/op (`BenchmarkWailsAdapter_IPCDispatch`, 2-core CI runner) | p95 ≤ 5,000 ns |
-| Frontend bundle (gzip) | 81 KB main chunk / 88 KB total (`frontend/dist`) | ≤ 250 KB |
-| Binary (stripped, `-s -w`, frontend not embedded) | 17.0 MB linux / 17.4 MB windows | < 40 MB |
-| Core test coverage | 80.4% (`go test -coverprofile ./internal/core/...`) | ≥ 80% |
-| Idle RAM (full GUI) | measured on hardware — acceptance checklist item | < 150 MB |
-| Cold start (full GUI) | measured on hardware — acceptance checklist item | < 2.0 s |
+**Performance metrics are produced by CI on the release build only** (never by ad-hoc sandbox runs): the `publish-release` job compiles `metrics.json` — frontend-bundle gzip (Linux job), stripped binary + installer sizes (from the actual published assets), core coverage (quality job) — and attaches it to every release. The README quotes that file; CI additionally enforces `gofmt -l internal cmd ipc scripts` clean and the ≥80% core-coverage gate. IPC dispatch latency is intentionally not advertised: nanoseconds per dispatch are an internal benchmark number, not something a user can feel. Idle RAM and cold start of the full GUI are measured on hardware during acceptance (checklist items), budget < 150 MB / < 2.0 s.
 
 ---
 

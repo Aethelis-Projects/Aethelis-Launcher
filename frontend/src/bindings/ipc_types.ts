@@ -167,12 +167,10 @@ export interface MrPackVersionDTO {
 }
 
 export interface ImportMrPackURLRequest {
-  url?: string;
   instance_name: string;
-  project_slug?: string;
-  version_id?: string;
+  project_slug: string;
+  version_id: string;
   sha1?: string;
-  sha512?: string;
   size?: number;
 }
 

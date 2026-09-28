@@ -185,3 +185,21 @@ func TestFabricLoader_GetProfile(t *testing.T) {
 		t.Fatalf("unexpected first lib: %+v", profile.Libraries[0])
 	}
 }
+
+func TestFabricSetVersionPinsMetaPath(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`)) // errcheck:ok test fixture
+	}))
+	defer server.Close()
+	client := loaders.NewFabricClient(server.URL, server.Client())
+	client.SetVersion("0.99.0")
+	if _, err := client.GetLoadersForGameVersion(context.Background(), "1.21.1"); err != nil {
+		t.Fatalf("get loaders: %v", err)
+	}
+	if path != "/v2/versions/loader/1.21.1" {
+		t.Fatalf("list path changed: %s", path)
+	}
+}
