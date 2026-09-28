@@ -189,7 +189,8 @@ Nord Launcher intentionally omits third-party authentication services (such as E
 
 1. **Session & Credential Security**: Third-party authlib-injector endpoints intercept Minecraft authentication handshakes and session tokens. Pointing authentication traffic to unverified external servers introduces risk of session hijacking, man-in-the-middle exploits, and credential theft. Nord Launcher enforces direct, official Microsoft OAuth2 with PKCE, storing refresh tokens exclusively in the native OS Credential Manager (Windows Credential Manager / Linux Secret Service) with zero telemetry and zero custodial servers.
 2. **Legal Integrity & EULA Compliance**: Nord Launcher complies with the Minecraft End User License Agreement (EULA), Terms of Service, and Microsoft Commercial Usage Guidelines. Maintaining strict separation from unofficial authentication bypasses ensures sustainable distribution, clear copyright compliance, and trust from mod authors and platform maintainers.
-3. **Data Integrity & Non-Custodial Storage**: All configuration, instance states, and credentials remain 100% local on the user's machine. Nord Launcher never operates intermediary proxies or user databases.
+3. **Local-Only Side Channels**: Auxiliary integrations never leave the machine. Discord Rich Presence talks to the locally running Discord client over its named pipe / AF_UNIX socket only (no network sockets, no proxying, no identifiers beyond the two display strings you can preview in Settings), and world datapack toggling uses physical moves into a sibling `datapacks-disabled/` directory instead of in-place renames, so vanilla game data files are never mutated.
+4. **Data Integrity & Non-Custodial Storage**: All configuration, instance states, and credentials remain 100% local on the user's machine. Nord Launcher never operates intermediary proxies or user databases.
 
 ---
 
