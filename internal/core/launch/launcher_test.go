@@ -301,7 +301,7 @@ func TestMonitorProcess_ExitZero(t *testing.T) {
 
 	launch.MonitorProcess(handle, inst, nil, func(id string, report *launch.CrashReport) {
 		onCrashCalled = true
-	}, nil, &mu)
+	}, nil, &mu, nil)
 
 	if inst.State != domain.StateIdle {
 		t.Errorf("expected state Idle, got %s", inst.State)
@@ -324,7 +324,7 @@ func TestMonitorProcess_ExitOne_Crash(t *testing.T) {
 	launch.MonitorProcess(handle, inst, nil, func(id string, report *launch.CrashReport) {
 		capturedID = id
 		capturedReport = report
-	}, nil, &mu)
+	}, nil, &mu, nil)
 
 	if inst.State != domain.StateCrashed {
 		t.Errorf("expected state Crashed, got %s", inst.State)
@@ -954,4 +954,4 @@ func TestInstanceService_SetInstanceFavorite_And_Group(t *testing.T) {
 	if sup != nil {
 		t.Errorf("expected nil supervisor for idle instance")
 	}
-}
+}

@@ -125,3 +125,35 @@ func TestWailsAdapter_ScanCurseForgePackZip_NilResolverHonest(t *testing.T) {
 		t.Fatalf("resolve reason must be explicit: %+v", plan.Unresolved[0])
 	}
 }
+
+func TestWailsAdapter_DiscordRpc_ToggleAndStatusWithoutService(t *testing.T) {
+	adapter := NewWailsAdapter(nil)
+	// No settings repo wired: toggle must persist silently-fail-open (nil repo
+	// is a valid embedded mode), status must degrade to all-off, never panic.
+	if err := adapter.SetDiscordRpcEnabled(true); err != nil {
+		t.Fatalf("toggle without repo: %v", err)
+	}
+	st, err := adapter.GetDiscordRpcStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Enabled || st.Connected || st.AppIDSet {
+		t.Fatalf("without settings repo everything must read off: %+v", st)
+	}
+	// Contract with a nil settings repo: persistence is a no-op, so the
+	// durable fields stay off, while the live manager still reflects the
+	// in-session app id (never silently re-applied after restart).
+	if err := adapter.SetDiscordAppID(SetSettingRequest{Value: "42"}); err != nil {
+		t.Fatalf("SetDiscordAppID without repo must be a no-op, got %v", err)
+	}
+	st, err = adapter.GetDiscordRpcStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Enabled {
+		t.Fatal("enabled is repo-backed; must stay false without a repo")
+	}
+	if !st.AppIDSet {
+		t.Fatal("live manager must reflect the in-session app id")
+	}
+}

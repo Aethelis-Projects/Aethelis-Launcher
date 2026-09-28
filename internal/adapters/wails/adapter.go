@@ -29,6 +29,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content"
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
+	"github.com/nord-launcher/launcher/internal/core/discordrpc"
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/java"
@@ -70,6 +71,7 @@ type WailsAdapter struct {
 	mrpackProgress     map[string]*MrPackImportStatusDTO
 	importer           *launch.InstanceImporter
 	cfPackImporter     *launch.CurseForgePackImporter
+	discordRPC         *discordrpc.Manager
 	integrityVerifier  ports.IntegrityVerifier
 	filePickerFn       func() (string, error)
 	onLogBatch         func(instanceID string, lines []string)
@@ -488,6 +490,21 @@ func (a *WailsAdapter) LaunchInstance(id string) (*LaunchResponse, error) {
 	sup := a.svc.GetSupervisor(id)
 	if sup != nil {
 		go a.startLogStreamer(id, sup)
+	}
+
+	// D'5: opt-in Discord Rich Presence. Manager is lazy and silent; all
+	// errors inside it only update the status view, never the launch path.
+	if m := a.discordManagerIfEnabled(); m != nil {
+		if inst, ierr := a.svc.GetInstance(id); ierr == nil && inst != nil {
+			_ = m.SetActivity(&discordrpc.Activity{ // errcheck:ok presence is best-effort by contract
+				Details:   "Minecraft " + inst.GameVersion,
+				State:     inst.Name,
+				StartUnix: time.Now().Unix(),
+			})
+		}
+		a.svc.SetOnExit(func(_ string, _ int) {
+			_ = m.SetActivity(nil) // errcheck:ok clear is best-effort
+		})
 	}
 
 	return &LaunchResponse{
@@ -3706,4 +3723,117 @@ func (a *WailsAdapter) ImportCurseForgePackZip(req ImportCFPackRequest) (*CFPack
 		return dto, fmt.Errorf("import curseforge pack: %w", err)
 	}
 	return dto, nil
+}
+
+// --- D'5 Discord RPC -------------------------------------------------------
+
+// discordManagerIfEnabled returns the lazily-built manager when the opt-in
+// setting is on. Absent Discord, absent app id, any pipe error: stays silent.
+func (a *WailsAdapter) discordManagerIfEnabled() *discordrpc.Manager {
+	a.mu.Lock()
+	if a.discordRPC == nil {
+		a.discordRPC = a.newDiscordManagerLocked()
+	}
+	m := a.discordRPC
+	a.mu.Unlock()
+
+	enabled, _ := a.discordSettings()
+	if !enabled {
+		return nil
+	}
+	return m
+}
+
+func (a *WailsAdapter) newDiscordManagerLocked() *discordrpc.Manager {
+	_, appID := a.discordSettingsWith(a.settingsRepo)
+	return discordrpc.NewManager(appID)
+}
+
+func (a *WailsAdapter) discordSettings() (enabled bool, appID string) {
+	a.mu.RLock()
+	repo := a.settingsRepo
+	a.mu.RUnlock()
+	return a.discordSettingsWith(repo)
+}
+
+// discordSettingsWith reads the two D'5 settings from a caller-resolved repo
+// (no lock taken here: callers may already hold a.mu).
+func (a *WailsAdapter) discordSettingsWith(repo *storage.SettingsRepository) (enabled bool, appID string) {
+	if repo == nil {
+		return false, ""
+	}
+	rawEnabled, _ := repo.Get(context.Background(), "discord_rpc_enabled") // errcheck:ok unset setting means disabled
+	appID, _ = repo.Get(context.Background(), "discord_app_id")            // errcheck:ok unset app id degrades to idle status
+	return rawEnabled == "true", appID
+}
+
+// SetDiscordRpcEnabled toggles presence. The RPC manager only exists while
+// opt-in is on; disabling tears the pipe down (graceful CLOSE within 5s).
+func (a *WailsAdapter) SetDiscordRpcEnabled(enabled bool) error {
+	if err := a.SetSetting(SetSettingRequest{Key: "discord_rpc_enabled", Value: map[bool]string{true: "true", false: "false"}[enabled]}); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	m := a.discordRPC
+	if m == nil && enabled {
+		m = a.newDiscordManagerLocked()
+		a.discordRPC = m
+	}
+	a.mu.Unlock()
+	if m != nil {
+		m.SetEnabled(enabled)
+	}
+	return nil
+}
+
+func (a *WailsAdapter) GetDiscordRpcStatus() (*DiscordRpcStatusDTO, error) {
+	a.mu.RLock()
+	m := a.discordRPC
+	a.mu.RUnlock()
+	enabled, appID := a.discordSettings()
+	dto := &DiscordRpcStatusDTO{Enabled: enabled, AppIDSet: appID != ""}
+	if m != nil {
+		st := m.Status()
+		dto.Connected = st.Connected
+		dto.HasActivity = st.HasActivity
+		dto.LastError = st.LastError
+		if st.AppIDSet {
+			dto.AppIDSet = true
+		}
+	}
+	return dto, nil
+}
+
+// GetDiscordRpcPreview renders exactly what other users would see, so the
+// toggle never asks for blind trust.
+func (a *WailsAdapter) GetDiscordRpcPreview(req InstanceIDRequest) (*DiscordRpcPreviewDTO, error) {
+	dto := &DiscordRpcPreviewDTO{}
+	if req.InstanceID == "" {
+		return dto, nil
+	}
+	if a.svc == nil {
+		return dto, nil
+	}
+	inst, err := a.svc.GetInstance(req.InstanceID)
+	if err != nil || inst == nil {
+		return dto, nil
+	}
+	dto.Details = "Minecraft " + inst.GameVersion
+	dto.State = inst.Name
+	return dto, nil
+}
+
+// SetDiscordAppID stores the Discord application identity used for the IPC
+// handshake (BYO app id; empty = presence stays off with an honest status).
+func (a *WailsAdapter) SetDiscordAppID(req SetSettingRequest) error {
+	if err := a.SetSetting(SetSettingRequest{Key: "discord_app_id", Value: req.Value}); err != nil {
+		return err
+	}
+	a.mu.RLock()
+	m := a.discordRPC
+	a.mu.RUnlock()
+	if m != nil {
+		m.SetAppID(req.Value)
+	}
+	return nil
 }

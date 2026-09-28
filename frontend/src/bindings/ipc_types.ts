@@ -519,10 +519,24 @@ export interface ImportCFPackRequest {
 }
 
 export interface CFPackImportResultDTO {
+
   instance_id: string;
   downloaded: number;
   override_files: number;
   skipped_credentials: string[];
   failed_files: string[];
   unresolved: string[];
+}
+
+export interface DiscordRpcStatusDTO {
+  enabled: boolean;
+  connected: boolean;
+  app_id_set: boolean;
+  has_activity: boolean;
+  last_error?: string;
+}
+
+export interface DiscordRpcPreviewDTO {
+  details: string;
+  state: string;
 }

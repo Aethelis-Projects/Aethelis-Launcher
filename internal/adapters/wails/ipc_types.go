@@ -522,3 +522,16 @@ type CFPackImportResultDTO struct {
 	FailedFiles   []string `json:"failed_files"`
 	Unresolved    []string `json:"unresolved"`
 }
+
+type DiscordRpcStatusDTO struct {
+	Enabled     bool   `json:"enabled"`
+	Connected   bool   `json:"connected"`
+	AppIDSet    bool   `json:"app_id_set"`
+	HasActivity bool   `json:"has_activity"`
+	LastError   string `json:"last_error,omitempty"`
+}
+
+type DiscordRpcPreviewDTO struct {
+	Details string `json:"details"`
+	State   string `json:"state"`
+}

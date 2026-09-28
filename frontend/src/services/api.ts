@@ -50,6 +50,8 @@ import type {
   CFPackScanRequest,
   CFPackPlanDTO,
   CFPackImportResultDTO,
+  DiscordRpcStatusDTO,
+  DiscordRpcPreviewDTO,
   PrismImportSummaryDTO,
   ScanPrismInstanceRequest,
   ImportPrismInstanceRequest,
@@ -113,6 +115,11 @@ interface WailsAdapterBindings {
   ListOptimizationMods?: (req: ListOptimizationModsRequest) => Promise<SearchModsResultDTO>;
   CheckInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
   RepairInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
+
+  SetDiscordRpcEnabled?: (enabled: boolean) => Promise<void>;
+  GetDiscordRpcStatus?: () => Promise<DiscordRpcStatusDTO>;
+  GetDiscordRpcPreview?: (req: { instance_id: string }) => Promise<DiscordRpcPreviewDTO>;
+  SetDiscordAppID?: (req: { key: string; value: string }) => Promise<void>;
 
   ScanCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackPlanDTO>;
   ImportCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackImportResultDTO>;
@@ -1169,6 +1176,31 @@ export const launcherAPI = {
       }),
       req
     );
+  },
+
+  async setDiscordRpcEnabled(enabled: boolean): Promise<void> {
+    await invokeWails<void>("SetDiscordRpcEnabled", () => undefined, enabled);
+  },
+
+  async getDiscordRpcStatus(): Promise<DiscordRpcStatusDTO> {
+    return invokeWails<DiscordRpcStatusDTO>("GetDiscordRpcStatus", () => ({
+      enabled: false,
+      connected: false,
+      app_id_set: false,
+      has_activity: false,
+    }));
+  },
+
+  async getDiscordRpcPreview(instanceId: string): Promise<DiscordRpcPreviewDTO> {
+    return invokeWails<DiscordRpcPreviewDTO>(
+      "GetDiscordRpcPreview",
+      () => ({ details: "Minecraft 1.21.1", state: "Preview Instance" }),
+      { instance_id: instanceId }
+    );
+  },
+
+  async setDiscordAppID(value: string): Promise<void> {
+    await invokeWails<void>("SetDiscordAppID", () => undefined, { key: "discord_app_id", value });
   },
 
   async scanCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackPlanDTO> {

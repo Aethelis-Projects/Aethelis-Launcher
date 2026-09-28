@@ -15,6 +15,7 @@ import { GameConsoleModal } from "./components/console/GameConsoleModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
 import { StartupUpdateModal } from "./components/updater/StartupUpdateModal";
 import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
+import { DiscordPresenceCard } from "./components/settings/DiscordPresenceCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
@@ -894,6 +895,7 @@ export const App: Component = () => {
           <Show when={currentNav() === "settings"}>
             <div class="max-w-3xl mx-auto space-y-6">
               <CurseForgeKeyCard />
+              <DiscordPresenceCard />
               <UpdatePanel
                 channel="stable"
                 onUpdateAvailable={(info) => setAvailableUpdate(info)}
