@@ -170,7 +170,6 @@ jobs:
 
   build-linux:
     name: Build & Package Linux (x64)
-    id: build-linux
     outputs:
       release_tag: ${{ steps.tag.outputs.tag }}
       bundle_gzip_kb: ${{ steps.assetmeta.outputs.bundle_gzip_kb }}
