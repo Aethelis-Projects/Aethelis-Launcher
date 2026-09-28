@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go/format"
 	"os"
 )
 
@@ -1211,7 +1212,17 @@ export interface DiscordRpcPreviewDTO {
 }
 `
 
-	if err := os.WriteFile("internal/adapters/wails/ipc_types.go", []byte(goContent), 0644); err != nil {
+	// Canonicalize the generated Go through gofmt (go/format) *inside* the
+	// generator, so "run generator" and "gofmt -l" are a fixed point:
+	// without this, CI (gofmt + parity) and a local gofmt pass oscillate
+	// between two different ipc_types.go (seen on 0b852ab).
+	formattedGo, err := format.Source([]byte(goContent))
+	if err != nil {
+		fmt.Printf("failed to format generated go types: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.WriteFile("internal/adapters/wails/ipc_types.go", formattedGo, 0644); err != nil {
 		fmt.Printf("failed to write go types: %v\n", err)
 		os.Exit(1)
 	}
