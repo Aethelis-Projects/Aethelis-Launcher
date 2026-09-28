@@ -2,17 +2,18 @@ package domain
 
 import (
 	"errors"
+	"strings"
 	"time"
 )
 
 var (
-	ErrInstanceNotFound          = errors.New("instance not found")
-	ErrAccountNotFound           = errors.New("account not found")
-	ErrInvalidConfig             = errors.New("invalid configuration")
-	ErrNoActiveAccount           = errors.New("no active account selected: please log in or select an account")
-	ErrVersionNotFound           = errors.New("requested Minecraft version not found in manifest")
-	ErrDownloadFailed            = errors.New("failed to download required game files")
-	ErrChecksumMismatch          = errors.New("file checksum verification failed")
+	ErrInstanceNotFound = errors.New("instance not found")
+	ErrAccountNotFound  = errors.New("account not found")
+	ErrInvalidConfig    = errors.New("invalid configuration")
+	ErrNoActiveAccount  = errors.New("no active account selected: please log in or select an account")
+	ErrVersionNotFound  = errors.New("requested Minecraft version not found in manifest")
+	ErrDownloadFailed   = errors.New("failed to download required game files")
+	ErrChecksumMismatch = errors.New("file checksum verification failed")
 )
 
 type LoaderType string
@@ -39,24 +40,24 @@ const (
 
 // Instance represents an isolated Minecraft installation.
 type Instance struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	GameVersion  string        `json:"game_version"`
-	Loader       LoaderType    `json:"loader"`
-	LoaderVer    string        `json:"loader_version,omitempty"`
-	IconPath     string        `json:"icon_path,omitempty"`
-	JavaPath     string        `json:"java_path,omitempty"`
-	MinRAMMB     int           `json:"min_ram_mb"`
-	MaxRAMMB     int           `json:"max_ram_mb"`
-	JVMArgs      []string      `json:"jvm_args"`
-	SkipJavaCheck bool         `json:"skip_java_check"`
-	Group        string        `json:"group,omitempty"`
-	IsFavorite   bool          `json:"is_favorite"`
-	State        InstanceState `json:"state"`
-	LastPlayedAt *time.Time    `json:"last_played_at,omitempty"`
-	TotalPlaySec int64         `json:"total_play_seconds"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
+	ID            string        `json:"id"`
+	Name          string        `json:"name"`
+	GameVersion   string        `json:"game_version"`
+	Loader        LoaderType    `json:"loader"`
+	LoaderVer     string        `json:"loader_version,omitempty"`
+	IconPath      string        `json:"icon_path,omitempty"`
+	JavaPath      string        `json:"java_path,omitempty"`
+	MinRAMMB      int           `json:"min_ram_mb"`
+	MaxRAMMB      int           `json:"max_ram_mb"`
+	JVMArgs       []string      `json:"jvm_args"`
+	SkipJavaCheck bool          `json:"skip_java_check"`
+	Group         string        `json:"group,omitempty"`
+	IsFavorite    bool          `json:"is_favorite"`
+	State         InstanceState `json:"state"`
+	LastPlayedAt  *time.Time    `json:"last_played_at,omitempty"`
+	TotalPlaySec  int64         `json:"total_play_seconds"`
+	CreatedAt     time.Time     `json:"created_at"`
+	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
 type AccountType string
@@ -226,4 +227,25 @@ func EvaluateRules(rules []Rule, currentOS, currentArch string, features map[str
 	return allowed
 }
 
-
+// IsCredentialFilename reports whether a base file name belongs to the
+// credential blocklist shared by every import path (.minecraft, Prism,
+// CurseForge zip overrides). Matching is case-insensitive on the base name.
+func IsCredentialFilename(baseName string) bool {
+	lower := strings.ToLower(baseName)
+	switch lower {
+	case "launcher_accounts.json",
+		"launcher_msa_credentials.bin",
+		"usercache.json",
+		"accounts.json",
+		"settings.json.secret",
+		"minecraft.Instance":
+		return true
+	}
+	if strings.HasSuffix(lower, ".token") || strings.HasSuffix(lower, ".auth") {
+		return true
+	}
+	if strings.Contains(lower, "msa-") || strings.Contains(lower, "_credentials") {
+		return true
+	}
+	return false
+}

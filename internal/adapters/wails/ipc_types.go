@@ -480,3 +480,45 @@ type IntegrityResultDTO struct {
 	VirtualAssetsSkipped bool                  `json:"virtual_assets_skipped"`
 	Items                []IntegrityProblemDTO `json:"items"`
 }
+
+type CFPackScanRequest struct {
+	ZipPath string `json:"zip_path"`
+}
+
+type CFPackFileDTO struct {
+	ProjectID   int64  `json:"project_id"`
+	FileID      int64  `json:"file_id"`
+	FileName    string `json:"file_name,omitempty"`
+	Required    bool   `json:"required"`
+	DownloadURL string `json:"download_url,omitempty"`
+	SHA1        string `json:"sha1,omitempty"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
+	ResolveErr  string `json:"resolve_error,omitempty"`
+}
+
+type CFPackPlanDTO struct {
+	Format         string          `json:"format"`
+	InstanceName   string          `json:"instance_name"`
+	GameVersion    string          `json:"game_version"`
+	Loader         string          `json:"loader"`
+	LoaderVersion  string          `json:"loader_version,omitempty"`
+	Files          []CFPackFileDTO `json:"files"`
+	Unresolved     []CFPackFileDTO `json:"unresolved"`
+	OverrideNames  []string        `json:"override_names"`
+	BlockedNames   []string        `json:"blocked_names"`
+	RequiredTotal  int             `json:"required_total"`
+	RequiredFailed int             `json:"required_failed"`
+}
+
+type ImportCFPackRequest struct {
+	ZipPath string `json:"zip_path"`
+}
+
+type CFPackImportResultDTO struct {
+	InstanceID    string   `json:"instance_id"`
+	Downloaded    int      `json:"downloaded"`
+	OverrideFiles int      `json:"override_files"`
+	SkippedCred   []string `json:"skipped_credentials"`
+	FailedFiles   []string `json:"failed_files"`
+	Unresolved    []string `json:"unresolved"`
+}

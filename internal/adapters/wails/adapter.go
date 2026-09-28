@@ -69,6 +69,7 @@ type WailsAdapter struct {
 	mrpackExporter     *content.MrPackExporter
 	mrpackProgress     map[string]*MrPackImportStatusDTO
 	importer           *launch.InstanceImporter
+	cfPackImporter     *launch.CurseForgePackImporter
 	integrityVerifier  ports.IntegrityVerifier
 	filePickerFn       func() (string, error)
 	onLogBatch         func(instanceID string, lines []string)
@@ -3105,6 +3106,29 @@ func (a *WailsAdapter) SetImporter(imp *launch.InstanceImporter) {
 	a.importer = imp
 }
 
+// getCFPackImporter lazily builds the CurseForge .zip pack importer bound to
+// the current curseforge client (may be nil: scans then run resolver-less and
+// the plan honestly lists everything as unresolved).
+func (a *WailsAdapter) getCFPackImporter() *launch.CurseForgePackImporter {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.cfPackImporter == nil {
+		var resolver launch.CurseForgePackFileResolver
+		if a.curseforge != nil {
+			resolver = &cfPackResolver{client: a.curseforge}
+		}
+		a.cfPackImporter = launch.NewCurseForgePackImporter(a.svc, &wailsHTTPClientWrapper{client: a.httpClient}, a.instancesDir, resolver)
+	}
+	return a.cfPackImporter
+}
+
+// SetCurseForgePackImporter overrides the lazy-built importer (tests/e2e).
+func (a *WailsAdapter) SetCurseForgePackImporter(imp *launch.CurseForgePackImporter) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cfPackImporter = imp
+}
+
 func (a *WailsAdapter) getImporter() *launch.InstanceImporter {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -3621,4 +3645,65 @@ func (a *WailsAdapter) distributeDatapack(instDir, srcPath, fileName, cleanInst,
 	}, versionID, "datapack")
 
 	return nil
+}
+
+func toCFPackFileDTOs(files []launch.CurseForgePackFile) []CFPackFileDTO {
+	out := make([]CFPackFileDTO, 0, len(files))
+	for _, f := range files {
+		out = append(out, CFPackFileDTO{
+			ProjectID:   f.ProjectID,
+			FileID:      f.FileID,
+			FileName:    f.FileName,
+			Required:    f.Required,
+			DownloadURL: f.DownloadURL,
+			SHA1:        f.SHA1,
+			SizeBytes:   f.SizeBytes,
+			ResolveErr:  f.ResolveErr,
+		})
+	}
+	return out
+}
+
+func (a *WailsAdapter) ScanCurseForgePackZip(req CFPackScanRequest) (*CFPackPlanDTO, error) {
+	plan, err := a.getCFPackImporter().ScanCurseForgeZip(context.Background(), req.ZipPath)
+	if err != nil {
+		return nil, fmt.Errorf("scan curseforge pack: %w", err)
+	}
+	return &CFPackPlanDTO{
+		Format:         plan.Format,
+		InstanceName:   plan.InstanceName,
+		GameVersion:    plan.GameVersion,
+		Loader:         plan.Loader,
+		LoaderVersion:  plan.LoaderVersion,
+		Files:          toCFPackFileDTOs(plan.Files),
+		Unresolved:     toCFPackFileDTOs(plan.Unresolved),
+		OverrideNames:  plan.OverrideNames,
+		BlockedNames:   plan.BlockedNames,
+		RequiredTotal:  plan.RequiredTotal,
+		RequiredFailed: plan.RequiredFailed,
+	}, nil
+}
+
+func (a *WailsAdapter) ImportCurseForgePackZip(req ImportCFPackRequest) (*CFPackImportResultDTO, error) {
+	imp := a.getCFPackImporter()
+	plan, err := imp.ScanCurseForgeZip(context.Background(), req.ZipPath)
+	if err != nil {
+		return nil, fmt.Errorf("scan curseforge pack: %w", err)
+	}
+	res, err := imp.ImportCurseForgeZip(context.Background(), plan)
+	if res == nil {
+		return nil, fmt.Errorf("import curseforge pack: %w", err)
+	}
+	dto := &CFPackImportResultDTO{
+		InstanceID:    res.InstanceID,
+		Downloaded:    res.Downloaded,
+		OverrideFiles: res.OverrideFiles,
+		SkippedCred:   res.SkippedCred,
+		FailedFiles:   res.FailedFiles,
+		Unresolved:    res.Unresolved,
+	}
+	if err != nil {
+		return dto, fmt.Errorf("import curseforge pack: %w", err)
+	}
+	return dto, nil
 }

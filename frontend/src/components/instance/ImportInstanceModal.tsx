@@ -5,16 +5,17 @@ import type {
   InstanceDTO,
   MinecraftImportSummaryDTO,
   PrismImportSummaryDTO,
+  CFPackPlanDTO,
 } from "../../bindings/ipc_types";
 
 interface ImportInstanceModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onImported?: (instance: InstanceDTO) => void;
+  onImported?: (instance: InstanceDTO | { id: string; name?: string }) => void;
 }
 
 export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) => {
-  const [sourceType, setSourceType] = createSignal<"minecraft" | "prism">("minecraft");
+  const [sourceType, setSourceType] = createSignal<"minecraft" | "prism" | "curseforge">("minecraft");
   const [customPath, setCustomPath] = createSignal("");
   const [instanceName, setInstanceName] = createSignal("");
   const [gameVersion, setGameVersion] = createSignal("");
@@ -34,7 +35,13 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
   const [officialSummary, setOfficialSummary] = createSignal<MinecraftImportSummaryDTO | null>(null);
   const [prismSummary, setPrismSummary] = createSignal<PrismImportSummaryDTO | null>(null);
 
+  // CurseForge modpack .zip (D'4b)
+  const [cfZipPath, setCfZipPath] = createSignal("");
+  const [cfPlan, setCfPlan] = createSignal<CFPackPlanDTO | null>(null);
+  const [cfWarning, setCfWarning] = createSignal("");
+
   const [isImporting, setIsImporting] = createSignal(false);
+  const [importNote, setImportNote] = createSignal("");
   const [importError, setImportError] = createSignal("");
   const [isCompleted, setIsCompleted] = createSignal(false);
 
@@ -46,6 +53,10 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
     setScanError("");
     setOfficialSummary(null);
     setPrismSummary(null);
+    setImportNote("");
+    setCfZipPath("");
+    setCfPlan(null);
+    setCfWarning("");
     setIsScanning(false);
     setIsImporting(false);
     setImportError("");
@@ -98,7 +109,57 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
     }
   };
 
-  const handleSourceTabChange = (type: "minecraft" | "prism") => {
+  const pickCFZip = async () => {
+    try {
+      const picked = await launcherAPI.pickMrPackFile();
+      if (picked) {
+        setCfZipPath(picked);
+        await scanCFZip(picked);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setScanError(`Не удалось выбрать архив: ${msg}`);
+    }
+  };
+
+  const scanCFZip = async (zipPath: string) => {
+    const trimmed = zipPath.trim();
+    if (!trimmed) {
+      setScanError("Укажите путь к .zip архиву модпака CurseForge");
+      return;
+    }
+    setIsScanning(true);
+    setScanError("");
+    setCfWarning("");
+    try {
+      const plan = await launcherAPI.scanCurseForgePackZip({ zip_path: trimmed });
+      setCfPlan(plan);
+      if (plan.game_version) {
+        setGameVersion(plan.game_version);
+        setInstanceName(plan.instance_name);
+        if (plan.loader) setLoader(plan.loader);
+      }
+      if (plan.format === "modlist-html") {
+        setCfWarning(
+          "Архив содержит только modlist.html (export официального лаунчера): Project/File ID в нём нет, " +
+            "моды будет нужно установить вручную — импортируются только overrides."
+        );
+      } else if (plan.unresolved.length > 0) {
+        setCfWarning(
+          `CurseForge API: ${plan.unresolved.length} файл(ов) не удалось разрешить (нет ключа API, файл удалён или лимит). ` +
+            `Создайте инстанс — эти моды попадут в список ручной доустановки, либо попробуйте импорт позже.`
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setScanError(`Не удалось просканировать модпак: ${msg}`);
+      setCfPlan(null);
+    } finally {
+      setIsScanning(false);
+    }
+  };
+
+  const handleSourceTabChange = (type: "minecraft" | "prism" | "curseforge") => {
     setSourceType(type);
     setScanError("");
     setImportError("");
@@ -107,9 +168,13 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
       if (!officialSummary()) {
         scanOfficial(customPath() || undefined);
       }
-    } else {
+    } else if (type === "prism") {
       if (customPath()) {
         scanPrism(customPath());
+      }
+    } else {
+      if (cfZipPath() && !cfPlan()) {
+        scanCFZip(cfZipPath());
       }
     }
   };
@@ -139,6 +204,23 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
           copy_options: copyOptions(),
           copy_servers: copyServers(),
         });
+      } else if (sourceType() === "curseforge") {
+        const result = await launcherAPI.importCurseForgePackZip({ zip_path: cfZipPath() });
+        setImportNote(
+          result
+            ? `Загружено модов: ${result.downloaded}; overrides: ${result.override_files}` +
+              (result.unresolved.length ? `; требуется ручная установка: ${result.unresolved.length}` : "") +
+              (result.skipped_credentials.length ? `; заблокировано учётных файлов: ${result.skipped_credentials.length}` : "")
+            : ""
+        );
+        setIsCompleted(true);
+        if (props.onImported && result?.instance_id) {
+          // Lightweight payload: the parent refetches the full list; we only
+          // need the id to preselect the freshly created instance.
+          props.onImported({ id: result.instance_id, name: result.instance_id });
+        }
+        setIsImporting(false);
+        return;
       } else {
         imported = await launcherAPI.importPrismInstance({
           source_dir: customPath(),
@@ -200,7 +282,8 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                 </div>
                 <h3 class="text-base font-medium text-white">Инстанс успешно импортирован</h3>
                 <p class="text-xs text-zinc-400 max-w-sm">
-                  Все выбранные миры, ресурспаки, моды и настройки скопированы в изолированную директорию.
+                  {importNote() ||
+                    "Все выбранные миры, ресурспаки, моды и настройки скопированы в изолированную директорию."}
                 </p>
                 <button
                   type="button"
@@ -242,9 +325,60 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                   <Cpu class="w-3.5 h-3.5" />
                   <span>Prism / MultiMC</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => handleSourceTabChange("curseforge")}
+                  class={`flex-1 py-1.5 rounded transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                    sourceType() === "curseforge"
+                      ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                      : "text-zinc-400 hover:text-zinc-100"
+                  }`}
+                  data-testid="source-tab-curseforge"
+                >
+                  <FolderDown class="w-3.5 h-3.5" />
+                  <span>CurseForge .zip</span>
+                </button>
               </div>
 
               {/* Source Directory Input */}
+              <Show when={sourceType() === "curseforge"}>
+                <div class="space-y-1.5">
+                  <label class="text-xs font-mono text-zinc-400">
+                    Архив модпака CurseForge (.zip с manifest.json или modlist.html)
+                  </label>
+                  <div class="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={cfZipPath()}
+                      onInput={(e) => setCfZipPath(e.currentTarget.value)}
+                      placeholder="C:\Downloads\Epic-Pack.zip"
+                      class="flex-1 bg-zinc-900 border border-zinc-800 focus:border-[#00D4B2] rounded px-3 py-2 text-xs text-zinc-100 placeholder-zinc-600 outline-none font-mono"
+                      data-testid="cf-zip-path-input"
+                    />
+                    <button
+                      type="button"
+                      disabled={isScanning()}
+                      onClick={() => scanCFZip(cfZipPath())}
+                      class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-xs font-mono transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                      data-testid="cf-scan-btn"
+                    >
+                      <Show when={isScanning()} fallback={<FolderOpen class="w-3.5 h-3.5 text-[#00D4B2]" />}>
+                        <Loader2 class="w-3.5 h-3.5 animate-spin text-[#00D4B2]" />
+                      </Show>
+                      <span>Сканировать</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={pickCFZip}
+                      class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded text-xs font-mono transition-colors cursor-pointer"
+                      data-testid="cf-pick-btn"
+                    >
+                      Обзор...
+                    </button>
+                  </div>
+                </div>
+              </Show>
+              <Show when={sourceType() !== "curseforge"}>
               <div class="space-y-1.5">
                 <label class="text-xs font-mono text-zinc-400">
                   {sourceType() === "minecraft"
@@ -284,6 +418,7 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                   </button>
                 </div>
               </div>
+              </Show>
 
               {/* Scan Error */}
               <Show when={scanError()}>
@@ -293,6 +428,44 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                 >
                   <AlertCircle class="w-4 h-4 shrink-0" />
                   <span>{scanError()}</span>
+                </div>
+              </Show>
+
+              <Show when={sourceType() === "curseforge" && cfPlan()}>
+                <div class="space-y-3 pt-2 border-t border-zinc-800/80" data-testid="cf-plan-card">
+                  <div class="flex items-center justify-between text-xs font-mono">
+                    <span class="text-zinc-400">
+                      {cfPlan()!.instance_name} · {cfPlan()!.game_version}
+                      {cfPlan()!.loader ? ` · ${cfPlan()!.loader}` : ""}
+                      {cfPlan()!.loader_version ? ` ${cfPlan()!.loader_version}` : ""}
+                    </span>
+                    <span class="text-zinc-500 uppercase">{cfPlan()!.format === "manifest" ? "manifest.json" : "modlist.html"}</span>
+                  </div>
+                  <Show when={cfWarning()}>
+                    <div
+                      class="p-3 rounded bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 flex items-start gap-2 font-mono"
+                      data-testid="cf-import-warning-banner"
+                    >
+                      <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
+                      <span>{cfWarning()}</span>
+                    </div>
+                  </Show>
+                  <div class="grid grid-cols-3 gap-2 text-xs font-mono text-zinc-300">
+                    <div>
+                      Моды к автозагрузке: <span class="text-[#00D4B2] font-medium">{cfPlan()!.files.length}</span>
+                    </div>
+                    <div>
+                      Требуют ручной установки: <span class="text-amber-300 font-medium">{cfPlan()!.unresolved.length}</span>
+                    </div>
+                    <div>
+                      Overrides: <span class="text-white font-medium">{cfPlan()!.override_names.length}</span>
+                    </div>
+                  </div>
+                  <Show when={cfPlan()!.blocked_names.length > 0}>
+                    <div class="text-[11px] font-mono text-red-400" data-testid="cf-blocked-note">
+                      Безопасность: {cfPlan()!.blocked_names.length} учётных файл(ов) из overrides будут пропущены (политика credential-блока)
+                    </div>
+                  </Show>
                 </div>
               </Show>
 
@@ -487,7 +660,12 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
               </button>
               <button
                 type="button"
-                disabled={isImporting() || (!officialSummary() && !prismSummary())}
+                disabled={
+                  isImporting() ||
+                  (!officialSummary() &&
+                    !prismSummary() &&
+                    !(sourceType() === "curseforge" && cfPlan()))
+                }
                 onClick={handleStartImport}
                 class="px-4 py-2 bg-[#00D4B2] hover:bg-[#00b89a] text-zinc-950 font-semibold rounded text-xs transition-colors flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                 data-testid="start-import-btn"

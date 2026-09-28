@@ -484,3 +484,45 @@ export interface IntegrityResultDTO {
   virtual_assets_skipped: boolean;
   items: IntegrityProblemDTO[];
 }
+
+export interface CFPackScanRequest {
+  zip_path: string;
+}
+
+export interface CFPackFileDTO {
+  project_id: number;
+  file_id: number;
+  file_name?: string;
+  required: boolean;
+  download_url?: string;
+  sha1?: string;
+  size_bytes?: number;
+  resolve_error?: string;
+}
+
+export interface CFPackPlanDTO {
+  format: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+  files: CFPackFileDTO[];
+  unresolved: CFPackFileDTO[];
+  override_names: string[];
+  blocked_names: string[];
+  required_total: number;
+  required_failed: number;
+}
+
+export interface ImportCFPackRequest {
+  zip_path: string;
+}
+
+export interface CFPackImportResultDTO {
+  instance_id: string;
+  downloaded: number;
+  override_files: number;
+  skipped_credentials: string[];
+  failed_files: string[];
+  unresolved: string[];
+}

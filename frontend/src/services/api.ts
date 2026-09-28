@@ -47,6 +47,9 @@ import type {
   MinecraftImportSummaryDTO,
   ScanOfficialMinecraftRequest,
   ImportOfficialMinecraftRequest,
+  CFPackScanRequest,
+  CFPackPlanDTO,
+  CFPackImportResultDTO,
   PrismImportSummaryDTO,
   ScanPrismInstanceRequest,
   ImportPrismInstanceRequest,
@@ -110,6 +113,9 @@ interface WailsAdapterBindings {
   ListOptimizationMods?: (req: ListOptimizationModsRequest) => Promise<SearchModsResultDTO>;
   CheckInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
   RepairInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
+
+  ScanCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackPlanDTO>;
+  ImportCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackImportResultDTO>;
 
   ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
   ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
@@ -1160,6 +1166,40 @@ export const launcherAPI = {
       "GetScreenshotData",
       () => ({
         data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      }),
+      req
+    );
+  },
+
+  async scanCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackPlanDTO> {
+    return invokeWails<CFPackPlanDTO>(
+      "ScanCurseForgePackZip",
+      () => ({
+        format: "manifest",
+        instance_name: "CurseForge Pack",
+        game_version: "1.20.1",
+        loader: "forge",
+        files: [],
+        unresolved: [],
+        override_names: [],
+        blocked_names: [],
+        required_total: 0,
+        required_failed: 0,
+      }),
+      req
+    );
+  },
+
+  async importCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackImportResultDTO> {
+    return invokeWails<CFPackImportResultDTO>(
+      "ImportCurseForgePackZip",
+      () => ({
+        instance_id: `cfpack-${Date.now()}`,
+        downloaded: 0,
+        override_files: 0,
+        skipped_credentials: [],
+        failed_files: [],
+        unresolved: [],
       }),
       req
     );
