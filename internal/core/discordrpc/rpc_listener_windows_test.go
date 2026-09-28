@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -19,7 +18,7 @@ var pipeSeq atomic.Uint32
 // listenFakeDiscord binds a real named pipe (the transport the Windows
 // Discord client uses) so the pipe path and dialer are exercised exactly as
 // production sees them.
-func listenFakeDiscord(t *testing.T, runtimeDir, name string) (net.Listener, error) {
+func listenFakeDiscord(t *testing.T, runtimeDir, name string) (net.Listener, string, error) {
 	t.Helper()
 	_ = runtimeDir
 	_ = name
@@ -28,14 +27,14 @@ func listenFakeDiscord(t *testing.T, runtimeDir, name string) (net.Listener, err
 		MessageMode: false, InputBufferSize: 64 << 10, OutputBufferSize: 64 << 10,
 	})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	t.Cleanup(func() { _ = ln.Close() }) // errcheck:ok test cleanup
 	wln, ok := ln.(interface{ Accept() (net.Conn, error) })
 	if !ok {
-		return nil, errors.New("unexpected pipe listener type")
+		return nil, "", errors.New("unexpected pipe listener type")
 	}
-	return &pipeListener{Listener: ln, accept: wln.Accept}, nil
+	return &pipeListener{Listener: ln, accept: wln.Accept}, pipeName, nil
 }
 
 type pipeListener struct {
@@ -47,11 +46,13 @@ func (l *pipeListener) Accept() (net.Conn, error) { return l.accept() }
 
 // fakeDialer points the manager at the test pipe (the default dialer scans
 // discord-ipc-0..9, which would collide with a real Discord on a dev box).
-func fakeDialer(t *testing.T, runtimeDir, name string) Option {
+// The name is captured from listenFakeDiscord via fakeDiscord.dialAddr - no
+// global sequence guessing, which silently raced when a test dialed the
+// previous test's pipe (the bug that only Windows CI exposed).
+func fakeDialer(t *testing.T, addr string) Option {
 	t.Helper()
-	pipeName := fmt.Sprintf(`\\.\pipe\discord-ipc-e2e-%d`, pipeSeq.Load())
 	return WithDialer(func(ctx context.Context, _ []string) (net.Conn, error) {
-		c, err := winio.DialPipeContext(ctx, strings.TrimSpace(pipeName))
+		c, err := winio.DialPipeContext(ctx, addr)
 		if err != nil {
 			return nil, err
 		}

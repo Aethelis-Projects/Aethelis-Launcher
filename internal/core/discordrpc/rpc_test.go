@@ -1,6 +1,7 @@
 package discordrpc
 
 import (
+	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -30,6 +31,7 @@ func waitFor(t *testing.T, cond func() bool, within time.Duration, what string) 
 type fakeDiscord struct {
 	t        *testing.T
 	ln       net.Listener
+	dialAddr string
 	framesCh chan string
 
 	mu         sync.Mutex
@@ -56,16 +58,31 @@ func shortTmpBase(t *testing.T) string {
 	return base
 }
 
+// dialerFor hands the manager the transport that reaches this specific fake.
+// On Unix the fake lives under XDG_RUNTIME_DIR and the default dialer finds
+// it (nil is a no-op); on Windows it is an e2e-named pipe and must be dialed
+// explicitly - the same DialPipeContext production uses, just with the test
+// address.
+func dialerFor(f *fakeDiscord) func(ctx context.Context, candidates []string) (net.Conn, error) {
+	opt := fakeDialer(f.t, f.dialAddr)
+	if opt == nil {
+		return nil
+	}
+	m := &Manager{appID: f.t.Name()}
+	opt(m)
+	return m.dialer
+}
+
 func newFakeDiscord(t *testing.T, runtimeDir, name string) *fakeDiscord {
 	t.Helper()
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	ln, err := listenFakeDiscord(t, runtimeDir, name)
+	ln, addr, err := listenFakeDiscord(t, runtimeDir, name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeDiscord{t: t, ln: ln, framesCh: make(chan string, 64)}
+	f := &fakeDiscord{t: t, ln: ln, dialAddr: addr, framesCh: make(chan string, 64)}
 	go f.acceptLoop()
 	t.Cleanup(func() { _ = ln.Close() }) // errcheck:ok test cleanup
 	return f
@@ -134,6 +151,7 @@ func TestRPC_FullLifecycle_WithFakeDiscord(t *testing.T) {
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
 	m := NewManager("1234567890")
+	m.SetDialerForTest(dialerFor(fake))
 	if m.Status().Enabled {
 		t.Fatal("must start disabled (opt-in default off)")
 	}
@@ -212,6 +230,7 @@ func TestRPC_ReconnectAfterDiscordRestart(t *testing.T) {
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
 	m := NewManager("app-id")
+	m.SetDialerForTest(dialerFor(fake))
 	m.SetEnabled(true)
 	waitFor(t, func() bool { return m.Status().Connected }, 3*time.Second, "first handshake")
 
@@ -264,6 +283,7 @@ func TestRPC_EmptyAppID_FallsBackToBuiltinIdentity(t *testing.T) {
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
 	m := NewManager("")
+	m.SetDialerForTest(dialerFor(fake))
 	m.SetEnabled(true)
 	waitFor(t, func() bool { return m.Status().Connected }, 3*time.Second, "handshake with builtin id")
 

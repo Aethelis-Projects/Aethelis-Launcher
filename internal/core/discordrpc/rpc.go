@@ -130,6 +130,20 @@ func WithClock(now func() time.Time) Option {
 	return func(m *Manager) { m.nowFn = now }
 }
 
+// SetDialerForTest rebinds the transport dialer after construction. It exists
+// solely so the Windows test fake (which binds an e2e-named pipe instead of
+// discord-ipc-0..9 to avoid clashing with a developer's real Discord) can hand
+// the manager its address; nil restores the platform default. Production code
+// never calls it.
+func (m *Manager) SetDialerForTest(d func(ctx context.Context, candidates []string) (net.Conn, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if d == nil {
+		d = platformDialer()
+	}
+	m.dialer = d
+}
+
 func NewManager(appID string, opts ...Option) *Manager {
 	m := &Manager{
 		appID:       appID,
@@ -138,7 +152,9 @@ func NewManager(appID string, opts ...Option) *Manager {
 		backoffMax:  30 * time.Second,
 	}
 	for _, o := range opts {
-		o(m)
+		if o != nil { // platform test hooks may resolve to a no-op
+			o(m)
+		}
 	}
 	if m.dialer == nil {
 		m.dialer = platformDialer()
