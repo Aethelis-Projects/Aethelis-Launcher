@@ -252,7 +252,16 @@ func (a *WailsAdapter) getMrPackExporter() *content.MrPackExporter {
 	return a.mrpackExporter
 }
 
-func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
+// AdapterOption wires the adapter inside the constructor (owner directive
+// 2026-09-28: wiring should be constructor-supplied, not exported surface).
+// The callback receives the never-bound *Host facade, so every wiring setter
+// is expressed at the one call site that builds the adapter and no wiring
+// method ever appears on the bound receiver. NewWailsAdapter applies all
+// options before returning - the adapter can never be observed or bound in a
+// half-wired state by callers that use this form.
+type AdapterOption func(*Host)
+
+func NewWailsAdapter(svc *launch.InstanceService, opts ...AdapterOption) *WailsAdapter {
 	a := &WailsAdapter{
 		svc:                svc,
 		relauncher:         updater.DefaultRelauncher,
@@ -266,6 +275,11 @@ func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 		svc.SetOnCrash(func(instanceID string, report *launch.CrashReport) {
 			a.recordCrash(instanceID, report)
 		})
+	}
+	for _, opt := range opts {
+		if opt != nil { // errcheck:ok tolerated like platform no-op options
+			opt(NewHost(a))
+		}
 	}
 	return a
 }

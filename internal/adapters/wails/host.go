@@ -30,8 +30,11 @@ import (
 // method outside the declared webview registry fails CI.
 type Host struct{ a *WailsAdapter }
 
-// NewHost returns the wiring facade for a constructed adapter. Wire everything
-// before handing the adapter to the application.
+// NewHost returns the wiring facade for a constructed adapter. Preferred form
+// for production wiring is passing it through wails.AdapterOption into
+// NewWailsAdapter; the facade setters remain for fixtures that build the
+// adapter before their services exist. Either way, wire everything before
+// handing the adapter to the application.
 func NewHost(a *WailsAdapter) *Host { return &Host{a: a} }
 
 func (h *Host) SetAllowedHosts(hosts []string) {

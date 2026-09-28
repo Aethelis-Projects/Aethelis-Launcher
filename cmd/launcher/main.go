@@ -184,20 +184,22 @@ func main() {
 	autoUpdater := updater.NewAutoUpdater(version, manifestURL, updater.GetDefaultPublicKey(), sharedHTTPClient)
 
 	// 5. Initialize Wails IPC Adapter
-	adapter := wails.NewWailsAdapter(instanceSvc)
-	host := wails.NewHost(adapter)
-	host.SetAuth(authSvc, accRepo)
-	host.SetContent(mrClient, cfClient)
-	host.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
-	host.SetUpdater(autoUpdater)
-	host.SetJavaDetector(javaDetector)
-	host.SetJavaManager(javaMgr)
-	host.SetSettings(settingsRepo)
-	if db != nil {
-		host.SetDB(db.DB())
-	}
-	host.SetVersion(version)
-	host.SetIntegrityVerifier(gameProvisioner)
+	adapter := wails.NewWailsAdapter(instanceSvc,
+		wails.AdapterOption(func(h *wails.Host) {
+			h.SetAuth(authSvc, accRepo)
+			h.SetContent(mrClient, cfClient)
+			h.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
+			h.SetUpdater(autoUpdater)
+			h.SetJavaDetector(javaDetector)
+			h.SetJavaManager(javaMgr)
+			h.SetSettings(settingsRepo)
+			if db != nil {
+				h.SetDB(db.DB())
+			}
+			h.SetVersion(version)
+			h.SetIntegrityVerifier(gameProvisioner)
+		}),
+	)
 
 	coreInitDuration := time.Since(startInit)
 
