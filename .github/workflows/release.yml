@@ -173,6 +173,7 @@ jobs:
     outputs:
       release_tag: ${{ steps.tag.outputs.tag }}
       bundle_gzip_kb: ${{ steps.assetmeta.outputs.bundle_gzip_kb }}
+      core_coverage: ${{ steps.covtotal.outputs.total }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -245,6 +246,26 @@ jobs:
             exit 1
           fi
           echo "PASS: Linux binary and tarball verified (clean binary + sidecar present in tarball)."
+        shell: bash
+
+      - name: Core Coverage Total (README metrics; same command as the CI gate)
+        id: covtotal
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          go test -coverprofile=corecov.out ./internal/core/... > /dev/null 2>&1 || true
+          TOTAL=$(go tool cover -func=corecov.out 2>/dev/null | awk '/^total:/ {print $3}' | tr -d '%' || true)
+          echo "total=${TOTAL:-n/a}" >> "$GITHUB_OUTPUT"
+          echo "core coverage total on the release build: ${TOTAL:-n/a}%"
+        shell: bash
+
+      - name: Frontend Bundle Size (README metrics, gzip)
+        id: assetmeta
+        run: |
+          DIST=$(ls -d frontend/dist dist/linux/frontend 2>/dev/null | head -1)
+          TOTAL=$(find "$DIST" \( -name "*.js" -o -name "*.css" \) -print0 | xargs -0 -r gzip -9 -c 2>/dev/null | wc -c)
+          KB=$(( (TOTAL + 1023) / 1024 ))
+          echo "bundle_gzip_kb=${KB}" >> "$GITHUB_OUTPUT"
+          echo "frontend bundle gzip from ${DIST}: ${KB} KB"
         shell: bash
 
       - name: Upload Linux Artifacts
@@ -446,6 +467,28 @@ jobs:
           for f in coverage/core-and-frontend-ubuntu-latest/coverage.txt; do
             [ -f "$f" ] && COV=$(cat "$f") && break
           done
+          mkdir -p /tmp/metrics-extract
+          tar -xzf "$TAR" -C /tmp/metrics-extract
+          BIN=$(find /tmp/metrics-extract -type f -name "nord-launcher*" ! -name "*.sh" ! -name "*.desktop" ! -name "*.png" | head -1)
+          go run ./scripts/release_metrics.go \
+            --version "$RELEASE_TAG" \
+            --tar-bytes "$(wc -c < "$TAR")" \
+            --linux-binary-bytes "$(wc -c < "$BIN")" \
+            --windows-installer-bytes "$(wc -c < "$WIN")" \
+            --bundle-gzip-kb "$BUNDLE_KB" \
+            --core-coverage "$COV" \
+            --out release-assets/metrics.json
+          cat release-assets/metrics.json
+        shell: bash
+
+      - name: Compile metrics.json (single source for the README perf story)
+        run: |
+          TAR=$(ls release-assets/*.tar.gz | head -1)
+          WIN=$(ls release-assets/*.exe | head -1)
+          BUNDLE_KB="${{ needs.build-linux.outputs.bundle_gzip_kb }}"
+          [ -n "$BUNDLE_KB" ] || BUNDLE_KB=null
+          COV="${{ needs.build-linux.outputs.core_coverage }}"
+          [ -n "$COV" ] || COV=null
           mkdir -p /tmp/metrics-extract
           tar -xzf "$TAR" -C /tmp/metrics-extract
           BIN=$(find /tmp/metrics-extract -type f -name "nord-launcher*" ! -name "*.sh" ! -name "*.desktop" ! -name "*.png" | head -1)
