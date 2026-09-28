@@ -1,5 +1,6 @@
 import { Component, createSignal, Show, onMount, For } from "solid-js";
-import { FolderDown, FolderOpen, Loader2, CheckCircle2, AlertCircle, X, Check, HardDrive, Cpu } from "lucide-solid";
+import { FolderDown, FolderOpen, Loader2, CheckCircle2, AlertCircle, X, Check, HardDrive, Cpu, Package } from "lucide-solid";
+import { MrPackImportModal } from "./MrPackImportModal";
 import { launcherAPI } from "../../services/api";
 import type {
   InstanceDTO,
@@ -13,10 +14,12 @@ interface ImportInstanceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImported?: (instance: InstanceDTO | { id: string; name?: string }) => void;
+  /** v0.7.2 G6: which source tab the unified import modal opens on. */
+  initialSource?: "mrpack" | "curseforge" | "minecraft" | "prism";
 }
 
 export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) => {
-  const [sourceType, setSourceType] = createSignal<"minecraft" | "prism" | "curseforge">("minecraft");
+  const [sourceType, setSourceType] = createSignal<"mrpack" | "curseforge" | "minecraft" | "prism">(props.initialSource || "mrpack");
   const [customPath, setCustomPath] = createSignal("");
   const [instanceName, setInstanceName] = createSignal("");
   const [gameVersion, setGameVersion] = createSignal("");
@@ -162,7 +165,7 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
     }
   };
 
-  const handleSourceTabChange = (type: "minecraft" | "prism" | "curseforge") => {
+  const handleSourceTabChange = (type: "mrpack" | "curseforge" | "minecraft" | "prism") => {
     setSourceType(type);
     setScanError("");
     setImportError("");
@@ -187,6 +190,11 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
       scanOfficial();
     }
   });
+
+  const handleMrpackImported = (inst: InstanceDTO) => {
+    props.onImported?.(inst);
+    props.onClose();
+  };
 
   const handleStartImport = async () => {
     setIsImporting(true);
@@ -276,7 +284,7 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
           </div>
 
           <div class="p-6 space-y-5 flex-1 overflow-y-auto max-h-[80vh]">
-            <Show when={isCompleted()}>
+            <Show when={isCompleted() && sourceType() !== "mrpack"}>
               <div
                 class="py-8 flex flex-col items-center justify-center text-center space-y-3"
                 data-testid="import-complete-view"
@@ -325,8 +333,24 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
             </Show>
 
             <Show when={!isCompleted()}>
-              {/* Source Switcher Tabs */}
+              <Show when={sourceType() === "mrpack"}>
+                <MrPackImportModal isOpen={props.isOpen} asPanel onClose={props.onClose} onImported={handleMrpackImported} />
+              </Show>
+              {/* Source Switcher Tabs (v0.7.2 G6: one modal, four sources) */}
               <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded p-1 text-xs font-mono">
+                <button
+                  type="button"
+                  onClick={() => handleSourceTabChange("mrpack")}
+                  class={`flex-1 py-1.5 rounded transition-colors flex items-center justify-center gap-2 cursor-pointer ${
+                    sourceType() === "mrpack"
+                      ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                      : "text-zinc-400 hover:text-zinc-100"
+                  }`}
+                  data-testid="source-tab-mrpack"
+                >
+                  <Package class="w-3.5 h-3.5" />
+                  <span>.mrpack</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => handleSourceTabChange("minecraft")}
@@ -368,6 +392,7 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                 </button>
               </div>
 
+              <Show when={sourceType() !== "mrpack"}>
               {/* Source Directory Input */}
               <Show when={sourceType() === "curseforge"}>
                 <div class="space-y-1.5">
@@ -687,11 +712,12 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
                   <span>{importError()}</span>
                 </div>
               </Show>
+              </Show>
             </Show>
           </div>
 
           {/* Footer */}
-          <Show when={!isCompleted()}>
+          <Show when={!isCompleted() && sourceType() !== "mrpack"}>
             <div class="p-4 border-t border-zinc-800 flex items-center justify-end gap-3 bg-zinc-900/30">
               <button
                 type="button"

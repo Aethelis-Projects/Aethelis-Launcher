@@ -117,6 +117,59 @@ export interface SearchModsRequest {
   project_type?: ProjectType;
 }
 
+export interface GameVersionDTO {
+  id: string;
+  type: string;
+  release_time: string;
+}
+
+export interface ListMinecraftVersionsRequest {
+  channel?: string;
+}
+
+export interface ListLoaderVersionsRequest {
+  game_version: string;
+  loader: string;
+}
+
+export interface LoaderResolutionDTO {
+  loader: string;
+  default: string;
+  options: string[];
+  source: string;
+  note?: string;
+}
+
+export interface CreateInstanceWithLoaderRequest {
+  name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+}
+
+export interface ListMrPackVersionsRequest {
+  project_slug: string;
+  game_version?: string;
+  loader?: string;
+}
+
+export interface MrPackVersionDTO {
+  version_id: string;
+  name: string;
+  version_type: string;
+  game_version: string;
+  loaders: string[];
+  url: string;
+  filename: string;
+  size: number;
+  sha1?: string;
+}
+
+export interface ImportMrPackURLRequest {
+  url: string;
+  instance_name: string;
+}
+
 export interface ProjectTagDTO {
   id: string;
   label: string;

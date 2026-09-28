@@ -35,6 +35,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/loadermeta"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
@@ -391,6 +392,12 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"AddJavaRuntime",
 		"ListModVersions",
 		"ListProjectTags",
+		"ListMinecraftVersions",
+		"ListLoaderVersions",
+		"CreateInstanceWithLoader",
+		"ListMrPackVersions",
+		"ImportMrPackFromURL",
+		"GetMrPackURLImportStatus",
 		"GetModInstallStatus",
 		"CheckModUpdates",
 		"GetDiagnosticReport",
@@ -428,9 +435,9 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (60 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 60 {
-		t.Fatalf("expected exactly 60 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (66 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 66 {
+		t.Fatalf("expected exactly 66 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -3365,5 +3372,120 @@ func TestWailsAdapter_CatalogProvidersV072(t *testing.T) {
 	}
 	if _, err := adapter.ListProjectTags(wails.ListProjectTagsRequest{ProjectType: "mod"}); err != nil {
 		t.Fatalf("ListProjectTags(mod): %v", err)
+	}
+}
+
+func newV072TestResolver(srv *httptest.Server) *loadermeta.Resolver {
+	r := loadermeta.NewResolver(srv.Client())
+	r.FabricURL = srv.URL + "/fabric/"
+	r.QuiltURL = srv.URL + "/quilt/"
+	r.ForgeURL = srv.URL + "/forge"
+	r.NeoURL = srv.URL + "/neo"
+	return r
+}
+
+// TestWailsAdapter_WizardAndModpacksV072 covers the v0.7.2 G10 wizard data
+// methods and the G5 .mrpack storefront plumbing with local fixtures.
+func TestWailsAdapter_WizardAndModpacksV072(t *testing.T) {
+	manifestSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"latest":{"release":"26.3","snapshot":"26.3-rc1"},"versions":[
+			{"id":"26.3","type":"release","url":"u","releaseTime":"2026-09-01T00:00:00+00:00"},
+			{"id":"26.3-rc1","type":"snapshot","url":"u","releaseTime":"2026-08-20T00:00:00+00:00"},
+			{"id":"1.21.4","type":"release","url":"u","releaseTime":"2024-12-03T00:00:00+00:00"}
+		]}`))
+	}))
+	defer manifestSrv.Close()
+
+	versionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.URL.RawQuery, "1.21.4") || !strings.Contains(r.URL.RawQuery, "fabric") {
+			t.Errorf("unexpected version query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"id":"v1","name":"Fabric Pack 1.21.4","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],
+			 "files":[{"filename":"fabricskyblocks-2.6.0.mrpack","url":"https://cdn.modrinth.test/a.mrpack","size":10,"hashes":{"sha1":"aa"}}]},
+			{"id":"v2","name":"Fabric Pack jar only","version_type":"beta","game_versions":["1.21.4"],"loaders":["fabric"],
+			 "files":[{"filename":"pack.jar","url":"https://cdn.modrinth.test/b.jar","size":5}]}
+		]`))
+	}))
+	defer versionSrv.Close()
+
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetGameManifestURL(manifestSrv.URL)
+	adapter.SetContent(modrinth.NewClient(versionSrv.URL, versionSrv.Client()), nil)
+
+	// --- ListMinecraftVersions -------------------------------------------
+	rels, err := adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{})
+	if err != nil {
+		t.Fatalf("ListMinecraftVersions: %v", err)
+	}
+	if len(rels) != 2 || rels[0].ID != "26.3" || rels[0].Type != "release" {
+		t.Fatalf("release channel = %+v", rels)
+	}
+	all, err := adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{Channel: "all"})
+	if err != nil || len(all) != 3 {
+		t.Fatalf("all channel = %+v err=%v", all, err)
+	}
+
+	// --- ListLoaderVersions ------------------------------------------------
+	fabricSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/1.21.4") {
+			t.Errorf("fabric path = %s, want trailing game version", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"loader":{"version":"0.16.9","stable":false}},{"loader":{"version":"0.16.4","stable":true}}]`))
+	}))
+	defer fabricSrv.Close()
+	adapter.SetLoaderResolver(&loadermeta.Resolver{}) // zero value: refuses to reach the network
+	res, err := adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "FABRIC "})
+	if err != nil {
+		t.Fatalf("ListLoaderVersions: %v", err)
+	}
+	if res == nil || res.Options == nil {
+		t.Fatalf("loader resolution = %+v, want non-nil options slice", res)
+	}
+	if !strings.Contains(res.Note, "оффлайн") {
+		t.Fatalf("expected degradation note on transport error, got %q", res.Note)
+	}
+	adapter.SetLoaderResolver(newV072TestResolver(fabricSrv))
+	res2, err := adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "fabric"})
+	if err != nil {
+		t.Fatalf("ListLoaderVersions (fixture): %v", err)
+	}
+	if res2.Default != "0.16.4" || len(res2.Options) != 2 || res2.Note != "" {
+		t.Fatalf("fixture resolution = %+v", res2)
+	}
+	if _, err := adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "sponge"}); err == nil {
+		t.Fatal("expected unsupported loader error")
+	}
+
+	// --- ListMrPackVersions ------------------------------------------------
+	packs, err := adapter.ListMrPackVersions(wails.ListMrPackVersionsRequest{ProjectSlug: "project", GameVersion: "1.21.4", Loader: "fabric"})
+	if err != nil {
+		t.Fatalf("ListMrPackVersions: %v", err)
+	}
+	if len(packs) != 1 {
+		t.Fatalf("mrpack filter = %+v, want only the .mrpack file", packs)
+	}
+	if packs[0].VersionID != "v1" || packs[0].Filename != "fabricskyblocks-2.6.0.mrpack" || packs[0].SHA1 != "aa" {
+		t.Fatalf("pack entry = %+v", packs[0])
+	}
+	if _, err := adapter.ListMrPackVersions(wails.ListMrPackVersionsRequest{}); err == nil {
+		t.Fatal("expected error for empty slug")
+	}
+
+	// --- ImportMrPackFromURL validation ------------------------------------
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://evil.test/p.mrpack", InstanceName: "x"}); err == nil {
+		t.Fatal("expected https-only rejection")
+	}
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://ok.test/p.mrpack", InstanceName: " ../../etc "}); err == nil {
+		t.Fatal("expected name validation error after path-traversal sanitize")
+	}
+
+	// --- GetMrPackURLImportStatus ------------------------------------------
+	st, err := adapter.GetMrPackURLImportStatus(wails.InstanceIDRequest{InstanceID: "never-imported"})
+	if err != nil || st == nil || st.Status != "idle" {
+		t.Fatalf("status = %+v err=%v, want idle", st, err)
 	}
 }

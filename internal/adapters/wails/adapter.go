@@ -34,6 +34,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/loadermeta"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/ports"
@@ -64,8 +65,10 @@ type WailsAdapter struct {
 	db                *sql.DB
 
 	lastCrashes        map[string]*CrashReportDTO
+	gameManifestURL    string
 	modVersionsCache   map[string]modVersionCacheEntry
 	projectTagsCache   map[string]projectTagsCacheEntry
+	mrpackURLProgress  map[string]*MrPackImportStatusDTO
 	modInstallProgress map[string]*ModInstallProgressDTO
 	mrpackImporter     *content.MrPackImporter
 	mrpackExporter     *content.MrPackExporter
@@ -73,6 +76,8 @@ type WailsAdapter struct {
 	importer           *launch.InstanceImporter
 	cfPackImporter     *launch.CurseForgePackImporter
 	discordRPC         *discordrpc.Manager
+	loaderResolver     *loadermeta.Resolver
+	gameManifestCache  *gameManifestCacheEntry
 	integrityVerifier  ports.IntegrityVerifier
 	filePickerFn       func() (string, error)
 	onLogBatch         func(instanceID string, lines []string)
@@ -82,6 +87,11 @@ type WailsAdapter struct {
 type modVersionCacheEntry struct {
 	files     []ModFileDTO
 	timestamp time.Time
+}
+
+type gameManifestCacheEntry struct {
+	entries   []game.VersionManifestEntry
+	fetchedAt time.Time
 }
 
 type projectTagsCacheEntry struct {
@@ -248,6 +258,7 @@ func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 		lastCrashes:        make(map[string]*CrashReportDTO),
 		modVersionsCache:   make(map[string]modVersionCacheEntry),
 		projectTagsCache:   make(map[string]projectTagsCacheEntry),
+		mrpackURLProgress:  make(map[string]*MrPackImportStatusDTO),
 		modInstallProgress: make(map[string]*ModInstallProgressDTO),
 	}
 	if svc != nil {
@@ -909,6 +920,274 @@ func (a *WailsAdapter) GetPerformancePreset() (*PerformancePresetDTO, error) {
 		SuggestedRAMMB: suggested,
 		AikarArgs:      launch.AikarArgs(suggested),
 	}, nil
+}
+
+// ---------------------------------------------------------------------------
+// v0.7.2 G10/G5: instance creation wizard + Modrinth modpack storefront.
+// ---------------------------------------------------------------------------
+
+const gameManifestTTL = 6 * time.Hour
+
+// SetGameManifestURL overrides the Mojang manifest endpoint (tests/private mirrors).
+func (a *WailsAdapter) SetGameManifestURL(u string) {
+	a.mu.Lock()
+	a.gameManifestURL = strings.TrimSpace(u)
+	a.gameManifestCache = nil
+	a.mu.Unlock()
+}
+
+func (a *WailsAdapter) manifestURL() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.gameManifestURL
+}
+
+// SetLoaderResolver injects an explicit loader metadata resolver (tests).
+func (a *WailsAdapter) SetLoaderResolver(r *loadermeta.Resolver) {
+	a.mu.Lock()
+	a.loaderResolver = r
+	a.mu.Unlock()
+}
+
+// loaderTransport adapts *http.Client to the loadermeta transport contract.
+type loaderTransport struct{ client *http.Client }
+
+func (t *loaderTransport) Do(req *http.Request) (*http.Response, error) {
+	return t.client.Do(req)
+}
+
+func (a *WailsAdapter) getLoaderResolver() *loadermeta.Resolver {
+	a.mu.RLock()
+	r := a.loaderResolver
+	a.mu.RUnlock()
+	if r != nil {
+		return r
+	}
+	nr := loadermeta.NewResolver(&loaderTransport{client: a.getHTTPClient()})
+	a.mu.Lock()
+	if a.loaderResolver == nil {
+		a.loaderResolver = nr
+	}
+	held := a.loaderResolver
+	a.mu.Unlock()
+	return held
+}
+
+// getHTTPClientNoLock mirrors getHTTPClient for call sites already holding no
+// lock; taken separately to avoid the a.mu re-entrancy hazard (v0.7.1 lesson).
+// ListMinecraftVersions returns the Mojang version catalog (release/snapshot/
+// all) for the wizard's first step; cached 6h.
+func (a *WailsAdapter) ListMinecraftVersions(req ListMinecraftVersionsRequest) ([]GameVersionDTO, error) {
+	channel := strings.ToLower(strings.TrimSpace(req.Channel))
+	if channel == "" {
+		channel = "release"
+	}
+	entries, err := a.cachedGameManifest()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GameVersionDTO, 0, len(entries))
+	for _, e := range entries {
+		if channel != "all" && e.Type != channel {
+			continue
+		}
+		out = append(out, GameVersionDTO{ID: e.ID, Type: e.Type, ReleaseTime: e.ReleaseTime.Format(time.RFC3339)})
+	}
+	return out, nil
+}
+
+func (a *WailsAdapter) cachedGameManifest() ([]game.VersionManifestEntry, error) {
+	a.mu.RLock()
+	cache := a.gameManifestCache
+	a.mu.RUnlock()
+	if cache != nil && time.Since(cache.fetchedAt) < gameManifestTTL {
+		return cache.entries, nil
+	}
+	manifest, err := game.FetchVersionManifest(context.Background(), &wailsHTTPClientWrapper{client: a.getHTTPClient()}, a.manifestURL())
+	if err != nil {
+		if cache != nil {
+			return cache.entries, nil // stale cache beats a hard error
+		}
+		return nil, fmt.Errorf("fetch version manifest: %w", err)
+	}
+	a.mu.Lock()
+	a.gameManifestCache = &gameManifestCacheEntry{entries: manifest.Versions, fetchedAt: time.Now()}
+	a.mu.Unlock()
+	return manifest.Versions, nil
+}
+
+// ListLoaderVersions resolves recommended/latest-stable plus the recent option
+// list for one (game version, loader) pair via official metadata services.
+func (a *WailsAdapter) ListLoaderVersions(req ListLoaderVersionsRequest) (*LoaderResolutionDTO, error) {
+	loader := strings.ToLower(strings.TrimSpace(req.Loader))
+	if loader == "" {
+		loader = "vanilla"
+	}
+	switch loader {
+	case "vanilla", "fabric", "quilt", "forge", "neoforge":
+	default:
+		return nil, fmt.Errorf("unsupported loader %q", loader)
+	}
+	opt, err := a.getLoaderResolver().Resolve(context.Background(), loader, strings.TrimSpace(req.GameVersion))
+	dto := &LoaderResolutionDTO{
+		Loader:  opt.Loader,
+		Default: opt.Default,
+		Options: opt.Options,
+		Source:  opt.Source,
+	}
+	if dto.Options == nil {
+		dto.Options = []string{}
+	}
+	if err != nil {
+		dto.Note = "не удалось получить список версий (оффлайн?) — можно продолжить с пустой версией"
+		return dto, nil
+	}
+	return dto, nil
+}
+
+// CreateInstanceWithLoader creates an instance pinned to a loader version.
+// Empty loaderVersion: vanilla, or loader resolution at first launch.
+func (a *WailsAdapter) CreateInstanceWithLoader(req CreateInstanceWithLoaderRequest) (*InstanceDTO, error) {
+	if a.svc == nil {
+		return nil, errors.New("instance service not available")
+	}
+	inst, err := a.svc.CreateInstanceWithLoader(strings.TrimSpace(req.Name), strings.TrimSpace(req.GameVersion), strings.TrimSpace(req.Loader), strings.TrimSpace(req.LoaderVersion))
+	if err != nil {
+		return nil, err
+	}
+	dto := toInstanceDTO(inst)
+	return &dto, nil
+}
+
+// ListMrPackVersions lists files of a Modrinth project and keeps only
+// .mrpack downloads (modpack storefront, v0.7.2 G5).
+func (a *WailsAdapter) ListMrPackVersions(req ListMrPackVersionsRequest) ([]MrPackVersionDTO, error) {
+	slug := strings.TrimSpace(req.ProjectSlug)
+	if slug == "" {
+		return nil, errors.New("project slug or id is required")
+	}
+	if a.modrinth == nil {
+		return nil, fmt.Errorf("modrinth client not initialized")
+	}
+	vers, err := a.modrinth.GetProjectVersions(context.Background(), slug, strings.TrimSpace(req.GameVersion), strings.TrimSpace(req.Loader))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MrPackVersionDTO, 0, len(vers))
+	for _, v := range vers {
+		for _, f := range v.Files {
+			if !strings.HasSuffix(strings.ToLower(f.FileName), ".mrpack") {
+				continue
+			}
+			out = append(out, MrPackVersionDTO{
+				VersionID:   v.ID,
+				Name:        v.Name,
+				VersionType: v.VersionType,
+				GameVersion: firstOr(v.GameVersions, ""),
+				Loaders:     v.Loaders,
+				URL:         f.URL,
+				Filename:    f.FileName,
+				Size:        f.Size,
+				SHA1:        f.SHA1,
+			})
+			break
+		}
+	}
+	return out, nil
+}
+
+func firstOr(list []string, fallback string) string {
+	if len(list) > 0 {
+		return list[0]
+	}
+	return fallback
+}
+
+// ImportMrPackFromURL downloads a .mrpack over HTTPS into a temp dir and runs
+// the standard importer pipeline (same progress/status as file import).
+func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(req.URL))
+	if err != nil || u.Scheme != "https" {
+		return "", errors.New("mrpack download requires an https URL")
+	}
+	name := sanitizeInstanceName(req.InstanceName)
+	if name == "" {
+		return "", errors.New("instance name is required")
+	}
+	importer := a.getMrPackImporter()
+	if importer == nil {
+		return "", errors.New("mrpack importer not available")
+	}
+
+	tmp, err := os.MkdirTemp("", "nord-mrpack-url-*")
+	if err != nil {
+		return "", fmt.Errorf("temp dir: %w", err)
+	}
+	path := filepath.Join(tmp, "pack.mrpack")
+	a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "downloading" })
+	body, err := (&wailsHTTPClientWrapper{client: a.getHTTPClient()}).Get(context.Background(), u.String(), nil)
+	if err != nil {
+		_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
+		a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = err.Error() })
+		return "", fmt.Errorf("download mrpack: %w", err)
+	}
+	if len(body) == 0 {
+		_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
+		return "", errors.New("downloaded mrpack is empty")
+	}
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
+		return "", fmt.Errorf("stage mrpack: %w", err)
+	}
+
+	instID, err := a.ImportMrPack(ImportMrPackRequest{MrPackPath: path, InstanceName: name})
+	_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
+	if err != nil {
+		a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = err.Error() })
+		return "", err
+	}
+	a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "complete" })
+	return instID, nil
+}
+
+// GetMrPackURLImportStatus mirrors the file-import progress for URL imports,
+// keyed by the requested instance name.
+func (a *WailsAdapter) GetMrPackURLImportStatus(req InstanceIDRequest) (*MrPackImportStatusDTO, error) {
+	name := sanitizeInstanceName(req.InstanceID)
+	a.mu.RLock()
+	if st, ok := a.mrpackURLProgress[name]; ok && st != nil {
+		cp := *st
+		a.mu.RUnlock()
+		return &cp, nil
+	}
+	a.mu.RUnlock()
+	if st, err := a.GetMrPackImportStatus(name); err == nil && st != nil {
+		return st, nil
+	}
+	return &MrPackImportStatusDTO{TaskID: name, Status: "idle"}, nil
+}
+
+func (a *WailsAdapter) setMrpackURLProgress(name string, mutate func(*MrPackImportStatusDTO)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mrpackURLProgress == nil {
+		a.mrpackURLProgress = make(map[string]*MrPackImportStatusDTO)
+	}
+	st, ok := a.mrpackURLProgress[name]
+	if !ok || st == nil {
+		st = &MrPackImportStatusDTO{TaskID: name}
+		a.mrpackURLProgress[name] = st
+	}
+	mutate(st)
+}
+
+func sanitizeInstanceName(in string) string {
+	in = strings.TrimSpace(in)
+	in = strings.ReplaceAll(in, "\\", "/")
+	if i := strings.LastIndexByte(in, '/'); i >= 0 {
+		in = in[i+1:]
+	}
+	return strings.TrimSpace(in)
 }
 
 // curseforgeUISPTags mirrors the public UISP category tables (the anonymous

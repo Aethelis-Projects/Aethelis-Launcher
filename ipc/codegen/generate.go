@@ -121,6 +121,59 @@ type SearchModsRequest struct {
 	ProjectType string ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
+type GameVersionDTO struct {
+	ID string      ` + "`" + `json:"id"` + "`" + `
+	Type string      ` + "`" + `json:"type"` + "`" + `
+	ReleaseTime string ` + "`" + `json:"release_time"` + "`" + `
+}
+
+type ListMinecraftVersionsRequest struct {
+	Channel string ` + "`" + `json:"channel,omitempty"` + "`" + `
+}
+
+type ListLoaderVersionsRequest struct {
+	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
+	Loader string ` + "`" + `json:"loader"` + "`" + `
+}
+
+type LoaderResolutionDTO struct {
+	Loader string   ` + "`" + `json:"loader"` + "`" + `
+	Default string   ` + "`" + `json:"default"` + "`" + `
+	Options []string ` + "`" + `json:"options"` + "`" + `
+	Source string   ` + "`" + `json:"source"` + "`" + `
+	Note string ` + "`" + `json:"note,omitempty"` + "`" + `
+}
+
+type CreateInstanceWithLoaderRequest struct {
+	Name string ` + "`" + `json:"name"` + "`" + `
+	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
+	Loader string ` + "`" + `json:"loader"` + "`" + `
+	LoaderVersion string ` + "`" + `json:"loader_version,omitempty"` + "`" + `
+}
+
+type ListMrPackVersionsRequest struct {
+	ProjectSlug string ` + "`" + `json:"project_slug"` + "`" + `
+	GameVersion string ` + "`" + `json:"game_version,omitempty"` + "`" + `
+	Loader string ` + "`" + `json:"loader,omitempty"` + "`" + `
+}
+
+type MrPackVersionDTO struct {
+	VersionID string    ` + "`" + `json:"version_id"` + "`" + `
+	Name string    ` + "`" + `json:"name"` + "`" + `
+	VersionType string    ` + "`" + `json:"version_type"` + "`" + `
+	GameVersion string    ` + "`" + `json:"game_version"` + "`" + `
+	Loaders []string ` + "`" + `json:"loaders"` + "`" + `
+	URL string    ` + "`" + `json:"url"` + "`" + `
+	Filename string    ` + "`" + `json:"filename"` + "`" + `
+	Size int64     ` + "`" + `json:"size"` + "`" + `
+	SHA1 string ` + "`" + `json:"sha1,omitempty"` + "`" + `
+}
+
+type ImportMrPackURLRequest struct {
+	URL string ` + "`" + `json:"url"` + "`" + `
+	InstanceName string ` + "`" + `json:"instance_name"` + "`" + `
+}
+
 type ProjectTagDTO struct {
 	ID         string ` + "`" + `json:"id"` + "`" + `
 	Label      string ` + "`" + `json:"label"` + "`" + `
@@ -668,6 +721,59 @@ export interface SearchModsRequest {
   sort?: string;
   category?: string;
   project_type?: ProjectType;
+}
+
+export interface GameVersionDTO {
+  id: string;
+  type: string;
+  release_time: string;
+}
+
+export interface ListMinecraftVersionsRequest {
+  channel?: string;
+}
+
+export interface ListLoaderVersionsRequest {
+  game_version: string;
+  loader: string;
+}
+
+export interface LoaderResolutionDTO {
+  loader: string;
+  default: string;
+  options: string[];
+  source: string;
+  note?: string;
+}
+
+export interface CreateInstanceWithLoaderRequest {
+  name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+}
+
+export interface ListMrPackVersionsRequest {
+  project_slug: string;
+  game_version?: string;
+  loader?: string;
+}
+
+export interface MrPackVersionDTO {
+  version_id: string;
+  name: string;
+  version_type: string;
+  game_version: string;
+  loaders: string[];
+  url: string;
+  filename: string;
+  size: number;
+  sha1?: string;
+}
+
+export interface ImportMrPackURLRequest {
+  url: string;
+  instance_name: string;
 }
 
 export interface ProjectTagDTO {

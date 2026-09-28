@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -594,4 +595,25 @@ func (s *InstanceService) GetSupervisor(instanceID string) *LogSupervisor {
 		return nil
 	}
 	return s.supervisors[instanceID]
+}
+
+// CreateInstanceWithLoader creates an instance pinned to an explicit loader
+// version (v0.7.2 G10 wizard). An empty loaderVersion is valid for vanilla and
+// means "let provisioning resolve the loader itself" for mod loaders.
+func (s *InstanceService) CreateInstanceWithLoader(name, version, loader string, loaderVersion string) (*domain.Instance, error) {
+	inst, err := s.CreateInstance(name, version, domain.LoaderType(loader))
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(loaderVersion) != "" {
+		s.mu.Lock()
+		inst.LoaderVer = strings.TrimSpace(loaderVersion)
+		s.mu.Unlock()
+		if s.repo != nil {
+			if err := s.repo.Save(context.Background(), inst); err != nil {
+				return nil, fmt.Errorf("persist loader version: %w", err)
+			}
+		}
+	}
+	return inst, nil
 }

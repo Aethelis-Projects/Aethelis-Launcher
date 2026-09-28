@@ -1,11 +1,12 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Package, Library, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image, FolderDown } from "lucide-solid";
+import { LayoutGrid, Package, Library, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Upload, Image, FolderDown, Plus } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
+import { ModpacksView } from "./components/mods/ModpacksView";
+import { CreateInstanceModal } from "./components/instance/CreateInstanceModal";
 import { InstanceCard } from "./components/instance/InstanceCard";
 import { InstanceSettingsModal, SettingsTab } from "./components/instance/InstanceSettingsModal";
 import { ScreenshotGalleryModal } from "./components/instance/ScreenshotGalleryModal";
-import { MrPackImportModal } from "./components/instance/MrPackImportModal";
 import { MrPackExportModal } from "./components/instance/MrPackExportModal";
 import { ImportInstanceModal } from "./components/instance/ImportInstanceModal";
 import { JavaManager } from "./components/java/JavaManager";
@@ -28,7 +29,7 @@ export type UpdateBadgeState =
   | "snoozed-visible"
   | "unknown";
 
-type NavTab = "instances" | "catalog" | "accounts" | "settings" | "java_manager";
+type NavTab = "instances" | "modpacks" | "catalog" | "accounts" | "settings" | "java_manager";
 
 export const App: Component = () => {
   // Navigation
@@ -48,8 +49,9 @@ export const App: Component = () => {
   const [systemError, setSystemError] = createSignal<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
-  const [isImportModalOpen, setIsImportModalOpen] = createSignal(false);
   const [isInstanceImportOpen, setIsInstanceImportOpen] = createSignal(false);
+  const [unifiedImportTab, setUnifiedImportTab] = createSignal<"mrpack" | "curseforge" | "minecraft" | "prism">("mrpack");
+  const [isCreateWizardOpen, setIsCreateWizardOpen] = createSignal(false);
   const [isExportModalOpen, setIsExportModalOpen] = createSignal(false);
   const [isScreenshotsOpen, setIsScreenshotsOpen] = createSignal(false);
   const [isConsoleOpen, setIsConsoleOpen] = createSignal(false);
@@ -417,6 +419,20 @@ export const App: Component = () => {
 
             <button
               type="button"
+              onClick={() => setCurrentNav("modpacks")}
+              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                currentNav() === "modpacks"
+                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+              title="Модпаки (сборки Modrinth, импорт .mrpack)"
+              data-testid="nav-modpacks"
+            >
+              <Package class="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
               onClick={() => setCurrentNav("java_manager")}
               class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
                 currentNav() === "java_manager"
@@ -507,6 +523,7 @@ export const App: Component = () => {
           <div class="flex items-center gap-4">
             <div class="w-80">
               <ModSearchInput
+                placeholder="Фильтр сборок…"
                 value={searchQuery()}
                 matchCount={filteredInstances().length}
                 onSearch={setSearchQuery}
@@ -526,23 +543,25 @@ export const App: Component = () => {
               </button>
             </Show>
 
+            {/* v0.7.2 G10: creation wizard */}
             <button
               type="button"
-              onClick={() => setIsImportModalOpen(true)}
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium transition-colors cursor-pointer"
-              title="Импортировать сборку формата Modrinth .mrpack"
-              data-testid="import-mrpack-btn"
+              onClick={() => setIsCreateWizardOpen(true)}
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-nord-cyan/10 hover:bg-nord-cyan/20 text-nord-cyan border border-nord-cyan/20 text-xs font-semibold transition-colors cursor-pointer"
+              title="Создать новую сборку"
+              data-testid="create-instance-btn"
             >
-              <Download class="w-3.5 h-3.5 text-nord-cyan" />
-              <span>Импорт .mrpack</span>
+              <Plus class="w-3.5 h-3.5" />
+              <span>Создать</span>
             </button>
 
+            {/* v0.7.2 G6: one import entry point; all sources live in its tabs */}
             <button
               type="button"
               onClick={() => setIsInstanceImportOpen(true)}
               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium transition-colors cursor-pointer"
-              title="Импортировать из .minecraft или Prism / MultiMC"
-              data-testid="import-instance-btn"
+              title="Импорт: .mrpack, CurseForge .zip, .minecraft, Prism / MultiMC"
+              data-testid="import-btn"
             >
               <FolderDown class="w-3.5 h-3.5 text-nord-cyan" />
               <span>Импорт</span>
@@ -848,6 +867,25 @@ export const App: Component = () => {
             </div>
           </Show>
 
+          {/* v0.7.2 G5: modpack storefront (Modrinth .mrpack) */}
+          <Show when={currentNav() === "modpacks"}>
+            <ModpacksView
+              onOpenUnifiedImport={(tab) => {
+                setUnifiedImportTab(tab ?? "curseforge");
+                setIsInstanceImportOpen(true);
+              }}
+              onImported={() => {
+                void (async () => {
+                  try {
+                    setInstances(await launcherAPI.listInstances());
+                  } catch (_e) {
+                    void _e;
+                  }
+                })();
+              }}
+            />
+          </Show>
+
           {/* VIEW 2: Accounts Management */}
           <Show when={currentNav() === "catalog"}>
             <div class="max-w-6xl mx-auto">
@@ -922,25 +960,26 @@ export const App: Component = () => {
         }}
       />
 
-      {/* MrPack Import Modal (v0.6.0) */}
-      <MrPackImportModal
-        isOpen={isImportModalOpen()}
-        onClose={() => setIsImportModalOpen(false)}
-        onImported={async (newInst) => {
-          setIsImportModalOpen(false);
+      {/* v0.7.2 G10: instance creation wizard */}
+      <CreateInstanceModal
+        isOpen={isCreateWizardOpen()}
+        onClose={() => setIsCreateWizardOpen(false)}
+        onCreated={async (inst) => {
           try {
             const list = await launcherAPI.listInstances();
             setInstances(list);
-            setSelectedInstanceId(newInst.id);
+            setSelectedInstanceId(inst.id);
           } catch (_err) {
-            // non-fatal
+            void _err;
           }
         }}
+        existingGroups={[...new Set(instances().map((i) => (i.group || "").trim()).filter(Boolean))]}
       />
 
       {/* 1-Click Instance Import Modal (v0.7.0 Feature D'4a) */}
       <ImportInstanceModal
         isOpen={isInstanceImportOpen()}
+        initialSource={unifiedImportTab()}
         onClose={() => setIsInstanceImportOpen(false)}
         onImported={async (newInst) => {
           setIsInstanceImportOpen(false);
