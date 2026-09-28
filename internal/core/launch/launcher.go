@@ -101,6 +101,19 @@ func (s *InstanceService) SetSessionRefresher(r SessionRefresher) {
 	s.sessionRefresher = r
 }
 
+// FireCrashForTest routes a crash report through the registered onCrash hook,
+// exactly as MonitorProcess would on a real crash. Test-only: it lets adapter
+// tests exercise the wiring installed by NewWailsAdapter instead of reaching
+// for an exported-but-should-be-internal record method on the bound struct.
+func (s *InstanceService) FireCrashForTest(instanceID string, report *CrashReport) {
+	s.mu.Lock()
+	cb := s.onCrash
+	s.mu.Unlock()
+	if cb != nil {
+		cb(instanceID, report)
+	}
+}
+
 func (s *InstanceService) SetOnCrash(cb func(instanceID string, report *CrashReport)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

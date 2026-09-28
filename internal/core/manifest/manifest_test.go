@@ -221,4 +221,3 @@ func TestManifest_RemoveAndNilGuards(t *testing.T) {
 	m.AddOrUpdate(&manifest.ModRecord{})
 	m.Remove("non-existent.jar")
 }
-

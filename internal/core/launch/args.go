@@ -16,12 +16,10 @@ type Library = domain.Library
 type Rule = domain.Rule
 type LaunchConfig = domain.LaunchConfig
 
-
 // EvaluateRules checks if a set of rules permits an argument or library for current OS and architecture.
 func EvaluateRules(rules []Rule, currentOS, currentArch string, features map[string]bool) bool {
 	return domain.EvaluateRules(rules, currentOS, currentArch, features)
 }
-
 
 // BuildLaunchArguments constructs the complete JVM and game arguments list.
 func BuildLaunchArguments(cfg LaunchConfig) ([]string, error) {

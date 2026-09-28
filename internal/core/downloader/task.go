@@ -20,6 +20,7 @@ type DownloadTask struct {
 	DestPath       string
 	ExpectedSHA1   string
 	ExpectedSHA256 string
+	ExpectedSHA512 string
 	ExpectedSize   int64
 	Priority       int
 	Index          int // internal index for heap.Interface

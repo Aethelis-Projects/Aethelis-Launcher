@@ -159,12 +159,16 @@ type MrPackVersionDTO struct {
 	Filename    string   `json:"filename"`
 	Size        int64    `json:"size"`
 	SHA1        string   `json:"sha1,omitempty"`
+	SHA512      string   `json:"sha512,omitempty"`
 }
 
 type ImportMrPackURLRequest struct {
-	URL          string `json:"url"`
+	URL          string `json:"url,omitempty"`
 	InstanceName string `json:"instance_name"`
-	SHA1         string `json:"sha1"`
+	ProjectSlug  string `json:"project_slug,omitempty"`
+	VersionID    string `json:"version_id,omitempty"`
+	SHA1         string `json:"sha1,omitempty"`
+	SHA512       string `json:"sha512,omitempty"`
 	Size         int64  `json:"size,omitempty"`
 }
 

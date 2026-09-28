@@ -323,6 +323,3 @@ func TestExtractChangelog_StrictValidation(t *testing.T) {
 		t.Fatalf("expected empty string for missing version, got: %q", missing)
 	}
 }
-
-
-

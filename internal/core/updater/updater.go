@@ -24,7 +24,7 @@ import (
 
 var (
 	ErrNoUpdateAvailable   = errors.New("no update available")
-	ErrSignatureInvalid     = errors.New("cryptographic signature verification failed")
+	ErrSignatureInvalid    = errors.New("cryptographic signature verification failed")
 	ErrChecksumMismatch    = errors.New("update payload sha256 checksum mismatch")
 	ErrUnsupportedPlatform = errors.New("current platform is not supported in update manifest")
 )
@@ -67,12 +67,12 @@ type UpdateManifest struct {
 }
 
 type UpdateInfo struct {
-	Available   bool           `json:"available"`
-	Version     string         `json:"version"`
-	CurrentVer  string         `json:"current_version"`
-	ReleaseDate time.Time      `json:"release_date"`
-	Changelog   string         `json:"changelog"`
-	Asset       PlatformAsset  `json:"asset"`
+	Available   bool          `json:"available"`
+	Version     string        `json:"version"`
+	CurrentVer  string        `json:"current_version"`
+	ReleaseDate time.Time     `json:"release_date"`
+	Changelog   string        `json:"changelog"`
+	Asset       PlatformAsset `json:"asset"`
 }
 
 type AutoUpdater struct {
@@ -108,7 +108,19 @@ func CurrentPlatformKey() string {
 }
 
 // CheckForUpdates fetches manifest and evaluates if a newer version exists.
+// IsDevVersion reports whether a build version is an unreleased dev sentinel
+// (the "-X main.version" fallback in cmd/launcher is "0.0.0-dev"). Such builds
+// must never offer updates: they would try to "downgrade" themselves to the
+// latest public release and re-download on every start.
+func IsDevVersion(v string) bool {
+	v = strings.TrimSpace(v)
+	return v == "" || strings.HasSuffix(v, "-dev")
+}
+
 func (u *AutoUpdater) CheckForUpdates(ctx context.Context) (*UpdateInfo, error) {
+	if IsDevVersion(u.currentVersion) {
+		return &UpdateInfo{CurrentVer: u.currentVersion}, nil
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.manifestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create update check request: %w", err)

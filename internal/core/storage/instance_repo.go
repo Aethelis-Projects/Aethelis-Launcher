@@ -214,11 +214,11 @@ type rowScanner interface {
 func (r *InstanceRepository) scanInstance(s rowScanner) (*domain.Instance, error) {
 	var (
 		id, name, gameVersion, loader, loaderVer, iconPath, javaPath, jvmArgsStr, stateStr string
-		minRAM, maxRAM, skipCheckInt, favInt                                                int
-		groupName                                                                           string
-		totalPlaySec                                                                        int64
-		lastPlayedStr                                                                       sql.NullString
-		createdAtStr, updatedAtStr                                                          string
+		minRAM, maxRAM, skipCheckInt, favInt                                               int
+		groupName                                                                          string
+		totalPlaySec                                                                       int64
+		lastPlayedStr                                                                      sql.NullString
+		createdAtStr, updatedAtStr                                                         string
 	)
 
 	err := s.Scan(

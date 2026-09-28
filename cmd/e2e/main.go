@@ -945,12 +945,12 @@ func main() {
 
 	step11Adapter := wails.NewWailsAdapter(nil)
 	mrServerURL, _ := url.Parse(step11Server.URL)
-	step11Adapter.SetAllowedHosts([]string{mrServerURL.Hostname(), mrServerURL.Host})
-	step11Adapter.SetFileSystem(fs.NewOSFileSystem(), step11InstancesDir)
-	step11Adapter.SetDB(step11DB.DB())
+	wails.NewHost(step11Adapter).SetAllowedHosts([]string{mrServerURL.Hostname(), mrServerURL.Host})
+	wails.NewHost(step11Adapter).SetFileSystem(fs.NewOSFileSystem(), step11InstancesDir)
+	wails.NewHost(step11Adapter).SetDB(step11DB.DB())
 
 	mrStep11Client := modrinth.NewClient(step11Server.URL, step11Server.Client())
-	step11Adapter.SetContent(mrStep11Client, nil)
+	wails.NewHost(step11Adapter).SetContent(mrStep11Client, nil)
 
 	// 1. Install Mod
 	installResp, err := step11Adapter.InstallMod(wails.InstallModRequest{
@@ -1266,12 +1266,12 @@ func main() {
 	}
 
 	step12Adapter := wails.NewWailsAdapter(nil)
-	step12Adapter.SetVersion("0.6.0")
+	wails.NewHost(step12Adapter).SetVersion("0.6.0")
 	step12ServerURL, _ := url.Parse(step12Server.URL)
-	step12Adapter.SetAllowedHosts([]string{step12ServerURL.Hostname(), step12ServerURL.Host})
-	step12Adapter.SetFileSystem(fs.NewOSFileSystem(), step12InstancesDir)
-	step12Adapter.SetDB(step12DB.DB())
-	step12Adapter.SetContent(modrinth.NewClient(step12Server.URL, step12Server.Client()), nil)
+	wails.NewHost(step12Adapter).SetAllowedHosts([]string{step12ServerURL.Hostname(), step12ServerURL.Host})
+	wails.NewHost(step12Adapter).SetFileSystem(fs.NewOSFileSystem(), step12InstancesDir)
+	wails.NewHost(step12Adapter).SetDB(step12DB.DB())
+	wails.NewHost(step12Adapter).SetContent(modrinth.NewClient(step12Server.URL, step12Server.Client()), nil)
 
 	_, err = step12Adapter.InstallMod(wails.InstallModRequest{
 		InstanceID:  step12InstID,
@@ -1586,7 +1586,27 @@ func main() {
 		_ = os.RemoveAll(step15Tmp) // errcheck:ok cleanup step 15 temp dir
 	}()
 	var step15ManifestHits int32
-	step15API := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// The mrpack URL pipeline enforces https on the resolved record, so the
+	// whole step-15 fixture runs over a TLS test server now.
+	step15PackBytes := []byte("PK\x03\x04-padded-e2e-mrpack-payload")
+	{
+		buf := &bytes.Buffer{}
+		zw := zip.NewWriter(buf)
+		f, _ := zw.Create("modrinth.index.json")                                                                                                                                       // errcheck:ok e2e fixture
+		_, _ = f.Write([]byte(`{"formatVersion":1,"game":"minecraft","versionId":"e2e","name":"URL Pack","files":[],"dependencies":{"minecraft":"1.21.4","fabric-loader":"0.16.4"}}`)) // errcheck:ok e2e fixture
+		_ = zw.Close()                                                                                                                                                                 // errcheck:ok finalize fixture
+		step15PackBytes = buf.Bytes()
+	}
+	step15SHA1 := fmt.Sprintf("%x", sha1.Sum(step15PackBytes))
+	step15SHA512 := fmt.Sprintf("%x", sha512.Sum512(step15PackBytes))
+	var step15API *httptest.Server
+	step15API = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/files/pack-2.6.mrpack":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(step15PackBytes) // errcheck:ok e2e fixture
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case strings.HasPrefix(r.URL.Path, "/mc/game/version_manifest"):
@@ -1601,7 +1621,7 @@ func main() {
 		case strings.HasPrefix(r.URL.Path, "/neoforge/tags"):
 			_, _ = w.Write([]byte(`[{"name":"21.5.0-beta-1"},{"name":"21.4.211"},{"name":"20.4.0"}]`)) // errcheck:ok e2e stub response
 		case strings.HasPrefix(r.URL.Path, "/v2/project/p1/version"):
-			_, _ = w.Write([]byte(`[{"id":"verMR","name":"Pack 2.6","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack-2.6.mrpack","url":"http://127.0.0.1:9/offline.mrpack","size":42,"hashes":{"sha1":"beef"}}]},{"id":"verJAR","name":"Jar drop","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack.jar","url":"http://127.0.0.1:9/offline.jar","size":7}]}]`)) // errcheck:ok e2e stub response
+			_, _ = fmt.Fprintf(w, `[{"id":"verMR","name":"Pack 2.6","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack-2.6.mrpack","url":"%s/files/pack-2.6.mrpack","size":%d,"hashes":{"sha1":"%s","sha512":"%s"}}]},{"id":"verJAR","name":"Jar drop","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack.jar","url":"https://127.0.0.1:9/offline.jar","size":7}]}]`, step15API.URL, len(step15PackBytes), step15SHA1, step15SHA512) // errcheck:ok e2e stub response
 		case strings.HasPrefix(r.URL.Path, "/v2/tag/category"):
 			_, _ = w.Write([]byte(`[{"id":"fabric","name":"Fabric","project_type":""},{"id":"modpacks","name":"Modpacks","project_type":"modpack"}]`)) // errcheck:ok e2e stub response
 		default:
@@ -1623,15 +1643,19 @@ func main() {
 	step15Repo := storage.NewInstanceRepository(step15DB)
 	step15Svc := launch.NewInstanceService(step15Repo, nil, nil, nil, e2eClock)
 	step15Adapter := wails.NewWailsAdapter(step15Svc)
-	step15Adapter.SetGameManifestURL(step15API.URL + "/mc/game/version_manifest_v2.json")
+	wails.NewHost(step15Adapter).SetGameManifestURL(step15API.URL + "/mc/game/version_manifest_v2.json")
+	wails.NewHost(step15Adapter).SetHTTPClient(step15API.Client())
+	if u15, errU := url.Parse(step15API.URL); errU == nil {
+		wails.NewHost(step15Adapter).SetAllowedHosts([]string{u15.Hostname()})
+	}
 	step15Resolver := loadermeta.NewResolver(step15API.Client())
 	step15Resolver.FabricURL = step15API.URL + "/fabric/"
 	step15Resolver.QuiltURL = step15API.URL + "/quilt/"
 	step15Resolver.ForgeURL = step15API.URL + "/forge/promotions_slim.json"
 	step15Resolver.NeoURL = step15API.URL + "/neoforge/tags"
-	step15Adapter.SetLoaderResolver(step15Resolver)
-	step15Adapter.SetContent(modrinth.NewClient(step15API.URL, step15API.Client()), curseforge.NewClient(step15API.URL, "e2e-key", step15API.Client()))
-	step15Adapter.SetFileSystem(nil, filepath.Join(step15Tmp, "instances"))
+	wails.NewHost(step15Adapter).SetLoaderResolver(step15Resolver)
+	wails.NewHost(step15Adapter).SetContent(modrinth.NewClient(step15API.URL, step15API.Client()), curseforge.NewClient(step15API.URL, "e2e-key", step15API.Client()))
+	wails.NewHost(step15Adapter).SetFileSystem(nil, filepath.Join(step15Tmp, "instances"))
 
 	// G10 step 2: Mojang manifest through the adapter (with cache).
 	rels, err := step15Adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{})
@@ -1681,25 +1705,56 @@ func main() {
 
 	// G5: project version listing filters to .mrpack files only.
 	mrpacks, err := step15Adapter.ListMrPackVersions(wails.ListMrPackVersionsRequest{ProjectSlug: "p1", GameVersion: "1.21.4", Loader: "fabric"})
-	if err != nil || len(mrpacks) != 1 || mrpacks[0].Filename != "pack-2.6.mrpack" || mrpacks[0].SHA1 != "beef" {
+	if err != nil || len(mrpacks) != 1 || mrpacks[0].Filename != "pack-2.6.mrpack" || mrpacks[0].SHA1 != step15SHA1 || mrpacks[0].SHA512 != step15SHA512 {
 		logf("FAIL: Step 15 ListMrPackVersions = %+v err=%v", mrpacks, err)
 		os.Exit(1)
 	}
 	logf("PASS: Step 15 modpack version list keeps only .mrpack files with download URL and sha1.")
 
 	// G5: URL import refuses non-https sources and records an honest failure status.
+	// A compromised webview sends url+hashes; none of it is trusted. Fallback
+	// mode (no slug/version_id) refuses any origin outside the CDN allowlist
+	// before touching the network, and non-https stays refused outright.
 	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://insecure.test/p.mrpack", InstanceName: "Nope", SHA1: "beef"}); err == nil {
 		logf("FAIL: Step 15 accepted an http:// mrpack URL")
 		os.Exit(1)
 	}
-	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://127.0.0.1:9/dead.mrpack", InstanceName: "Pack Via URL", SHA1: "beef"}); err == nil {
-		logf("FAIL: Step 15 URL import swallowed a transport failure")
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://cdn.evil.test/p.mrpack", InstanceName: "Evil", SHA1: "beef"}); err == nil || !strings.Contains(err.Error(), "not an allowed download host") {
+		logf("FAIL: Step 15 URL import dialled an untrusted host: %v", err)
 		os.Exit(1)
 	}
-	if st, err := step15Adapter.GetMrPackURLImportStatus(wails.InstanceIDRequest{InstanceID: "Pack Via URL"}); err != nil || st.Status != "failed" {
-		logf("FAIL: Step 15 URL import status after failure = %+v err=%v", st, err)
+	// Tampered integrity hint in resolution mode is rejected before any dial,
+	// even though the URL field is now optional.
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: "Tamper", ProjectSlug: "p1", VersionID: "verMR", SHA1: fmt.Sprintf("%040x", 0xdeadbeef)}); err == nil || !strings.Contains(err.Error(), "does not match the Modrinth API record") {
+		logf("FAIL: Step 15 accepted a sha1 that disagrees with the API record: %v", err)
 		os.Exit(1)
 	}
+	// Resolution mode end-to-end: a *malicious* url from the client must be
+	// ignored - the adapter re-fetches url+hashes from the API. If the client
+	// URL were dialed, the loopback black-hole would fail the import.
+	if instID, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
+		URL:          "https://127.0.0.1:9/attacker.mrpack",
+		InstanceName: "URL Resolved Pack",
+		ProjectSlug:  "p1",
+		VersionID:    "verMR",
+	}); err != nil || instID == "" {
+		logf("FAIL: Step 15 resolution-mode import: %v", err)
+		os.Exit(1)
+	}
+	// The real payload imported over TLS, sha1 AND sha512 verified, with a
+	// deliberately wrong client-side sha1/size hint rejected up front.
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
+		InstanceName: "URL Mismatch Pack", ProjectSlug: "p1", VersionID: "verMR",
+		SHA1: step15SHA1, Size: 999999999,
+	}); err == nil || !strings.Contains(err.Error(), "size does not match the Modrinth API record") {
+		logf("FAIL: Step 15 accepted a size hint disagreeing with the API record: %v", err)
+		os.Exit(1)
+	}
+	if st, err := step15Adapter.GetMrPackURLImportStatus(wails.InstanceIDRequest{InstanceID: "URL Resolved Pack"}); err != nil || st.Status != "complete" {
+		logf("FAIL: Step 15 resolution-mode status = %+v err=%v", st, err)
+		os.Exit(1)
+	}
+
 	// The download-then-import pipeline itself is exercised with the local
 	// importer (the scheme check above is proven; ImportMrPack does the rest).
 	step15PackBuf := &bytes.Buffer{}

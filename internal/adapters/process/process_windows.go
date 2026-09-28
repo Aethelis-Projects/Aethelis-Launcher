@@ -20,7 +20,7 @@ var (
 )
 
 const (
-	JobObjectExtendedLimitInformation = 9
+	JobObjectExtendedLimitInformation  = 9
 	JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
 )
 
@@ -46,12 +46,12 @@ type ioCounters struct {
 }
 
 type jobobjectExtendedLimitInformation struct {
-	BasicLimitInformation jobobjectBasicLimitInformation
-	IoInfo                ioCounters
-	ProcessMemoryLimit    uintptr
-	JobMemoryLimit        uintptr
+	BasicLimitInformation  jobobjectBasicLimitInformation
+	IoInfo                 ioCounters
+	ProcessMemoryLimit     uintptr
+	JobMemoryLimit         uintptr
 	PeakProcessMemoryLimit uintptr
-	PeakJobMemoryLimit    uintptr
+	PeakJobMemoryLimit     uintptr
 }
 
 func getOrCreateGlobalJob() syscall.Handle {

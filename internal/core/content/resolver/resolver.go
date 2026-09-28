@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	ErrCircularDependency = errors.New("circular dependency detected")
+	ErrCircularDependency  = errors.New("circular dependency detected")
 	ErrNoCompatibleVersion = errors.New("no compatible mod version found for target game/loader")
 )
 
@@ -38,8 +38,8 @@ func NewDependencyResolver(fetcher VersionFetcher) *DependencyResolver {
 }
 
 type ResolutionResult struct {
-	SelectedFiles    []content.ModFile
-	ResolvedMods     []string
+	SelectedFiles     []content.ModFile
+	ResolvedMods      []string
 	DependenciesAdded []string
 }
 

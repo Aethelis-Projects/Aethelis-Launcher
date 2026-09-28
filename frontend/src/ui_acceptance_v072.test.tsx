@@ -174,10 +174,9 @@ describe("v0.7.2 UI acceptance walk", () => {
     fireEvent.click(await screen.findByTestId("modpack-version-fabric-skyblocks-vXYZ"));
     await waitFor(() => expect(api.importMrPackFromURL).toHaveBeenCalled());
     expect(api.importMrPackFromURL.mock.calls[0][0]).toEqual({
-      url: "https://cdn.modrinth.com/p.mrpack",
+      project_slug: "fabric-skyblocks",
+      version_id: "vXYZ",
       instance_name: "Fabric Skyblocks",
-      sha1: "aa",
-      size: 12000000,
     });
     await screen.findByText("Импортировано");
 

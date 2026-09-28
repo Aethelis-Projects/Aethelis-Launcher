@@ -56,8 +56,9 @@ func parseVersion(v string) []int {
 
 // compareVersion returns:
 // -1 if a < b
-//  0 if a == b
-//  1 if a > b
+//
+//	0 if a == b
+//	1 if a > b
 func compareVersion(a, b string) int {
 	pa := parseVersion(a)
 	pb := parseVersion(b)

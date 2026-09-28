@@ -185,18 +185,19 @@ func main() {
 
 	// 5. Initialize Wails IPC Adapter
 	adapter := wails.NewWailsAdapter(instanceSvc)
-	adapter.SetAuth(authSvc, accRepo)
-	adapter.SetContent(mrClient, cfClient)
-	adapter.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
-	adapter.SetUpdater(autoUpdater)
-	adapter.SetJavaDetector(javaDetector)
-	adapter.SetJavaManager(javaMgr)
-	adapter.SetSettings(settingsRepo)
+	host := wails.NewHost(adapter)
+	host.SetAuth(authSvc, accRepo)
+	host.SetContent(mrClient, cfClient)
+	host.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
+	host.SetUpdater(autoUpdater)
+	host.SetJavaDetector(javaDetector)
+	host.SetJavaManager(javaMgr)
+	host.SetSettings(settingsRepo)
 	if db != nil {
-		adapter.SetDB(db.DB())
+		host.SetDB(db.DB())
 	}
-	adapter.SetVersion(version)
-	adapter.SetIntegrityVerifier(gameProvisioner)
+	host.SetVersion(version)
+	host.SetIntegrityVerifier(gameProvisioner)
 
 	coreInitDuration := time.Since(startInit)
 

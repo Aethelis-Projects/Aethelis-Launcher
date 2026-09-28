@@ -109,19 +109,19 @@ func (a *WailsAdapter) setInstallProgress(instanceID string, p *ModInstallProgre
 	a.modInstallProgress[instanceID] = p
 }
 
-func (a *WailsAdapter) SetJavaManager(jm *java.JavaManager) {
+func (a *WailsAdapter) setJavaManager(jm *java.JavaManager) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.javaMgr = jm
 }
 
-func (a *WailsAdapter) SetInstalledModsRepo(repo *storage.InstalledModsRepository) {
+func (a *WailsAdapter) setInstalledModsRepo(repo *storage.InstalledModsRepository) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.installedModsRepo = repo
 }
 
-func (a *WailsAdapter) SetDB(db *sql.DB) {
+func (a *WailsAdapter) setDB(db *sql.DB) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.db = db
@@ -130,19 +130,19 @@ func (a *WailsAdapter) SetDB(db *sql.DB) {
 	}
 }
 
-func (a *WailsAdapter) SetMrPackImporter(importer *content.MrPackImporter) {
+func (a *WailsAdapter) setMrPackImporter(importer *content.MrPackImporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.mrpackImporter = importer
 }
 
-func (a *WailsAdapter) SetMrPackExporter(exporter *content.MrPackExporter) {
+func (a *WailsAdapter) setMrPackExporter(exporter *content.MrPackExporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.mrpackExporter = exporter
 }
 
-func (a *WailsAdapter) SetFilePicker(fn func() (string, error)) {
+func (a *WailsAdapter) setFilePicker(fn func() (string, error)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.filePickerFn = fn
@@ -264,13 +264,13 @@ func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
 	}
 	if svc != nil {
 		svc.SetOnCrash(func(instanceID string, report *launch.CrashReport) {
-			a.RecordCrash(instanceID, report)
+			a.recordCrash(instanceID, report)
 		})
 	}
 	return a
 }
 
-func (a *WailsAdapter) SetVersion(v string) {
+func (a *WailsAdapter) setVersion(v string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.version = strings.TrimPrefix(v, "v")
@@ -288,43 +288,43 @@ func (a *WailsAdapter) GetCurrentVersion() string {
 	return ""
 }
 
-func (a *WailsAdapter) SetUpdater(u *updater.AutoUpdater) {
+func (a *WailsAdapter) setUpdater(u *updater.AutoUpdater) {
 	a.updater = u
 }
 
-func (a *WailsAdapter) SetRelauncher(fn updater.RelauncherFunc) {
+func (a *WailsAdapter) setRelauncher(fn updater.RelauncherFunc) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.relauncher = fn
 }
 
-func (a *WailsAdapter) SetJavaDetector(jd ports.JavaDetector) {
+func (a *WailsAdapter) setJavaDetector(jd ports.JavaDetector) {
 	a.javaDetector = jd
 }
 
-func (a *WailsAdapter) SetAuth(authSvc *auth.AuthService, accountRepo ports.AccountRepository) {
+func (a *WailsAdapter) setAuth(authSvc *auth.AuthService, accountRepo ports.AccountRepository) {
 	a.authSvc = authSvc
 	a.accountRepo = accountRepo
 }
 
-func (a *WailsAdapter) SetContent(mr *modrinth.Client, cf *curseforge.Client) {
+func (a *WailsAdapter) setContent(mr *modrinth.Client, cf *curseforge.Client) {
 	a.modrinth = mr
 	a.curseforge = cf
 }
 
-func (a *WailsAdapter) SetFileSystem(fs ports.FileSystem, instancesDir string) {
+func (a *WailsAdapter) setFileSystem(fs ports.FileSystem, instancesDir string) {
 	a.fileSys = fs
 	a.instancesDir = instancesDir
 }
 
-func (a *WailsAdapter) SetSettings(repo *storage.SettingsRepository) {
+func (a *WailsAdapter) setSettings(repo *storage.SettingsRepository) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.settingsRepo = repo
 }
 
 // SetIntegrityVerifier wires the Mojang cache integrity checker (D'2).
-func (a *WailsAdapter) SetIntegrityVerifier(v ports.IntegrityVerifier) {
+func (a *WailsAdapter) setIntegrityVerifier(v ports.IntegrityVerifier) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.integrityVerifier = v
@@ -691,7 +691,7 @@ func (a *WailsAdapter) emitLogBatch(instanceID string, lines []string) {
 	}
 }
 
-func (a *WailsAdapter) SetOnLogBatch(fn func(instanceID string, lines []string)) {
+func (a *WailsAdapter) setOnLogBatch(fn func(instanceID string, lines []string)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.onLogBatch = fn
@@ -930,7 +930,7 @@ func (a *WailsAdapter) GetPerformancePreset() (*PerformancePresetDTO, error) {
 const gameManifestTTL = 6 * time.Hour
 
 // SetGameManifestURL overrides the Mojang manifest endpoint (tests/private mirrors).
-func (a *WailsAdapter) SetGameManifestURL(u string) {
+func (a *WailsAdapter) setGameManifestURL(u string) {
 	a.mu.Lock()
 	a.gameManifestURL = strings.TrimSpace(u)
 	a.gameManifestCache = nil
@@ -944,7 +944,7 @@ func (a *WailsAdapter) manifestURL() string {
 }
 
 // SetLoaderResolver injects an explicit loader metadata resolver (tests).
-func (a *WailsAdapter) SetLoaderResolver(r *loadermeta.Resolver) {
+func (a *WailsAdapter) setLoaderResolver(r *loadermeta.Resolver) {
 	a.mu.Lock()
 	a.loaderResolver = r
 	a.mu.Unlock()
@@ -1095,6 +1095,7 @@ func (a *WailsAdapter) ListMrPackVersions(req ListMrPackVersionsRequest) ([]MrPa
 				Filename:    f.FileName,
 				Size:        f.Size,
 				SHA1:        f.SHA1,
+				SHA512:      f.SHA512,
 			})
 			break
 		}
@@ -1111,16 +1112,91 @@ func firstOr(list []string, fallback string) string {
 
 // ImportMrPackFromURL downloads a .mrpack over HTTPS into a temp dir and runs
 // the standard importer pipeline (same progress/status as file import).
+// mrpack downloads must not trust the webview. The primary path
+// (project_slug + version_id) ignores every client-supplied transport field:
+// Go re-fetches the version record from the Modrinth API and uses that
+// URL/hashes/size. The fallback (a pasted URL with no identifiers) is pinned
+// to the shared download-host allowlist (cdn.modrinth.com et al.; extendable
+// only host-side via SetAllowedHosts) and to https - checked on the initial
+// request AND every redirect hop. Rationale: the webview renders user-authored
+// project descriptions (XSS surface), and url+sha1 used to be taken on faith
+// from JS - a compromised page could point the download at attacker bytes
+// carrying the attacker's hash.
+// resolveMrpackFile returns the authoritative (url, sha1, sha512, size) for a
+// Modrinth version, straight from the API the core itself trusts.
+func (a *WailsAdapter) resolveMrpackFile(slug, versionID string) (dlURL, sha1sum, sha512sum string, size int64, err error) {
+	vers, err := a.modrinth.GetProjectVersions(context.Background(), slug, "", "")
+	if err != nil {
+		return "", "", "", 0, fmt.Errorf("resolve mrpack version: %w", err)
+	}
+	for _, v := range vers {
+		if v.ID != versionID {
+			continue
+		}
+		for _, f := range v.Files {
+			if !strings.HasSuffix(strings.ToLower(f.FileName), ".mrpack") {
+				continue
+			}
+			return f.URL, strings.ToLower(f.SHA1), strings.ToLower(f.SHA512), f.Size, nil
+		}
+		return "", "", "", 0, errors.New("resolved version has no .mrpack file")
+	}
+	return "", "", "", 0, errors.New("mrpack version not found on Modrinth")
+}
+
+func (a *WailsAdapter) mrpackHostAllowed(host string) bool {
+	return a.isAllowedDownloadHost(host)
+}
+
 func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, error) {
-	u, err := url.Parse(strings.TrimSpace(req.URL))
-	if err != nil || u.Scheme != "https" {
-		return "", errors.New("mrpack download requires an https URL")
-	}
-	sha1sum := strings.ToLower(strings.TrimSpace(req.SHA1))
-	if sha1sum == "" {
-		return "", errors.New("mrpack download requires the sha1 advertised by Modrinth")
-	}
 	name := sanitizeInstanceName(req.InstanceName)
+	if name == "" {
+		return "", errors.New("instance name is required")
+	}
+
+	var dlURL, sha1sum, sha512sum string
+	size := req.Size
+	slug := strings.TrimSpace(req.ProjectSlug)
+	versionID := strings.TrimSpace(req.VersionID)
+	if slug != "" && versionID != "" {
+		// Authoritative mode: everything about the file comes from Go.
+		// Client-provided url/sha1/size are treated as untrusted hints and
+		// must agree - a mismatch is tampering, not a fallback.
+		if a.modrinth == nil {
+			return "", errors.New("modrinth client not initialized")
+		}
+		resolvedURL, rSHA1, rSHA512, rSize, err := a.resolveMrpackFile(slug, versionID)
+		if err != nil {
+			return "", err
+		}
+		if req.SHA1 != "" && !strings.EqualFold(strings.TrimSpace(req.SHA1), rSHA1) {
+			return "", errors.New("mrpack sha1 does not match the Modrinth API record")
+		}
+		if req.Size > 0 && rSize > 0 && req.Size != rSize {
+			return "", errors.New("mrpack size does not match the Modrinth API record")
+		}
+		dlURL, sha1sum, sha512sum, size = resolvedURL, rSHA1, rSHA512, rSize
+	} else {
+		// Fallback mode: only the official Modrinth CDN is accepted, https
+		// end-to-end, and a hash must still be supplied by the caller.
+		u, err := url.Parse(strings.TrimSpace(req.URL))
+		if err != nil || u.Scheme != "https" || u.Hostname() == "" {
+			return "", errors.New("mrpack download requires an https URL")
+		}
+		if !a.mrpackHostAllowed(u.Hostname()) {
+			return "", fmt.Errorf("mrpack download origin %q is not an allowed download host", u.Hostname())
+		}
+		sha1sum = strings.ToLower(strings.TrimSpace(req.SHA1))
+		sha512sum = strings.ToLower(strings.TrimSpace(req.SHA512))
+		if sha1sum == "" && sha512sum == "" {
+			return "", errors.New("mrpack download requires the sha1 or sha512 advertised by Modrinth")
+		}
+		dlURL = u.String()
+	}
+	u, err := url.Parse(dlURL)
+	if err != nil || u.Scheme != "https" || !a.mrpackHostAllowed(u.Hostname()) {
+		return "", errors.New("mrpack download requires an https URL on an allowed download host")
+	}
 	if name == "" {
 		return "", errors.New("instance name is required")
 	}
@@ -1151,19 +1227,19 @@ func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, 
 		MaxWorkers: 1, MaxConnsPerHost: 1,
 		HTTPTimeout: 15 * time.Minute, MaxRetries: 1,
 		BaseBackoff: 2 * time.Second, BufferSize: 128 * 1024,
-	}, mrpackDownloadClient(a.getHTTPClient()))
+	}, a.mrpackDownloadClient())
 	task := &downloader.DownloadTask{
 		ID: "mrpack-" + name, URL: u.String(), DestPath: path,
-		ExpectedSHA1: sha1sum, ExpectedSize: req.Size, Priority: 0,
+		ExpectedSHA1: sha1sum, ExpectedSHA512: sha512sum, ExpectedSize: size, Priority: 0,
 	}
 	if err := dl.DownloadBatch(context.Background(), []*downloader.DownloadTask{task}, nil); err != nil {
 		a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = err.Error() })
 		return "", fmt.Errorf("download mrpack: %w", err)
 	}
-	if req.Size > 0 {
-		if fi, statErr := os.Stat(path); statErr != nil || fi.Size() != req.Size {
+	if size > 0 {
+		if fi, statErr := os.Stat(path); statErr != nil || fi.Size() != size {
 			a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = "size mismatch" })
-			return "", fmt.Errorf("downloaded mrpack size mismatch: want %d", req.Size)
+			return "", fmt.Errorf("downloaded mrpack size mismatch: want %d", size)
 		}
 	}
 
@@ -1177,13 +1253,17 @@ func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, 
 }
 
 // mrpackDownloadClient copies the adapter client's transport but replaces the
-// redirect policy: every hop must stay on https, and no hop may inflate beyond
-// the size cap.
-func mrpackDownloadClient(base *http.Client) *http.Client {
+// redirect policy: every hop must stay on https AND on an allowed origin
+// (redirects are attacker-controllable even when the initial URL was sane).
+func (a *WailsAdapter) mrpackDownloadClient() *http.Client {
+	base := a.getHTTPClient()
 	c := &http.Client{Timeout: base.Timeout, Transport: base.Transport}
 	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != "https" {
 			return errors.New("mrpack download redirected away from https")
+		}
+		if !a.mrpackHostAllowed(req.URL.Hostname()) {
+			return fmt.Errorf("mrpack download redirected to untrusted host %q", req.URL.Hostname())
 		}
 		if len(via) >= 5 {
 			return errors.New("mrpack download: too many redirects")
@@ -1784,7 +1864,7 @@ func (a *WailsAdapter) DeleteMod(req DeleteModRequest) error {
 	return nil
 }
 
-func (a *WailsAdapter) RecordCrash(instanceID string, report *launch.CrashReport) {
+func (a *WailsAdapter) recordCrash(instanceID string, report *launch.CrashReport) {
 	if report == nil {
 		return
 	}
@@ -1901,7 +1981,7 @@ func (a *WailsAdapter) RestartApplication() error {
 	return updater.Relaunch()
 }
 
-func (a *WailsAdapter) SetHTTPClient(client *http.Client) {
+func (a *WailsAdapter) setHTTPClient(client *http.Client) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.httpClient = client
@@ -1916,7 +1996,7 @@ func (a *WailsAdapter) getHTTPClient() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
 
-func (a *WailsAdapter) SetAllowedHosts(hosts []string) {
+func (a *WailsAdapter) setAllowedHosts(hosts []string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.allowedHosts = hosts
@@ -3555,7 +3635,7 @@ func (a *WailsAdapter) GetScreenshotData(req GetScreenshotDataRequest) (*GetScre
 	return &GetScreenshotDataResponse{DataURL: dataURL}, nil
 }
 
-func (a *WailsAdapter) SetImporter(imp *launch.InstanceImporter) {
+func (a *WailsAdapter) setImporter(imp *launch.InstanceImporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.importer = imp
@@ -3578,7 +3658,7 @@ func (a *WailsAdapter) getCFPackImporter() *launch.CurseForgePackImporter {
 }
 
 // SetCurseForgePackImporter overrides the lazy-built importer (tests/e2e).
-func (a *WailsAdapter) SetCurseForgePackImporter(imp *launch.CurseForgePackImporter) {
+func (a *WailsAdapter) setCurseForgePackImporter(imp *launch.CurseForgePackImporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cfPackImporter = imp

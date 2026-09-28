@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -314,5 +315,32 @@ func TestSignAndVerifyPayload_CanonicalDomain(t *testing.T) {
 	// 4. Mismatched public key
 	if VerifyPayload(otherPubKey, payload, sig) {
 		t.Errorf("expected verification with mismatched public key to fail")
+	}
+}
+
+// v0.7.2 review: dev builds (0.0.0-dev fallback when no ldflags injection)
+// must not offer or apply updates, and must not even touch the network.
+func TestCheckForUpdates_DevVersionIsSilent(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"9.9.9"}`)) // errcheck:ok test fixture
+	}))
+	defer srv.Close()
+
+	u := NewAutoUpdater("0.0.0-dev", srv.URL, GetDefaultPublicKey(), srv.Client())
+	info, err := u.CheckForUpdates(context.Background())
+	if err != nil {
+		t.Fatalf("dev check must not error: %v", err)
+	}
+	if info.Available {
+		t.Fatal("dev build must never report an update available")
+	}
+	if atomic.LoadInt32(&hits) != 0 {
+		t.Fatal("dev build must not contact the update manifest")
+	}
+	if !IsDevVersion("0.0.0-dev") || IsDevVersion("0.7.2") {
+		t.Fatal("IsDevVersion misclassified")
 	}
 }

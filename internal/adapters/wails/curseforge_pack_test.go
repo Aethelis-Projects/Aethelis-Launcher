@@ -109,7 +109,7 @@ func TestWailsAdapter_ScanCurseForgePackZip_NilResolverHonest(t *testing.T) {
 	zipPath := writeCFZipForAdapter(t, map[string]string{"manifest.json": string(mj)})
 
 	adapter := NewWailsAdapter(nil)
-	adapter.SetCurseForgePackImporter(launch.NewCurseForgePackImporter(nil, nil, t.TempDir(), nil))
+	NewHost(adapter).SetCurseForgePackImporter(launch.NewCurseForgePackImporter(nil, nil, t.TempDir(), nil))
 
 	plan, err := adapter.ScanCurseForgePackZip(CFPackScanRequest{ZipPath: zipPath})
 	if err != nil {

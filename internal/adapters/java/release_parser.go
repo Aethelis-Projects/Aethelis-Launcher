@@ -15,4 +15,3 @@ func ParseJavaMajor(fullVersion string) int {
 func ParseReleaseFile(homeDir string) (*ports.JavaInstallation, error) {
 	return corejava.ParseReleaseFile(homeDir)
 }
-

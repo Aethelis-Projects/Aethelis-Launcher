@@ -416,7 +416,7 @@ func TestMrPack_ImportPipeline_Success(t *testing.T) {
 	}`, s1, s512, len(modContent))
 
 	writeZipArchive(t, mrpackPath, map[string][]byte{
-		"modrinth.index.json":           []byte(indexJSON),
+		"modrinth.index.json":          []byte(indexJSON),
 		"overrides/config/sodium.json": overrideContent,
 	})
 
@@ -695,7 +695,7 @@ func TestMrPack_ImportPipeline_OverridesPrecedence(t *testing.T) {
 	}`, s1, len(dlContent))
 
 	writeZipArchive(t, mrpackPath, map[string][]byte{
-		"modrinth.index.json":         []byte(indexJSON),
+		"modrinth.index.json":        []byte(indexJSON),
 		"overrides/mods/collide.jar": overrideWinnerContent,
 	})
 
@@ -1310,8 +1310,3 @@ func TestMrPack_Exporter_CoverageBoosters(t *testing.T) {
 		t.Errorf("expected cached mod download URL, got: %+v", index.Files)
 	}
 }
-
-
-
-
-

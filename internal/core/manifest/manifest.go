@@ -239,8 +239,8 @@ func (m *InstallsManifest) ReconcileWithDisk(modsDir string) (*ReconcileResult, 
 
 	// 1. Detect duplicate active .jar files and self-heal
 	type activeFileEntry struct {
-		name     string
-		modTime  time.Time
+		name    string
+		modTime time.Time
 	}
 	activeByMod := make(map[string][]activeFileEntry)
 	for _, entry := range entries {

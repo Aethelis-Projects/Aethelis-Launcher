@@ -11,11 +11,11 @@ func TestResolveSidecarKey(t *testing.T) {
 	oldNord := os.Getenv("NORD_CF_KEY")
 	oldCF := os.Getenv("CURSEFORGE_API_KEY")
 	defer func() {
-		_ = os.Setenv("NORD_CF_KEY", oldNord)        // errcheck:ok restore env after test
-		_ = os.Setenv("CURSEFORGE_API_KEY", oldCF)   // errcheck:ok restore env after test
+		_ = os.Setenv("NORD_CF_KEY", oldNord)      // errcheck:ok restore env after test
+		_ = os.Setenv("CURSEFORGE_API_KEY", oldCF) // errcheck:ok restore env after test
 	}()
 
-	_ = os.Unsetenv("NORD_CF_KEY")      // errcheck:ok clean env for test isolation
+	_ = os.Unsetenv("NORD_CF_KEY")        // errcheck:ok clean env for test isolation
 	_ = os.Unsetenv("CURSEFORGE_API_KEY") // errcheck:ok clean env for test isolation
 
 	tempDir := t.TempDir()
@@ -63,11 +63,11 @@ func TestResolveSidecarKey(t *testing.T) {
 	oldAppData := os.Getenv("AppData")
 	oldXDG := os.Getenv("XDG_CONFIG_HOME")
 	defer func() {
-		_ = os.Setenv("AppData", oldAppData)          // errcheck:ok restore env
-		_ = os.Setenv("XDG_CONFIG_HOME", oldXDG)      // errcheck:ok restore env
+		_ = os.Setenv("AppData", oldAppData)     // errcheck:ok restore env
+		_ = os.Setenv("XDG_CONFIG_HOME", oldXDG) // errcheck:ok restore env
 	}()
-	_ = os.Setenv("AppData", cfgDir)             // errcheck:ok override config dir for test
-	_ = os.Setenv("XDG_CONFIG_HOME", cfgDir)     // errcheck:ok override config dir for test
+	_ = os.Setenv("AppData", cfgDir)         // errcheck:ok override config dir for test
+	_ = os.Setenv("XDG_CONFIG_HOME", cfgDir) // errcheck:ok override config dir for test
 
 	nordCfgDir := filepath.Join(cfgDir, "nord-launcher")
 	_ = os.MkdirAll(nordCfgDir, 0755) // errcheck:ok test dir setup

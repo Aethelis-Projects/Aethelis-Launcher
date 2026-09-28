@@ -263,4 +263,4 @@ func TestModrinthClient_SearchMods_ProjectTypes(t *testing.T) {
 	if !strings.Contains(capturedFacets, `["project_type:shader"]`) {
 		t.Fatalf("expected exact lowercase facet [\"project_type:shader\"], got %s", capturedFacets)
 	}
-}
+}

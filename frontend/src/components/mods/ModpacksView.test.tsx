@@ -71,11 +71,12 @@ describe("ModpacksView (v0.7.2 G5)", () => {
     fireEvent.click(await screen.findByTestId("modpack-version-fabric-skyblocks-vXYZ"));
 
     await waitFor(() => expect(importSpy).toHaveBeenCalled());
+    // The UI must send only what Go can re-verify - slug + version id. The
+    // url/sha1 pair is deliberately not trusted from the webview.
     expect(importSpy.mock.calls[0][0]).toEqual({
-      url: mrpackVersion.url,
+      project_slug: "fabric-skyblocks",
+      version_id: "vXYZ",
       instance_name: "Fabric Skyblocks",
-      sha1: "aa",
-      size: 12000000,
     });
     await screen.findByText("Импортировано");
     expect(onImported).toHaveBeenCalled();

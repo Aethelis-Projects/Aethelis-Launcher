@@ -463,4 +463,3 @@ func getReleaseOverview(cleanVer, tagVersion string) string {
 		return fmt.Sprintf("Official %s release of Nord Launcher delivering performance improvements, stability updates, and feature enhancements.", tagVersion)
 	}
 }
-

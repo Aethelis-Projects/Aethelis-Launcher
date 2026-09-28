@@ -133,4 +133,3 @@ func TestInstalledModsRepository_CRUDAndSync(t *testing.T) {
 		t.Fatalf("expected nil error on nilRepo.Delete: %v", err)
 	}
 }
-

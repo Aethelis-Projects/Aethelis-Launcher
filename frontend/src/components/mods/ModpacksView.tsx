@@ -141,10 +141,11 @@ export function ModpacksView(props: ModpacksViewProps) {
     patchCard(mod.slug, { phase: "importing", status: undefined });
     try {
       const instPromise = launcherAPI.importMrPackFromURL({
-        url: ver.url,
+        // Go re-resolves url + hashes from the Modrinth API; nothing here is
+        // trusted. slug/version_id is the authoritative pair.
+        project_slug: mod.slug,
+        version_id: ver.version_id,
         instance_name: mod.name,
-        sha1: ver.sha1 ?? "",
-        size: ver.size,
       });
       const timer = window.setInterval(async () => {
         try {

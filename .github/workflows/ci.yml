@@ -43,7 +43,20 @@ jobs:
           version: "12"
 
       - name: Version Consistency Gate (VERSION is the single source)
-        run: node scripts/check_version_consistency.js
+        # The exact command the release job runs with its tag; CI rehearses
+        # it with the matching tag plus a deliberate mismatch, so the
+        # tag==VERSION gate can never first-fire on an actual release push.
+        run: |
+          node scripts/check_version_consistency.js "v$(cat VERSION)"
+          if node scripts/check_version_consistency.js v9.9.9 2>/dev/null; then
+            echo "CRITICAL: version gate accepted a tag that does not match VERSION"
+            exit 1
+          fi
+          if ! grep -q "^## \[$(cat VERSION)\]" CHANGELOG.md; then
+            echo "CRITICAL: CHANGELOG has no section for VERSION"
+            exit 1
+          fi
+          echo "PASS: release-gate path rehearsed (positive + negative + changelog grep)."
         shell: bash
 
       - name: Verify IPC Codegen Parity

@@ -147,7 +147,7 @@ func (s *AdoptiumRuntimeService) Download(ctx context.Context, major int) (strin
 	}
 	tempPath := tempFile.Name()
 	defer func() {
-		_ = tempFile.Close() // errcheck:ok best-effort temp file cleanup
+		_ = tempFile.Close()    // errcheck:ok best-effort temp file cleanup
 		_ = os.Remove(tempPath) // errcheck:ok best-effort temp file cleanup
 	}()
 
