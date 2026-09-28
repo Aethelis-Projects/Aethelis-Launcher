@@ -30,6 +30,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content/curseforge"
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/domain"
+	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
@@ -68,6 +69,7 @@ type WailsAdapter struct {
 	mrpackExporter     *content.MrPackExporter
 	mrpackProgress     map[string]*MrPackImportStatusDTO
 	importer           *launch.InstanceImporter
+	integrityVerifier  ports.IntegrityVerifier
 	filePickerFn       func() (string, error)
 	onLogBatch         func(instanceID string, lines []string)
 	mu                 sync.RWMutex
@@ -297,6 +299,71 @@ func (a *WailsAdapter) SetSettings(repo *storage.SettingsRepository) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.settingsRepo = repo
+}
+
+// SetIntegrityVerifier wires the Mojang cache integrity checker (D'2).
+func (a *WailsAdapter) SetIntegrityVerifier(v ports.IntegrityVerifier) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.integrityVerifier = v
+}
+
+func toIntegrityResultDTO(res *game.IntegrityResult) *IntegrityResultDTO {
+	dto := &IntegrityResultDTO{
+		Version:              res.GameVersion,
+		CheckedCount:         res.CheckedCount,
+		ProblemsCount:        res.ProblemsCount,
+		RepairedCount:        res.RepairedCount,
+		ProblemsCapped:       res.ProblemsCapped,
+		VirtualAssetsSkipped: res.VirtualAssetsSkipped,
+		Items:                make([]IntegrityProblemDTO, 0),
+	}
+	for _, finding := range res.Findings {
+		dto.Items = append(dto.Items, IntegrityProblemDTO{
+			Path:   finding.Path,
+			Reason: finding.Reason,
+		})
+	}
+	return dto
+}
+
+// CheckInstanceFiles verifies Mojang-managed cache files (version JSON, client
+// jar, libraries, natives, asset index and objects) against official SHA-1.
+// Downloads nothing; pair with RepairInstanceFiles to fix findings.
+func (a *WailsAdapter) CheckInstanceFiles(req InstanceIDRequest) (*IntegrityResultDTO, error) {
+	return a.runIntegrityPass(req, false)
+}
+
+// RepairInstanceFiles re-downloads exactly the broken or missing files via the
+// atomic sha1-enforcing downloader. Already-valid files are never touched.
+func (a *WailsAdapter) RepairInstanceFiles(req InstanceIDRequest) (*IntegrityResultDTO, error) {
+	return a.runIntegrityPass(req, true)
+}
+
+func (a *WailsAdapter) runIntegrityPass(req InstanceIDRequest, repair bool) (*IntegrityResultDTO, error) {
+	a.mu.RLock()
+	verifier := a.integrityVerifier
+	a.mu.RUnlock()
+	if verifier == nil {
+		return nil, fmt.Errorf("integrity verifier not initialized")
+	}
+	if a.svc == nil {
+		return nil, fmt.Errorf("instance service not initialized")
+	}
+	inst, err := a.svc.GetInstance(req.InstanceID)
+	if err != nil {
+		return nil, fmt.Errorf("instance not found: %w", err)
+	}
+	var res *game.IntegrityResult
+	if repair {
+		res, err = verifier.FixInstanceFiles(context.Background(), inst)
+	} else {
+		res, err = verifier.CheckInstanceFiles(context.Background(), inst)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("integrity pass failed: %w", err)
+	}
+	return toIntegrityResultDTO(res), nil
 }
 
 func toInstanceDTO(inst *domain.Instance) InstanceDTO {

@@ -409,6 +409,9 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetInstanceGroup",
 		"EnsureInstanceDir",
 		"GetPerformancePreset",
+		"ListOptimizationMods",
+		"CheckInstanceFiles",
+		"RepairInstanceFiles",
 		"ListInstanceWorlds",
 		"ListWorldDatapacks",
 		"SetDatapackEnabled",
@@ -420,9 +423,9 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (51 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 52 {
-		t.Fatalf("expected exactly 51 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (55 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 55 {
+		t.Fatalf("expected exactly 55 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -3280,5 +3283,43 @@ func TestWailsAdapter_ListOptimizationMods(t *testing.T) {
 	bare := wails.NewWailsAdapter(nil)
 	if _, err := bare.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "forge"}); err == nil {
 		t.Fatal("expected error when modrinth client is not initialized")
+	}
+}
+
+type stubIntegrityVerifier struct {
+	checkCalls int
+	fixCalls   int
+	lastID     string
+}
+
+func (v *stubIntegrityVerifier) CheckInstanceFiles(_ context.Context, inst *domain.Instance) (*ports.IntegrityResult, error) {
+	v.checkCalls++
+	v.lastID = inst.ID
+	return &ports.IntegrityResult{
+		GameVersion: inst.GameVersion, CheckedCount: 10, ProblemsCount: 2,
+		Findings: []ports.IntegrityFinding{{Path: "Client JAR", Reason: "ChecksumMismatch"}, {Path: "Asset abc", Reason: "Missing"}},
+	}, nil
+}
+
+func (v *stubIntegrityVerifier) FixInstanceFiles(_ context.Context, inst *domain.Instance) (*ports.IntegrityResult, error) {
+	v.fixCalls++
+	v.lastID = inst.ID
+	return &ports.IntegrityResult{GameVersion: inst.GameVersion, CheckedCount: 10, ProblemsCount: 0, RepairedCount: 2}, nil
+}
+
+func TestWailsAdapter_IntegrityWiring(t *testing.T) {
+	stub := &stubIntegrityVerifier{}
+	svc := launch.NewInstanceService(nil, nil, nil, nil, nil)
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetIntegrityVerifier(stub)
+
+	if _, err := adapter.CheckInstanceFiles(wails.InstanceIDRequest{InstanceID: "missing-inst"}); err == nil || !strings.Contains(err.Error(), "instance not found") {
+		t.Fatalf("expected 'instance not found' error, got %v", err)
+	}
+
+	// no verifier wired: loud failure, never a silent zero-problem report
+	bare := wails.NewWailsAdapter(svc)
+	if _, err := bare.CheckInstanceFiles(wails.InstanceIDRequest{InstanceID: "missing-inst"}); err == nil || !strings.Contains(err.Error(), "integrity verifier not initialized") {
+		t.Fatalf("expected 'verifier not initialized' error, got %v", err)
 	}
 }

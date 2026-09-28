@@ -1,8 +1,8 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database, Gauge, ChevronDown } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database, Gauge, ChevronDown, ShieldCheck } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
-import type { ModItemDTO, PerformancePresetDTO } from "../../bindings/ipc_types";
+import type { IntegrityResultDTO, ModItemDTO, PerformancePresetDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
 import { ModCatalog } from "../mods/ModCatalog";
 import { DatapackManager } from "./DatapackManager";
@@ -46,7 +46,7 @@ export function getRecommendedJavaMajor(version: string, manifestMajor?: number)
   return 21;
 }
 
-export type SettingsTab = "general" | "java" | "memory" | "args" | "mods" | "datapacks" | "optimization";
+export type SettingsTab = "general" | "java" | "memory" | "args" | "mods" | "datapacks" | "optimization" | "integrity";
 
 interface InstanceSettingsModalProps {
   instance: InstanceDTO;
@@ -78,6 +78,8 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const [optimizationLoaded, setOptimizationLoaded] = createSignal(false);
   const [installedOptimizationIds, setInstalledOptimizationIds] = createSignal<Set<string>>(new Set());
   const [installingOptimizationId, setInstallingOptimizationId] = createSignal("");
+  const [integrityResult, setIntegrityResult] = createSignal<IntegrityResultDTO | null>(null);
+  const [integrityBusy, setIntegrityBusy] = createSignal<"check" | "repair" | "">("");
 
   const recommendedJava = () => getRecommendedJavaMajor(props.instance.game_version);
 
@@ -212,6 +214,25 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const handleResetAikarPreset = () => {
     const rest = currentJvmArgList().filter((a) => !AIKAR_PREFIXES.some((p) => a.startsWith(p)));
     setCustomJvmArgs(rest.join(" "));
+  };
+
+  const handleRunIntegrity = async (mode: "check" | "repair") => {
+    setIntegrityBusy(mode);
+    setError("");
+    try {
+      const res = mode === "repair"
+        ? await launcherAPI.repairInstanceFiles(props.instance.id)
+        : await launcherAPI.checkInstanceFiles(props.instance.id);
+      setIntegrityResult(res);
+      if (mode === "repair" && res.problems_count === 0 && res.repaired_count > 0) {
+        setError("");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Не удалось проверить файлы");
+    } finally {
+      setIntegrityBusy("");
+    }
   };
 
   const loadOptimizationMods = async () => {
@@ -378,6 +399,19 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             >
               <Gauge class="w-4 h-4" />
               <span>Оптимизация</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("integrity")}
+              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                activeTab() === "integrity"
+                  ? "border-nord-cyan text-nord-cyan font-semibold"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+              data-testid="tab-integrity"
+            >
+              <ShieldCheck class="w-4 h-4" />
+              <span>Файлы</span>
             </button>
           </div>
 
@@ -967,6 +1001,63 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                           </div>
                         )}
                       </For>
+                    </div>
+                  </Show>
+                </div>
+              </div>
+            </Show>
+            {/* TAB 8: Integrity (D'2) */}
+            <Show when={activeTab() === "integrity"}>
+              <div class="space-y-4">
+                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
+                  <span class="block text-zinc-200 font-semibold text-sm">Целостность файлов игры</span>
+                  <p class="text-xs text-zinc-400 leading-relaxed">
+                    Сверяет кэш Mojang (version JSON, client.jar, библиотеки, нативы, индексы и объекты ассетов) с официальными SHA-1 и докачивает только повреждённое. Библиотеки лоадера и моды проверяются своим механизмом (self-heal) и сюда не входят.
+                  </p>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRunIntegrity("check")}
+                      disabled={integrityBusy() !== ""}
+                      class="py-2 px-4 rounded-lg bg-zinc-800 border border-white/10 text-zinc-100 text-xs font-semibold hover:bg-zinc-700 disabled:opacity-50 transition-colors cursor-pointer"
+                      data-testid="integrity-check-btn"
+                    >
+                      {integrityBusy() === "check" ? "Проверка..." : "Проверить файлы"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRunIntegrity("repair")}
+                      disabled={integrityBusy() !== ""}
+                      class="py-2 px-4 rounded-lg bg-[#00D4B2] text-zinc-950 text-xs font-semibold hover:bg-[#00e6c3] disabled:opacity-50 transition-colors cursor-pointer"
+                      data-testid="integrity-repair-btn"
+                    >
+                      {integrityBusy() === "repair" ? "Починка..." : "Проверить и починить"}
+                    </button>
+                  </div>
+                  <Show when={integrityResult()}>
+                    <div class="p-3 rounded-lg bg-zinc-950/60 border border-white/5 text-xs font-mono space-y-1.5" data-testid="integrity-result">
+                      <p class="text-zinc-300">
+                        Проверено файлов: <span class="text-nord-cyan">{integrityResult()!.checked_count}</span>
+                        <Show when={integrityResult()!.repaired_count > 0}>
+                          {" "}| Починено: <span class="text-emerald-400">{integrityResult()!.repaired_count}</span>
+                        </Show>
+                        {" "}| Проблем: <span class={integrityResult()!.problems_count > 0 ? "text-nord-rose" : "text-emerald-400"}>{integrityResult()!.problems_count}</span>
+                      </p>
+                      <Show when={integrityResult()!.virtual_assets_skipped}>
+                        <p class="text-zinc-500">Виртуальные ассеты (старые версии) пропущены — чинятся пересозданием через Provision.</p>
+                      </Show>
+                      <Show when={integrityResult()!.problems_count > 0}>
+                        <ul class="space-y-0.5 pt-1">
+                          <For each={integrityResult()!.items}>
+                            {(item) => (
+                              <li class="text-nord-rose truncate">{item.path} - {item.reason}</li>
+                            )}
+                          </For>
+                        </ul>
+                        <Show when={integrityResult()!.problems_capped}>
+                          <p class="text-zinc-500">Список усечён до 25 позиций; посчитаны все.</p>
+                        </Show>
+                      </Show>
                     </div>
                   </Show>
                 </div>

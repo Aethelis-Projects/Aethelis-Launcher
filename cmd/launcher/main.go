@@ -196,6 +196,7 @@ func main() {
 		adapter.SetDB(db.DB())
 	}
 	adapter.SetVersion(version)
+	adapter.SetIntegrityVerifier(gameProvisioner)
 
 	coreInitDuration := time.Since(startInit)
 

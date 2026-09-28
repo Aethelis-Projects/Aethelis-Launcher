@@ -465,3 +465,22 @@ export interface ListOptimizationModsRequest {
   game_version: string;
   loader: string;
 }
+
+export interface InstanceIDRequest {
+  instance_id: string;
+}
+
+export interface IntegrityProblemDTO {
+  path: string;
+  reason: string;
+}
+
+export interface IntegrityResultDTO {
+  version: string;
+  checked_count: number;
+  problems_count: number;
+  repaired_count: number;
+  problems_capped: boolean;
+  virtual_assets_skipped: boolean;
+  items: IntegrityProblemDTO[];
+}

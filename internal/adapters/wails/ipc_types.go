@@ -188,13 +188,13 @@ type ModFileDTO struct {
 }
 
 type ModUpdateItemDTO struct {
-	FileName        string `json:"file_name"`
-	ModID           string `json:"mod_id"`
-	Source          string `json:"source"`
-	CurrentVersion  string `json:"current_version"`
-	LatestVersion   string `json:"latest_version"`
-	LatestVersionID string `json:"latest_version_id"`
-	ReleaseType     string `json:"release_type"`
+	FileName        string   `json:"file_name"`
+	ModID           string   `json:"mod_id"`
+	Source          string   `json:"source"`
+	CurrentVersion  string   `json:"current_version"`
+	LatestVersion   string   `json:"latest_version"`
+	LatestVersionID string   `json:"latest_version_id"`
+	ReleaseType     string   `json:"release_type"`
 	Dependencies    []string `json:"dependencies,omitempty"`
 	Changelog       string   `json:"changelog,omitempty"`
 }
@@ -460,4 +460,23 @@ type PerformancePresetDTO struct {
 type ListOptimizationModsRequest struct {
 	GameVersion string `json:"game_version"`
 	Loader      string `json:"loader"`
+}
+
+type InstanceIDRequest struct {
+	InstanceID string `json:"instance_id"`
+}
+
+type IntegrityProblemDTO struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
+type IntegrityResultDTO struct {
+	Version              string                `json:"version"`
+	CheckedCount         int                   `json:"checked_count"`
+	ProblemsCount        int                   `json:"problems_count"`
+	RepairedCount        int                   `json:"repaired_count"`
+	ProblemsCapped       bool                  `json:"problems_capped"`
+	VirtualAssetsSkipped bool                  `json:"virtual_assets_skipped"`
+	Items                []IntegrityProblemDTO `json:"items"`
 }

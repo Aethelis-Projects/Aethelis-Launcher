@@ -40,6 +40,8 @@ import type {
   GetScreenshotDataResponse,
   PerformancePresetDTO,
   ListOptimizationModsRequest,
+  IntegrityResultDTO,
+  InstanceIDRequest,
   SaveGameLogRequest,
   SaveGameLogResponse,
   MinecraftImportSummaryDTO,
@@ -106,6 +108,8 @@ interface WailsAdapterBindings {
   EnsureInstanceDir?: (instanceId: string, dirType: string) => Promise<string>;
   GetPerformancePreset?: () => Promise<PerformancePresetDTO>;
   ListOptimizationMods?: (req: ListOptimizationModsRequest) => Promise<SearchModsResultDTO>;
+  CheckInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
+  RepairInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
 
   ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
   ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
@@ -1104,6 +1108,29 @@ export const launcherAPI = {
       items: [],
       total_count: 0,
     }), req);
+  },
+  async checkInstanceFiles(instanceId: string): Promise<IntegrityResultDTO> {
+    return invokeWails<IntegrityResultDTO>("CheckInstanceFiles", () => ({
+      version: "",
+      checked_count: 0,
+      problems_count: 0,
+      repaired_count: 0,
+      problems_capped: false,
+      virtual_assets_skipped: false,
+      items: [],
+    }), { instance_id: instanceId });
+  },
+
+  async repairInstanceFiles(instanceId: string): Promise<IntegrityResultDTO> {
+    return invokeWails<IntegrityResultDTO>("RepairInstanceFiles", () => ({
+      version: "",
+      checked_count: 0,
+      problems_count: 0,
+      repaired_count: 0,
+      problems_capped: false,
+      virtual_assets_skipped: false,
+      items: [],
+    }), { instance_id: instanceId });
   },
 
   async listScreenshots(instanceId: string): Promise<ScreenshotDTO[]> {
