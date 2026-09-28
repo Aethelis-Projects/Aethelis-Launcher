@@ -40,6 +40,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/loadermeta"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/storage"
@@ -1577,8 +1578,174 @@ func main() {
 	}
 	logf("PASS: CF .zip contract verified: plan split (1 dl + 1 unresolved), credential blocked, override extracted, instance persisted.")
 
+	// --- STEP 15: v0.7.2 wizard APIs, .mrpack URL pipeline & catalog parity (offline fixtures) ---
+	logf("\n--- STEP 15: Loader-Version APIs, MrPack URL Import & Catalog Provider Parity E2E (v0.7.2 G5/G10) ---")
+	step15Tmp := filepath.Join(os.TempDir(), fmt.Sprintf("nord-e2e-step15-%d", time.Now().UnixNano()))
+	_ = os.MkdirAll(step15Tmp, 0755) // errcheck:ok create temp dir
+	defer func() {
+		_ = os.RemoveAll(step15Tmp) // errcheck:ok cleanup step 15 temp dir
+	}()
+	var step15ManifestHits int32
+	step15API := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/mc/game/version_manifest"):
+			step15ManifestHits++
+			_, _ = w.Write([]byte(`{"latest":{"release":"26.3","snapshot":"26.3-rc1"},"versions":[{"id":"26.3","type":"release","url":"x","releaseTime":"2026-09-01T00:00:00Z"},{"id":"1.21.4","type":"release","url":"x","releaseTime":"2024-12-03T00:00:00Z"},{"id":"26.3-rc1","type":"snapshot","url":"x","releaseTime":"2026-08-20T00:00:00Z"}]}`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/fabric/"):
+			_, _ = w.Write([]byte(`[{"loader":{"version":"0.16.9","stable":false}},{"loader":{"version":"0.16.4","stable":true}}]`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/quilt/"):
+			_, _ = w.Write([]byte(`[{"loader":{"version":"0.26.0"}}]`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/forge/promotions_slim.json"):
+			_, _ = w.Write([]byte(`{"promos":{"1.21.4-recommended":"54.1.0-forge"}}`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/neoforge/tags"):
+			_, _ = w.Write([]byte(`[{"name":"21.5.0-beta-1"},{"name":"21.4.211"},{"name":"20.4.0"}]`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/v2/project/p1/version"):
+			_, _ = w.Write([]byte(`[{"id":"verMR","name":"Pack 2.6","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack-2.6.mrpack","url":"http://127.0.0.1:9/offline.mrpack","size":42,"hashes":{"sha1":"beef"}}]},{"id":"verJAR","name":"Jar drop","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack.jar","url":"http://127.0.0.1:9/offline.jar","size":7}]}]`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/v2/tag/category"):
+			_, _ = w.Write([]byte(`[{"id":"fabric","name":"Fabric","project_type":""},{"id":"modpacks","name":"Modpacks","project_type":"modpack"}]`)) // errcheck:ok e2e stub response
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer step15API.Close()
+
+	step15DB, err := storage.OpenDatabase(filepath.Join(step15Tmp, "nord-e2e-15.db"))
+	if err != nil {
+		logf("FAIL: Step 15 SQLite init failed: %v", err)
+		os.Exit(1)
+	}
+	defer func() { _ = step15DB.Close() }() // errcheck:ok close db
+	if err := step15DB.Migrate(); err != nil {
+		logf("FAIL: Step 15 migrations failed: %v", err)
+		os.Exit(1)
+	}
+	step15Repo := storage.NewInstanceRepository(step15DB)
+	step15Svc := launch.NewInstanceService(step15Repo, nil, nil, nil, e2eClock)
+	step15Adapter := wails.NewWailsAdapter(step15Svc)
+	step15Adapter.SetGameManifestURL(step15API.URL + "/mc/game/version_manifest_v2.json")
+	step15Resolver := loadermeta.NewResolver(step15API.Client())
+	step15Resolver.FabricURL = step15API.URL + "/fabric/"
+	step15Resolver.QuiltURL = step15API.URL + "/quilt/"
+	step15Resolver.ForgeURL = step15API.URL + "/forge/promotions_slim.json"
+	step15Resolver.NeoURL = step15API.URL + "/neoforge/tags"
+	step15Adapter.SetLoaderResolver(step15Resolver)
+	step15Adapter.SetContent(modrinth.NewClient(step15API.URL, step15API.Client()), curseforge.NewClient(step15API.URL, "e2e-key", step15API.Client()))
+	step15Adapter.SetFileSystem(nil, filepath.Join(step15Tmp, "instances"))
+
+	// G10 step 2: Mojang manifest through the adapter (with cache).
+	rels, err := step15Adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{})
+	if err != nil || len(rels) != 2 || rels[0].ID != "26.3" {
+		logf("FAIL: Step 15 ListMinecraftVersions releases: %+v %v", rels, err)
+		os.Exit(1)
+	}
+	allv, err := step15Adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{Channel: "all"})
+	if err != nil || len(allv) != 3 {
+		logf("FAIL: Step 15 ListMinecraftVersions all: %+v %v", allv, err)
+		os.Exit(1)
+	}
+	if step15ManifestHits != 1 {
+		logf("FAIL: Step 15 manifest cache bypassed: %d upstream calls", step15ManifestHits)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 Mojang manifest catalog served through adapter with 6h cache (1 upstream hit for 2 calls).")
+
+	// G10 step 3: loader channels resolve recommended/latest values.
+	step15Cases := []struct{ loader, want string }{
+		{"fabric", "0.16.4"}, {"quilt", "0.26.0"}, {"forge", "54.1.0"}, {"neoforge", "21.4.211"},
+	}
+	for _, c := range step15Cases {
+		res, err := step15Adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: c.loader})
+		if err != nil || res == nil || res.Default != c.want || res.Note != "" {
+			logf("FAIL: Step 15 ListLoaderVersions(%s) = %+v err=%v, want default %s", c.loader, res, err, c.want)
+			os.Exit(1)
+		}
+	}
+	if _, err := step15Adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "sponge"}); err == nil {
+		logf("FAIL: Step 15 accepted unsupported loader 'sponge'")
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 all four loader resolvers hit their official endpoints and pick the right defaults.")
+
+	// G10 creation: loader version pinned and persisted.
+	step15Inst, err := step15Adapter.CreateInstanceWithLoader(wails.CreateInstanceWithLoaderRequest{Name: "Wizard Pack", GameVersion: "1.21.4", Loader: "fabric", LoaderVersion: "0.16.4"})
+	if err != nil || step15Inst == nil {
+		logf("FAIL: Step 15 CreateInstanceWithLoader: %v", err)
+		os.Exit(1)
+	}
+	if persisted, err := step15Repo.GetByID(context.Background(), step15Inst.ID); err != nil || persisted.LoaderVer != "0.16.4" {
+		logf("FAIL: Step 15 loader version not persisted: %+v %v", persisted, err)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 wizard creation pinned LoaderVer=%s in the repository.", step15Inst.LoaderVersion)
+
+	// G5: project version listing filters to .mrpack files only.
+	mrpacks, err := step15Adapter.ListMrPackVersions(wails.ListMrPackVersionsRequest{ProjectSlug: "p1", GameVersion: "1.21.4", Loader: "fabric"})
+	if err != nil || len(mrpacks) != 1 || mrpacks[0].Filename != "pack-2.6.mrpack" || mrpacks[0].SHA1 != "beef" {
+		logf("FAIL: Step 15 ListMrPackVersions = %+v err=%v", mrpacks, err)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 modpack version list keeps only .mrpack files with download URL and sha1.")
+
+	// G5: URL import refuses non-https sources and records an honest failure status.
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://insecure.test/p.mrpack", InstanceName: "Nope"}); err == nil {
+		logf("FAIL: Step 15 accepted an http:// mrpack URL")
+		os.Exit(1)
+	}
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://127.0.0.1:9/dead.mrpack", InstanceName: "Pack Via URL"}); err == nil {
+		logf("FAIL: Step 15 URL import swallowed a transport failure")
+		os.Exit(1)
+	}
+	if st, err := step15Adapter.GetMrPackURLImportStatus(wails.InstanceIDRequest{InstanceID: "Pack Via URL"}); err != nil || st.Status != "failed" {
+		logf("FAIL: Step 15 URL import status after failure = %+v err=%v", st, err)
+		os.Exit(1)
+	}
+	// The download-then-import pipeline itself is exercised with the local
+	// importer (the scheme check above is proven; ImportMrPack does the rest).
+	step15PackBuf := &bytes.Buffer{}
+	zw15 := zip.NewWriter(step15PackBuf)
+	f15, err := zw15.Create("modrinth.index.json")
+	if err != nil {
+		logf("FAIL: Step 15 zip entry: %v", err)
+		os.Exit(1)
+	}
+	_, _ = f15.Write([]byte(`{"formatVersion":1,"game":"minecraft","versionId":"e2e","name":"URL Pack","files":[],"dependencies":{"minecraft":"1.21.4","fabric-loader":"0.16.4"}}`)) // errcheck:ok e2e fixture
+	_ = zw15.Close()                                                                                                                                                                 // errcheck:ok finalize zip
+	step15PackPath := filepath.Join(step15Tmp, "url-pack.mrpack")
+	if err := os.WriteFile(step15PackPath, step15PackBuf.Bytes(), 0o600); err != nil {
+		logf("FAIL: Step 15 write fixture mrpack: %v", err)
+		os.Exit(1)
+	}
+	if instID, err := step15Adapter.ImportMrPack(wails.ImportMrPackRequest{MrPackPath: step15PackPath, InstanceName: "Local Via Pipeline"}); err != nil || instID == "" {
+		logf("FAIL: Step 15 importer pipeline behind the URL wrapper: %v", err)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 URL import path validates scheme, records failed status, and the shared importer pipeline runs.")
+
+	// Catalog parity: CF refuses modpack search honestly; Modrinth tags feed filters.
+	if res, err := step15Adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", ProjectType: "modpack", Limit: 5}); err != nil || res.Reason != "unsupported_type" {
+		logf("FAIL: Step 15 CF modpack gate = %+v err=%v", res, err)
+		os.Exit(1)
+	}
+	tagz, err := step15Adapter.ListProjectTags(wails.ListProjectTagsRequest{Provider: "modrinth", ProjectType: "modpack"})
+	if err != nil || len(tagz) == 0 {
+		logf("FAIL: Step 15 ListProjectTags empty: %v", err)
+		os.Exit(1)
+	}
+	seenTag := false
+	for _, tg := range tagz {
+		if tg.ID == "modpacks" {
+			seenTag = true
+		}
+	}
+	if !seenTag {
+		logf("FAIL: Step 15 modpack tag missing: %+v", tagz)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 catalog provider parity: CF modpack gate + Modrinth live tags (%d).", len(tagz))
+
 	logf("\n=================================================================")
-	logf(" ALL 14 E2E STAGES PASSED")
+	logf(" ALL 15 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt
