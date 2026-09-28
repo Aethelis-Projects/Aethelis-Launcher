@@ -463,30 +463,6 @@ jobs:
           WIN=$(ls release-assets/*.exe | head -1)
           BUNDLE_KB="${{ needs.build-linux.outputs.bundle_gzip_kb }}"
           [ -n "$BUNDLE_KB" ] || BUNDLE_KB=null
-          COV=null
-          for f in coverage/core-and-frontend-ubuntu-latest/coverage.txt; do
-            [ -f "$f" ] && COV=$(cat "$f") && break
-          done
-          mkdir -p /tmp/metrics-extract
-          tar -xzf "$TAR" -C /tmp/metrics-extract
-          BIN=$(find /tmp/metrics-extract -type f -name "nord-launcher*" ! -name "*.sh" ! -name "*.desktop" ! -name "*.png" | head -1)
-          go run ./scripts/release_metrics.go \
-            --version "$RELEASE_TAG" \
-            --tar-bytes "$(wc -c < "$TAR")" \
-            --linux-binary-bytes "$(wc -c < "$BIN")" \
-            --windows-installer-bytes "$(wc -c < "$WIN")" \
-            --bundle-gzip-kb "$BUNDLE_KB" \
-            --core-coverage "$COV" \
-            --out release-assets/metrics.json
-          cat release-assets/metrics.json
-        shell: bash
-
-      - name: Compile metrics.json (single source for the README perf story)
-        run: |
-          TAR=$(ls release-assets/*.tar.gz | head -1)
-          WIN=$(ls release-assets/*.exe | head -1)
-          BUNDLE_KB="${{ needs.build-linux.outputs.bundle_gzip_kb }}"
-          [ -n "$BUNDLE_KB" ] || BUNDLE_KB=null
           COV="${{ needs.build-linux.outputs.core_coverage }}"
           [ -n "$COV" ] || COV=null
           mkdir -p /tmp/metrics-extract
