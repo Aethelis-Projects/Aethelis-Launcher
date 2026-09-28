@@ -36,6 +36,26 @@ type fakeDiscord struct {
 	activeConn net.Conn
 }
 
+// shortTmpBase gives the AF_UNIX socket a path that stays under the 107 byte
+// sockaddr_un limit on Windows runners (t.TempDir nests the test name and
+// overflows there); cleaned up via t.Cleanup.
+func shortTmpBase(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(os.TempDir(), "nrd")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(dir, t.Name())
+	if len(base) > 64 {
+		base = filepath.Join(dir, "t")
+	}
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) }) // errcheck:ok test cleanup
+	return base
+}
+
 func newFakeDiscord(t *testing.T, runtimeDir, name string) *fakeDiscord {
 	t.Helper()
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
@@ -81,7 +101,7 @@ func (f *fakeDiscord) serve(conn net.Conn) {
 				}
 			}
 			ack, _ := encodeJSON(map[string]interface{}{"evt": "READY", "data": map[string]interface{}{"client_id": "cid"}}) // errcheck:ok static test payload
-			_ = writeFrame(conn, opFrame, ack)                                                                                   // errcheck:ok test pipe
+			_ = writeFrame(conn, opFrame, ack)                                                                               // errcheck:ok test pipe
 		case opFrame:
 			select {
 			case f.framesCh <- string(payload):
@@ -111,7 +131,7 @@ func (f *fakeDiscord) dropLive() {
 }
 
 func TestRPC_FullLifecycle_WithFakeDiscord(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
@@ -189,7 +209,7 @@ func TestRPC_FullLifecycle_WithFakeDiscord(t *testing.T) {
 }
 
 func TestRPC_ReconnectAfterDiscordRestart(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
@@ -220,7 +240,7 @@ func TestRPC_ReconnectAfterDiscordRestart(t *testing.T) {
 }
 
 func TestRPC_NoDiscord_SilentDegradation(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir) // no listener anywhere
 
 	m := NewManager("app-id")
@@ -241,7 +261,7 @@ func TestRPC_EmptyAppID_FallsBackToBuiltinIdentity(t *testing.T) {
 	// v0.7.2 G8: the shipped constant is the identity; users can no longer
 	// (and never had to) configure it. An empty constructor value must not
 	// block the handshake.
-	dir := t.TempDir()
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
