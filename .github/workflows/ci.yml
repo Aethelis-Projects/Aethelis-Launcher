@@ -60,8 +60,16 @@ jobs:
         shell: bash
 
       - name: Verify gofmt (CI-measured, keeps the README claim honest)
-        run: test -z "$(gofmt -l internal cmd ipc scripts)"
-        shell: bash
+        # Command substitution is not portable: Git Bash on Windows execs
+        # real gofmt but /usr/bin/bash for `$(...)`, so capture the list via
+        # an output env var instead of inlining it in a test -z.
+        run: gofmt -l internal cmd ipc scripts
+        id: gofmtlist
+      - name: Verify gofmt (list must be empty)
+        run: test -z "${{ env.UNFORMATTED }}" || { echo "Unformatted files:"; echo "$GOFMT_LIST"; exit 1; }
+        env:
+          UNFORMATTED: ${{ steps.gofmtlist.outputs.stdout }}
+          GOFMT_LIST: ${{ steps.gofmtlist.outputs.stdout }}
 
       - name: Verify IPC Codegen Parity
         run: |
