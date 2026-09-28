@@ -33,18 +33,19 @@
 
 ## Why Nord Launcher
 
-Most Minecraft launchers are Electron appliances: megabytes of overhead, background noise, and opaque update pipelines. Nord Launcher is built the other way around — a pure Go core, a ~28 KB embedded UI, and a small native shell. Every update is cryptographically signed, every secret lives in the OS credential manager, and nothing is phoned home.
+Most Minecraft launchers are Electron appliances: megabytes of overhead, background noise, and opaque update pipelines. Nord Launcher is built the other way around — a pure Go core, an ~81 KB gzipped embedded UI, and a small native shell. Every update is cryptographically signed, every secret lives in the OS credential manager, and nothing is phoned home.
 
-**Measured in CI (release v0.1.2):**
+**Measured on v0.7.2 (2026-09-28; CI + headless reruns, Linux amd64 / cross-Windows):**
 
 | Metric | Result | Budget |
 |---|---|---|
-| Cold start | ~1.03 s | < 2.0 s |
-| Idle RAM | ~82 MB | < 150 MB |
-| IPC dispatch (p95) | 297 ns | ≤ 5,000 ns |
-| Frontend bundle (gzip) | 27.7 KB | ≤ 250 KB |
-| Windows binary | 17.5 MB | < 40 MB |
-| Core test coverage | 80.9% | ≥ 80% |
+| Core init (`--idle-test`, headless) | 9 ms | < 100 ms |
+| IPC dispatch | ~109 ns/op (`BenchmarkWailsAdapter_IPCDispatch`, 2-core CI runner) | p95 ≤ 5,000 ns |
+| Frontend bundle (gzip) | 81 KB main chunk / 88 KB total (`frontend/dist`) | ≤ 250 KB |
+| Binary (stripped, `-s -w`, frontend not embedded) | 17.0 MB linux / 17.4 MB windows | < 40 MB |
+| Core test coverage | 80.4% (`go test -coverprofile ./internal/core/...`) | ≥ 80% |
+| Idle RAM (full GUI) | measured on hardware — acceptance checklist item | < 150 MB |
+| Cold start (full GUI) | measured on hardware — acceptance checklist item | < 2.0 s |
 
 ---
 
