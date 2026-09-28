@@ -180,7 +180,7 @@ describe("App Component (B1, B2, D2, M1)", () => {
     expect(banner.textContent).toContain("Database connection lost");
   });
 
-  it("configures instance Java path via updateInstance (S3)", async () => {
+  it("home no longer duplicates the Java runtime editor (v0.7.2 G1)", async () => {
     vi.spyOn(launcherAPI, "listInstances").mockResolvedValue([
       {
         id: "inst-1",
@@ -196,34 +196,15 @@ describe("App Component (B1, B2, D2, M1)", () => {
       },
     ]);
 
-    const updateSpy = vi.spyOn(launcherAPI, "updateInstance").mockResolvedValue({
-      id: "inst-1",
-      name: "Vanilla 1.21.1",
-      game_version: "1.21.1",
-      loader: "vanilla",
-      java_path: "C:\\Java21\\bin\\java.exe",
-      min_ram_mb: 2048,
-      max_ram_mb: 4096,
-      jvm_args: [],
-      skip_java_check: false,
-      state: "idle",
-      total_play_seconds: 0,
-    });
-
     render(() => <App />);
+    await screen.findByTestId("cockpit-log-tail");
 
-    const input = await screen.findByTestId("instance-java-path-input");
-    const saveBtn = await screen.findByTestId("save-java-path-button");
-
-    fireEvent.input(input, { target: { value: "C:\\Java21\\bin\\java.exe" } });
-    fireEvent.click(saveBtn);
-
-    await vi.waitFor(() => {
-      expect(updateSpy).toHaveBeenCalledWith({
-        id: "inst-1",
-        java_path: "C:\\Java21\\bin\\java.exe",
-      });
-    });
+    // The cockpit header used to carry its own Java path input + chip; both
+    // were duplicates of the instance settings. The console tail stays.
+    expect(screen.queryByTestId("instance-java-path-input")).toBeNull();
+    expect(screen.queryByTestId("save-java-path-button")).toBeNull();
+    expect(document.body.textContent).not.toContain("Среда выполнения Java");
+    expect(screen.getByTestId("cockpit-log-tail")).toBeTruthy();
   });
 
   it("renders cockpit data density badges and log tail panel (J3)", async () => {

@@ -39,7 +39,6 @@ import type {
   GetScreenshotDataRequest,
   GetScreenshotDataResponse,
   PerformancePresetDTO,
-  ListOptimizationModsRequest,
   IntegrityResultDTO,
   InstanceIDRequest,
   SaveGameLogRequest,
@@ -112,14 +111,12 @@ interface WailsAdapterBindings {
   OpenPath?: (path: string) => Promise<void>;
   EnsureInstanceDir?: (instanceId: string, dirType: string) => Promise<string>;
   GetPerformancePreset?: () => Promise<PerformancePresetDTO>;
-  ListOptimizationMods?: (req: ListOptimizationModsRequest) => Promise<SearchModsResultDTO>;
   CheckInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
   RepairInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
 
   SetDiscordRpcEnabled?: (enabled: boolean) => Promise<void>;
   GetDiscordRpcStatus?: () => Promise<DiscordRpcStatusDTO>;
   GetDiscordRpcPreview?: (req: { instance_id: string }) => Promise<DiscordRpcPreviewDTO>;
-  SetDiscordAppID?: (req: { key: string; value: string }) => Promise<void>;
 
   ScanCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackPlanDTO>;
   ImportCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackImportResultDTO>;
@@ -1115,13 +1112,6 @@ export const launcherAPI = {
       aikar_args: [],
     }));
   },
-
-  async listOptimizationMods(req: ListOptimizationModsRequest): Promise<SearchModsResultDTO> {
-    return invokeWails<SearchModsResultDTO>("ListOptimizationMods", () => ({
-      items: [],
-      total_count: 0,
-    }), req);
-  },
   async checkInstanceFiles(instanceId: string): Promise<IntegrityResultDTO> {
     return invokeWails<IntegrityResultDTO>("CheckInstanceFiles", () => ({
       version: "",
@@ -1198,11 +1188,6 @@ export const launcherAPI = {
       { instance_id: instanceId }
     );
   },
-
-  async setDiscordAppID(value: string): Promise<void> {
-    await invokeWails<void>("SetDiscordAppID", () => undefined, { key: "discord_app_id", value });
-  },
-
   async scanCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackPlanDTO> {
     return invokeWails<CFPackPlanDTO>(
       "ScanCurseForgePackZip",

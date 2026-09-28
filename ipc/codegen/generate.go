@@ -465,11 +465,6 @@ type PerformancePresetDTO struct {
 	AikarArgs      []string ` + "`" + `json:"aikar_args"` + "`" + `
 }
 
-type ListOptimizationModsRequest struct {
-	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
-	Loader      string ` + "`" + `json:"loader"` + "`" + `
-}
-
 type InstanceIDRequest struct {
 	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
 }
@@ -1006,11 +1001,6 @@ export interface DeleteDatapackRequest {
 export interface PerformancePresetDTO {
   suggested_ram_mb: number;
   aikar_args: string[];
-}
-
-export interface ListOptimizationModsRequest {
-  game_version: string;
-  loader: string;
 }
 
 export interface InstanceIDRequest {

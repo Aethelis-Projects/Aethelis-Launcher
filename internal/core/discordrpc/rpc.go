@@ -35,6 +35,10 @@ const (
 // maxFrameLen guards against absurd frames from a misbehaving pipe peer.
 const maxFrameLen = 1 << 20
 
+// BuiltinAppID is the launcher's registered Discord application identity
+// (owner decision v0.7.2: shipped in the binary, not user-configurable).
+const BuiltinAppID = "1545829310563360840"
+
 // Activity is the presence payload Discord renders. Zero account fields by
 // construction — the struct simply does not carry any.
 type Activity struct {
@@ -312,6 +316,9 @@ func (m *Manager) handshake(conn net.Conn) error {
 	m.mu.Lock()
 	appID := m.appID
 	m.mu.Unlock()
+	if appID == "" {
+		appID = BuiltinAppID // shipped identity: RPC works out of the box
+	}
 	if appID == "" {
 		return errors.New("discord application id not configured")
 	}

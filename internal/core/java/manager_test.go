@@ -653,3 +653,67 @@ func TestJavaManager_CleanUnusedRuntimes_Guards(t *testing.T) {
 		t.Errorf("expected detected home %s to still exist", detectedHome)
 	}
 }
+
+// v0.7.2 G7: instances with no explicit java_path must still attribute the
+// runtime auto-resolution picks (MC 26.1+ -> Java 25) as "in use".
+func TestJavaManager_ListRuntimes_AutoAttribution(t *testing.T) {
+	dir := t.TempDir()
+	managed := filepath.Join(dir, "managed")
+	jdk := filepath.Join(managed, "jdk-25")
+	javaBin := filepath.Join(jdk, "bin", "java")
+	if err := os.MkdirAll(filepath.Join(jdk, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(jdk, "release"), []byte("JAVA_VERSION=\"25\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(javaBin, []byte("#!/bin/sh\necho\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	repo := &memRepoStub{instances: []*domain.Instance{
+		{ID: "a", Name: "New MC", GameVersion: "26.2"},  // no JavaPath: auto-resolves to 25
+		{ID: "b", Name: "Old MC", GameVersion: "1.8.9"}, // auto-resolves to 8 (absent here)
+	}}
+	mgr := java.NewJavaManager(filepath.Join(dir, "managed"), nil, repo, nil)
+
+	installations, err := mgr.ListRuntimes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ins := range installations {
+		if ins.MajorVersion == 25 {
+			found = true
+			if len(ins.UsedBy) != 1 || ins.UsedBy[0] != "New MC" {
+				t.Fatalf("auto-attribution failed for Java 25: %+v", ins.UsedBy)
+			}
+		}
+		if ins.MajorVersion == 8 && len(ins.UsedBy) > 0 {
+			t.Fatalf("instance 1.8.9 must not be attributed to an absent 8; got %+v", ins.UsedBy)
+		}
+	}
+	if !found {
+		t.Fatal("jdk-25 managed runtime was not listed at all")
+	}
+}
+
+type memRepoStub struct{ instances []*domain.Instance }
+
+func (r *memRepoStub) Save(_ context.Context, inst *domain.Instance) error {
+	r.instances = append(r.instances, inst)
+	return nil
+}
+func (r *memRepoStub) GetByID(_ context.Context, id string) (*domain.Instance, error) {
+	for _, i := range r.instances {
+		if i.ID == id {
+			return i, nil
+		}
+	}
+	return nil, domain.ErrInstanceNotFound
+}
+func (r *memRepoStub) ListAll(context.Context) ([]*domain.Instance, error) { return r.instances, nil }
+func (r *memRepoStub) Delete(context.Context, string) error                { return nil }
+func (r *memRepoStub) UpdateState(context.Context, string, domain.InstanceState) error {
+	return nil
+}

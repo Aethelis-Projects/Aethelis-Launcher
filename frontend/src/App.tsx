@@ -15,7 +15,6 @@ import { GameConsoleModal } from "./components/console/GameConsoleModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
 import { StartupUpdateModal } from "./components/updater/StartupUpdateModal";
 import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
-import { DiscordPresenceCard } from "./components/settings/DiscordPresenceCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
@@ -289,8 +288,6 @@ export const App: Component = () => {
     }
   };
 
-  const [customJavaPath, setCustomJavaPath] = createSignal("");
-
   const loadModsCount = async (instId: string) => {
     if (!instId) return;
     try {
@@ -313,7 +310,6 @@ export const App: Component = () => {
 
   createEffect(() => {
     const inst = activeInstance();
-    setCustomJavaPath(inst.java_path || "");
     if (inst.id) {
       loadModsCount(inst.id);
       launcherAPI
@@ -322,22 +318,6 @@ export const App: Component = () => {
         .catch(() => {});
     }
   });
-
-  const saveInstanceJavaPath = async () => {
-    const targetId = activeInstance().id;
-    if (!targetId) return;
-    try {
-      const updated = await launcherAPI.updateInstance({
-        id: targetId,
-        java_path: customJavaPath().trim(),
-      });
-      setInstances((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-    } catch (err: unknown) {
-      console.error("Failed to update instance Java path:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setSystemError(`Ошибка обновления параметров инстанса: ${msg}`);
-    }
-  };
 
   const handleLaunch = async () => {
     const inst = activeInstance();
@@ -720,37 +700,6 @@ export const App: Component = () => {
                     </div>
                   </div>
 
-                  {/* Java Runtime Path Control (S3: preserved for backward compat & test coverage) */}
-                  <div class="p-3.5 rounded-xl bg-black/20 border border-white/5 flex flex-col gap-2">
-                    <div class="flex items-center justify-between">
-                      <span class="text-xs font-semibold text-zinc-300">Среда выполнения Java (JavaPath)</span>
-                      <span class="text-[11px] font-mono text-zinc-500">
-                        {activeInstance().java_path ? "Пользовательский путь" : "Авто (Java 25 / 21 / 17 / 16 / 11 / 8)"}
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={customJavaPath()}
-                        placeholder="Авто-определение или путь к java.exe"
-                        onInput={(e) => setCustomJavaPath(e.currentTarget.value)}
-                        class="flex-1 px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-nord-cyan"
-                        data-testid="instance-java-path-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={saveInstanceJavaPath}
-                        class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white transition-colors cursor-pointer"
-                        data-testid="save-java-path-button"
-                      >
-                        Сохранить
-                      </button>
-                    </div>
-                    <p class="text-[11px] text-zinc-500">
-                      При запуске выполняется строгая проверка соответствия мажорной версии Java (fail-closed).
-                    </p>
-                  </div>
-
                   {/* Live Console Log Tail (J3) */}
                   <div
                     class="p-3.5 rounded-xl bg-black/30 border border-white/5 flex flex-col gap-2"
@@ -895,7 +844,6 @@ export const App: Component = () => {
           <Show when={currentNav() === "settings"}>
             <div class="max-w-3xl mx-auto space-y-6">
               <CurseForgeKeyCard />
-              <DiscordPresenceCard />
               <UpdatePanel
                 channel="stable"
                 onUpdateAvailable={(info) => setAvailableUpdate(info)}

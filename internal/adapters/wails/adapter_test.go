@@ -409,7 +409,6 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetInstanceGroup",
 		"EnsureInstanceDir",
 		"GetPerformancePreset",
-		"ListOptimizationMods",
 		"CheckInstanceFiles",
 		"RepairInstanceFiles",
 		"ScanCurseForgePackZip",
@@ -417,7 +416,6 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetDiscordRpcEnabled",
 		"GetDiscordRpcStatus",
 		"GetDiscordRpcPreview",
-		"SetDiscordAppID",
 		"ListInstanceWorlds",
 		"ListWorldDatapacks",
 		"SetDatapackEnabled",
@@ -429,9 +427,9 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (61 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 61 {
-		t.Fatalf("expected exactly 61 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (59 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 59 {
+		t.Fatalf("expected exactly 59 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -3213,84 +3211,6 @@ func TestWailsAdapter_GetPerformancePreset(t *testing.T) {
 	}
 }
 
-func TestWailsAdapter_ListOptimizationMods(t *testing.T) {
-	hits := map[string]string{
-		"sodium":       "Sodium",
-		"lithium":      "Lithium",
-		"ferrite-core": "FerriteCore",
-	}
-	var mu sync.Mutex
-	var seenQueries []string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query().Get("query")
-		mu.Lock()
-		seenQueries = append(seenQueries, query)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		if title, ok := hits[query]; ok {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"hits": []map[string]interface{}{
-					{
-						"project_id":   "proj-" + query,
-						"slug":         query,
-						"title":        title,
-						"description":  "curated optimization entry",
-						"author":       "curated-author",
-						"downloads":    1000,
-						"categories":   []string{"fabric", "performance"},
-						"project_type": "mod",
-					},
-					{
-						"project_id":   "noise-" + query,
-						"slug":         query + "-unofficial-fork",
-						"title":        "Noise Fork",
-						"downloads":    5,
-						"project_type": "mod",
-					},
-				},
-				"total_hits": 2,
-			})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"hits": []interface{}{}, "total_hits": 0})
-	}))
-	defer ts.Close()
-
-	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetContent(modrinth.NewClient(ts.URL, ts.Client()), nil)
-
-	res, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "fabric"})
-	if err != nil {
-		t.Fatalf("ListOptimizationMods failed: %v", err)
-	}
-	if len(res.Items) != len(hits) {
-		t.Fatalf("expected %d curated items (modernfix has no hit -> skipped), got %d: %+v", len(hits), len(res.Items), res.Items)
-	}
-	for _, it := range res.Items {
-		if _, ok := hits[it.Slug]; !ok {
-			t.Errorf("unexpected slug returned: %q", it.Slug)
-		}
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(seenQueries) != 4 {
-		t.Errorf("expected one lookup per curated slug (4), got %d: %v", len(seenQueries), seenQueries)
-	}
-
-	empty, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "vanilla"})
-	if err != nil {
-		t.Fatalf("vanilla must not error: %v", err)
-	}
-	if len(empty.Items) != 0 {
-		t.Fatalf("vanilla must return empty curated set, got %d", len(empty.Items))
-	}
-
-	// A loader with a curated set but no content client must fail loudly, not fake data.
-	bare := wails.NewWailsAdapter(nil)
-	if _, err := bare.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "forge"}); err == nil {
-		t.Fatal("expected error when modrinth client is not initialized")
-	}
-}
 
 type stubIntegrityVerifier struct {
 	checkCalls int

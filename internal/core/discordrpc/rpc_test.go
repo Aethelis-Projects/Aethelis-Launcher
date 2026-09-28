@@ -74,6 +74,12 @@ func (f *fakeDiscord) serve(conn net.Conn) {
 		}
 		switch op {
 		case opHandshake:
+			if strings.Contains(string(payload), BuiltinAppID) {
+				select {
+				case f.framesCh <- string(payload):
+				default: // errcheck:ok drop if not observed
+				}
+			}
 			ack, _ := encodeJSON(map[string]interface{}{"evt": "READY", "data": map[string]interface{}{"client_id": "cid"}}) // errcheck:ok static test payload
 			_ = writeFrame(conn, opFrame, ack)                                                                                   // errcheck:ok test pipe
 		case opFrame:
@@ -231,16 +237,32 @@ func TestRPC_NoDiscord_SilentDegradation(t *testing.T) {
 	m.SetEnabled(false)
 }
 
-func TestRPC_MissingAppID_ExplicitStatus(t *testing.T) {
+func TestRPC_EmptyAppID_FallsBackToBuiltinIdentity(t *testing.T) {
+	// v0.7.2 G8: the shipped constant is the identity; users can no longer
+	// (and never had to) configure it. An empty constructor value must not
+	// block the handshake.
 	dir := t.TempDir()
 	t.Setenv("XDG_RUNTIME_DIR", dir)
-	newFakeDiscord(t, dir, "discord-ipc-0")
+	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
-	m := NewManager("") // no application id configured
+	m := NewManager("")
 	m.SetEnabled(true)
-	waitFor(t, func() bool { return strings.Contains(m.Status().LastError, "application id") }, 3*time.Second, "explicit config error")
-	if m.Status().Connected {
-		t.Fatal("must not be connected without handshake identity")
+	waitFor(t, func() bool { return m.Status().Connected }, 3*time.Second, "handshake with builtin id")
+
+	observed := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !observed {
+		select {
+		case raw := <-fake.framesCh:
+			if strings.Contains(raw, BuiltinAppID) {
+				observed = true
+			}
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if !observed {
+		t.Fatal("handshake must carry the builtin application id")
 	}
 	m.SetEnabled(false)
 }

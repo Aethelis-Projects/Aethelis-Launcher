@@ -137,14 +137,11 @@ func TestWailsAdapter_DiscordRpc_ToggleAndStatusWithoutService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Enabled || st.Connected || st.AppIDSet {
-		t.Fatalf("without settings repo everything must read off: %+v", st)
+	if st.Enabled || st.Connected {
+		t.Fatalf("without settings repo enabled/connected must read off: %+v", st)
 	}
-	// Contract with a nil settings repo: persistence is a no-op, so the
-	// durable fields stay off, while the live manager still reflects the
-	// in-session app id (never silently re-applied after restart).
-	if err := adapter.SetDiscordAppID(SetSettingRequest{Value: "42"}); err != nil {
-		t.Fatalf("SetDiscordAppID without repo must be a no-op, got %v", err)
+	if !st.AppIDSet {
+		t.Fatalf("builtin app id must always report set: %+v", st)
 	}
 	st, err = adapter.GetDiscordRpcStatus()
 	if err != nil {
@@ -153,7 +150,9 @@ func TestWailsAdapter_DiscordRpc_ToggleAndStatusWithoutService(t *testing.T) {
 	if st.Enabled {
 		t.Fatal("enabled is repo-backed; must stay false without a repo")
 	}
+	// v0.7.2 G8: the app id ships as a binary constant, so status always
+	// reports it set — even before any manager exists.
 	if !st.AppIDSet {
-		t.Fatal("live manager must reflect the in-session app id")
+		t.Fatal("builtin app id must report as set")
 	}
 }

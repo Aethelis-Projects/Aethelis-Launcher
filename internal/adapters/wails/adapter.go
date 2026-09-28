@@ -880,44 +880,6 @@ func (a *WailsAdapter) GetPerformancePreset() (*PerformancePresetDTO, error) {
 	}, nil
 }
 
-// ListOptimizationMods resolves the curated optimization set for a loader
-// family via Modrinth search pinned to the instance game version, so every
-// returned item is installable through the existing version matcher.
-// Missing curated entries are skipped (no fake rows); a loader without a
-// curated set yields an empty result the UI renders as "nothing vetted yet".
-func (a *WailsAdapter) ListOptimizationMods(req ListOptimizationModsRequest) (*SearchModsResultDTO, error) {
-	slugs := launch.CuratedOptimizationSlugs(req.Loader)
-	if len(slugs) == 0 {
-		return &SearchModsResultDTO{Items: []ModItemDTO{}, TotalCount: 0}, nil
-	}
-	if a.modrinth == nil {
-		return nil, fmt.Errorf("modrinth client not initialized")
-	}
-	seen := map[string]bool{}
-	out := make([]ModItemDTO, 0, len(slugs))
-	for _, slug := range slugs {
-		res, err := a.SearchMods(SearchModsRequest{
-			Query:       slug,
-			GameVersion: req.GameVersion,
-			Loader:      req.Loader,
-			Source:      "modrinth",
-			Limit:       10,
-			ProjectType: "mod",
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, it := range res.Items {
-			if it.Slug == slug && !seen[slug] {
-				seen[slug] = true
-				out = append(out, it)
-				break
-			}
-		}
-	}
-	return &SearchModsResultDTO{Items: out, TotalCount: int64(len(out))}, nil
-}
-
 func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO, error) {
 	if strings.TrimSpace(req.ModID) == "" {
 		return nil, errors.New("mod_id is required")
@@ -3737,34 +3699,32 @@ func (a *WailsAdapter) discordManagerIfEnabled() *discordrpc.Manager {
 	m := a.discordRPC
 	a.mu.Unlock()
 
-	enabled, _ := a.discordSettings()
-	if !enabled {
+	if !a.discordSettings() {
 		return nil
 	}
 	return m
 }
 
 func (a *WailsAdapter) newDiscordManagerLocked() *discordrpc.Manager {
-	_, appID := a.discordSettingsWith(a.settingsRepo)
-	return discordrpc.NewManager(appID)
+	return discordrpc.NewManager("") // builtin app id ships in the binary (v0.7.2 G8)
 }
 
-func (a *WailsAdapter) discordSettings() (enabled bool, appID string) {
+func (a *WailsAdapter) discordSettings() bool {
 	a.mu.RLock()
 	repo := a.settingsRepo
 	a.mu.RUnlock()
-	return a.discordSettingsWith(repo)
+	return a.discordEnabledWith(repo)
 }
 
-// discordSettingsWith reads the two D'5 settings from a caller-resolved repo
-// (no lock taken here: callers may already hold a.mu).
-func (a *WailsAdapter) discordSettingsWith(repo *storage.SettingsRepository) (enabled bool, appID string) {
+// discordEnabledWith reads the D'5 opt-in from a caller-resolved repo
+// (no lock taken here: callers may already hold a.mu). The application id is
+// not user-configurable since v0.7.2 — it ships as discordrpc.BuiltinAppID.
+func (a *WailsAdapter) discordEnabledWith(repo *storage.SettingsRepository) bool {
 	if repo == nil {
-		return false, ""
+		return false
 	}
 	rawEnabled, _ := repo.Get(context.Background(), "discord_rpc_enabled") // errcheck:ok unset setting means disabled
-	appID, _ = repo.Get(context.Background(), "discord_app_id")            // errcheck:ok unset app id degrades to idle status
-	return rawEnabled == "true", appID
+	return rawEnabled == "true"
 }
 
 // SetDiscordRpcEnabled toggles presence. The RPC manager only exists while
@@ -3790,8 +3750,7 @@ func (a *WailsAdapter) GetDiscordRpcStatus() (*DiscordRpcStatusDTO, error) {
 	a.mu.RLock()
 	m := a.discordRPC
 	a.mu.RUnlock()
-	enabled, appID := a.discordSettings()
-	dto := &DiscordRpcStatusDTO{Enabled: enabled, AppIDSet: appID != ""}
+	dto := &DiscordRpcStatusDTO{Enabled: a.discordSettings(), AppIDSet: discordrpc.BuiltinAppID != ""}
 	if m != nil {
 		st := m.Status()
 		dto.Connected = st.Connected
@@ -3821,19 +3780,4 @@ func (a *WailsAdapter) GetDiscordRpcPreview(req InstanceIDRequest) (*DiscordRpcP
 	dto.Details = "Minecraft " + inst.GameVersion
 	dto.State = inst.Name
 	return dto, nil
-}
-
-// SetDiscordAppID stores the Discord application identity used for the IPC
-// handshake (BYO app id; empty = presence stays off with an honest status).
-func (a *WailsAdapter) SetDiscordAppID(req SetSettingRequest) error {
-	if err := a.SetSetting(SetSettingRequest{Key: "discord_app_id", Value: req.Value}); err != nil {
-		return err
-	}
-	a.mu.RLock()
-	m := a.discordRPC
-	a.mu.RUnlock()
-	if m != nil {
-		m.SetAppID(req.Value)
-	}
-	return nil
 }

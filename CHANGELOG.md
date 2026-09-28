@@ -3,6 +3,14 @@
 All notable changes to Nord Launcher are documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [Unreleased]
+
+### Changed
+- UI consolidation (v0.7.2, in progress): the home cockpit no longer duplicates the Java runtime editor (path input + "Среда выполнения Java" plate removed; settings remain the single owner), and Instance Settings now carry one "Производительность и Java" tab combining the Java runtime, RAM presets, JVM flags and performance presets (the standalone "Оптимизация" tab with the curated mod catalog is gone). The standalone "Рекомендуемая Java" plate was replaced by an inline "install missing recommended runtime" affordance.
+- Discord Rich Presence settings were moved out of the global Settings page into the unified instance tab (single toggle); the Discord Application ID is now a built-in binary constant, so `SetDiscordAppID` and the `discord_app_id` setting were removed.
+- Java manager usage attribution is honest now: path comparison is normalized (slashes/case) and instances running on auto-detected Java are attributed to the runtime the launcher would actually pick (including the Java 8 -> 11 fallback), so "used by" no longer shows empty for active runtimes.
+- Wails method registry recalculated: 61 -> 59 (`ListOptimizationMods` and `SetDiscordAppID` removed; generated TS bindings pruned accordingly).
+
 ## [0.7.1] - 2026-09-28
 
 ### Added

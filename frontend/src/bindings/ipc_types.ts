@@ -461,11 +461,6 @@ export interface PerformancePresetDTO {
   aikar_args: string[];
 }
 
-export interface ListOptimizationModsRequest {
-  game_version: string;
-  loader: string;
-}
-
 export interface InstanceIDRequest {
   instance_id: string;
 }

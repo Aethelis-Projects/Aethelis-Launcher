@@ -457,11 +457,6 @@ type PerformancePresetDTO struct {
 	AikarArgs      []string `json:"aikar_args"`
 }
 
-type ListOptimizationModsRequest struct {
-	GameVersion string `json:"game_version"`
-	Loader      string `json:"loader"`
-}
-
 type InstanceIDRequest struct {
 	InstanceID string `json:"instance_id"`
 }
