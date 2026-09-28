@@ -61,9 +61,7 @@ func newFakeDiscord(t *testing.T, runtimeDir, name string) *fakeDiscord {
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(runtimeDir, name)
-	_ = os.Remove(path) // errcheck:ok stale socket cleanup, if any
-	ln, err := net.Listen("unix", path)
+	ln, err := listenFakeDiscord(t, runtimeDir, name)
 	if err != nil {
 		t.Fatal(err)
 	}

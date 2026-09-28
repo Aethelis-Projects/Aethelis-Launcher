@@ -89,7 +89,7 @@ export function ModpacksView(props: ModpacksViewProps) {
         limit: 24,
         offset: 0,
         category: category(),
-        project_type: "modpack" as never,
+        project_type: "modpack",
       });
       setResults(res.items ?? []);
       setTotal(res.total_count ?? 0);
@@ -118,7 +118,10 @@ export function ModpacksView(props: ModpacksViewProps) {
         game_version: gameVersion() || undefined,
         loader: loader() || undefined,
       });
-      const mrpackOnly = vers.filter((v) => v.filename.toLowerCase().endsWith(".mrpack"));
+      // sha1 is mandatory: the URL importer verifies it before importing.
+      const mrpackOnly = vers.filter(
+        (v) => v.filename.toLowerCase().endsWith(".mrpack") && v.sha1,
+      );
       patchCard(mod.slug, { phase: "versions", versions: mrpackOnly });
     } catch (e) {
       patchCard(mod.slug, {
@@ -140,6 +143,8 @@ export function ModpacksView(props: ModpacksViewProps) {
       const instPromise = launcherAPI.importMrPackFromURL({
         url: ver.url,
         instance_name: mod.name,
+        sha1: ver.sha1 ?? "",
+        size: ver.size,
       });
       const timer = window.setInterval(async () => {
         try {
@@ -153,10 +158,7 @@ export function ModpacksView(props: ModpacksViewProps) {
       await instPromise;
       window.clearInterval(timer);
       timers.delete(mod.slug);
-      patchCard(mod.slug, {
-        phase: "done",
-        status: { status: "complete" } as never,
-      });
+      patchCard(mod.slug, { phase: "done" });
       props.onImported?.("");
     } catch (e) {
       const t = timers.get(mod.slug);

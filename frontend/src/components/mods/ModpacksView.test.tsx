@@ -13,7 +13,7 @@ const pack: ModItemDTO = {
   summary: "skyblocks but fabric",
   downloads: 2500000,
   categories: ["fabric", "adventure"],
-  project_type: "modpack" as never,
+  project_type: "modpack",
 };
 
 const mrpackVersion: MrPackVersionDTO = {
@@ -25,6 +25,7 @@ const mrpackVersion: MrPackVersionDTO = {
   url: "https://cdn.modrinth.com/data/proj1/versions/vXYZ/pack.mrpack",
   filename: "pack.mrpack",
   size: 12000000,
+  sha1: "aa",
 };
 
 const doneStatus: MrPackImportStatusDTO = {
@@ -41,7 +42,7 @@ const doneStatus: MrPackImportStatusDTO = {
 function stubCommon() {
   vi.spyOn(launcherAPI, "listMinecraftVersions").mockResolvedValue([]);
   vi.spyOn(launcherAPI, "listProjectTags").mockResolvedValue([]);
-  vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [pack], total_count: 1 } as never);
+  vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [pack], total_count: 1, reason: "" });
 }
 
 describe("ModpacksView (v0.7.2 G5)", () => {
@@ -73,6 +74,8 @@ describe("ModpacksView (v0.7.2 G5)", () => {
     expect(importSpy.mock.calls[0][0]).toEqual({
       url: mrpackVersion.url,
       instance_name: "Fabric Skyblocks",
+      sha1: "aa",
+      size: 12000000,
     });
     await screen.findByText("Импортировано");
     expect(onImported).toHaveBeenCalled();

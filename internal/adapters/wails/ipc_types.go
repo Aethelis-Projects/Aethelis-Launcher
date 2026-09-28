@@ -114,8 +114,8 @@ type SearchModsRequest struct {
 }
 
 type GameVersionDTO struct {
-	ID string      `json:"id"`
-	Type string      `json:"type"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
 	ReleaseTime string `json:"release_time"`
 }
 
@@ -125,45 +125,47 @@ type ListMinecraftVersionsRequest struct {
 
 type ListLoaderVersionsRequest struct {
 	GameVersion string `json:"game_version"`
-	Loader string `json:"loader"`
+	Loader      string `json:"loader"`
 }
 
 type LoaderResolutionDTO struct {
-	Loader string   `json:"loader"`
+	Loader  string   `json:"loader"`
 	Default string   `json:"default"`
 	Options []string `json:"options"`
-	Source string   `json:"source"`
-	Note string `json:"note,omitempty"`
+	Source  string   `json:"source"`
+	Note    string   `json:"note,omitempty"`
 }
 
 type CreateInstanceWithLoaderRequest struct {
-	Name string `json:"name"`
-	GameVersion string `json:"game_version"`
-	Loader string `json:"loader"`
+	Name          string `json:"name"`
+	GameVersion   string `json:"game_version"`
+	Loader        string `json:"loader"`
 	LoaderVersion string `json:"loader_version,omitempty"`
 }
 
 type ListMrPackVersionsRequest struct {
 	ProjectSlug string `json:"project_slug"`
 	GameVersion string `json:"game_version,omitempty"`
-	Loader string `json:"loader,omitempty"`
+	Loader      string `json:"loader,omitempty"`
 }
 
 type MrPackVersionDTO struct {
-	VersionID string    `json:"version_id"`
-	Name string    `json:"name"`
-	VersionType string    `json:"version_type"`
-	GameVersion string    `json:"game_version"`
-	Loaders []string `json:"loaders"`
-	URL string    `json:"url"`
-	Filename string    `json:"filename"`
-	Size int64     `json:"size"`
-	SHA1 string `json:"sha1,omitempty"`
+	VersionID   string   `json:"version_id"`
+	Name        string   `json:"name"`
+	VersionType string   `json:"version_type"`
+	GameVersion string   `json:"game_version"`
+	Loaders     []string `json:"loaders"`
+	URL         string   `json:"url"`
+	Filename    string   `json:"filename"`
+	Size        int64    `json:"size"`
+	SHA1        string   `json:"sha1,omitempty"`
 }
 
 type ImportMrPackURLRequest struct {
-	URL string `json:"url"`
+	URL          string `json:"url"`
 	InstanceName string `json:"instance_name"`
+	SHA1         string `json:"sha1"`
+	Size         int64  `json:"size,omitempty"`
 }
 
 type ProjectTagDTO struct {

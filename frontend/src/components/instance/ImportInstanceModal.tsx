@@ -1,4 +1,4 @@
-import { Component, createSignal, Show, onMount, For } from "solid-js";
+import { Component, createSignal, createEffect, Show, onMount, For } from "solid-js";
 import { FolderDown, FolderOpen, Loader2, CheckCircle2, AlertCircle, X, Check, HardDrive, Cpu, Package } from "lucide-solid";
 import { MrPackImportModal } from "./MrPackImportModal";
 import { launcherAPI } from "../../services/api";
@@ -68,6 +68,12 @@ export const ImportInstanceModal: Component<ImportInstanceModalProps> = (props) 
     setImportError("");
     setIsCompleted(false);
   };
+
+  // v0.7.2 G6: a fresh open always honors the requested entry tab
+  // (modpacks handoff => curseforge), instead of the previously left one.
+  createEffect(() => {
+    if (props.isOpen) setSourceType(props.initialSource || "mrpack");
+  });
 
   const handleClose = () => {
     resetState();

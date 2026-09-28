@@ -1688,11 +1688,11 @@ func main() {
 	logf("PASS: Step 15 modpack version list keeps only .mrpack files with download URL and sha1.")
 
 	// G5: URL import refuses non-https sources and records an honest failure status.
-	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://insecure.test/p.mrpack", InstanceName: "Nope"}); err == nil {
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://insecure.test/p.mrpack", InstanceName: "Nope", SHA1: "beef"}); err == nil {
 		logf("FAIL: Step 15 accepted an http:// mrpack URL")
 		os.Exit(1)
 	}
-	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://127.0.0.1:9/dead.mrpack", InstanceName: "Pack Via URL"}); err == nil {
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://127.0.0.1:9/dead.mrpack", InstanceName: "Pack Via URL", SHA1: "beef"}); err == nil {
 		logf("FAIL: Step 15 URL import swallowed a transport failure")
 		os.Exit(1)
 	}

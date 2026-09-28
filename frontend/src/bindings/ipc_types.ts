@@ -4,7 +4,7 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
-export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack";
+export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack" | "modpack";
 
 
 export interface InstanceDTO {
@@ -168,6 +168,8 @@ export interface MrPackVersionDTO {
 export interface ImportMrPackURLRequest {
   url: string;
   instance_name: string;
+  sha1: string;
+  size?: number;
 }
 
 export interface ProjectTagDTO {

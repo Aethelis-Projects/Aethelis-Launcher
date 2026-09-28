@@ -31,6 +31,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/discordrpc"
 	"github.com/nord-launcher/launcher/internal/core/domain"
+	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
@@ -1079,6 +1080,11 @@ func (a *WailsAdapter) ListMrPackVersions(req ListMrPackVersionsRequest) ([]MrPa
 			if !strings.HasSuffix(strings.ToLower(f.FileName), ".mrpack") {
 				continue
 			}
+			// Files the importer could never accept are not offered for
+			// download at all (hard cap shared with the .mrpack pipeline).
+			if f.Size > content.MaxMrPackSizeBytes {
+				continue
+			}
 			out = append(out, MrPackVersionDTO{
 				VersionID:   v.ID,
 				Name:        v.Name,
@@ -1110,6 +1116,10 @@ func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, 
 	if err != nil || u.Scheme != "https" {
 		return "", errors.New("mrpack download requires an https URL")
 	}
+	sha1sum := strings.ToLower(strings.TrimSpace(req.SHA1))
+	if sha1sum == "" {
+		return "", errors.New("mrpack download requires the sha1 advertised by Modrinth")
+	}
 	name := sanitizeInstanceName(req.InstanceName)
 	if name == "" {
 		return "", errors.New("instance name is required")
@@ -1119,35 +1129,68 @@ func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, 
 		return "", errors.New("mrpack importer not available")
 	}
 
+	// Private 0700 staging dir + os.CreateTemp: predictable names in a shared
+	// /tmp would invite symlink attacks on multi-user systems.
 	tmp, err := os.MkdirTemp("", "nord-mrpack-url-*")
 	if err != nil {
 		return "", fmt.Errorf("temp dir: %w", err)
 	}
+	defer func() { _ = os.RemoveAll(tmp) }() // errcheck:ok staging cleanup
 	path := filepath.Join(tmp, "pack.mrpack")
-	a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "downloading" })
-	body, err := (&wailsHTTPClientWrapper{client: a.getHTTPClient()}).Get(context.Background(), u.String(), nil)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
 	if err != nil {
-		_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
+		return "", fmt.Errorf("stage mrpack: %w", err)
+	}
+	_ = f.Close() // errcheck:ok existence+perms reserved; downloader writes the body
+
+	a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "downloading" })
+	// Streaming download through the core downloader (128 KB io.Copy buffers,
+	// range-resume, .part atomic rename) with sha1 enforcement and a hard
+	// redirect policy that pins the transfer to https end-to-end.
+	dl := downloader.NewDispatcher(downloader.Config{
+		MaxWorkers: 1, MaxConnsPerHost: 1,
+		HTTPTimeout: 15 * time.Minute, MaxRetries: 1,
+		BaseBackoff: 2 * time.Second, BufferSize: 128 * 1024,
+	}, mrpackDownloadClient(a.getHTTPClient()))
+	task := &downloader.DownloadTask{
+		ID: "mrpack-" + name, URL: u.String(), DestPath: path,
+		ExpectedSHA1: sha1sum, ExpectedSize: req.Size, Priority: 0,
+	}
+	if err := dl.DownloadBatch(context.Background(), []*downloader.DownloadTask{task}, nil); err != nil {
 		a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = err.Error() })
 		return "", fmt.Errorf("download mrpack: %w", err)
 	}
-	if len(body) == 0 {
-		_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
-		return "", errors.New("downloaded mrpack is empty")
-	}
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
-		return "", fmt.Errorf("stage mrpack: %w", err)
+	if req.Size > 0 {
+		if fi, statErr := os.Stat(path); statErr != nil || fi.Size() != req.Size {
+			a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = "size mismatch" })
+			return "", fmt.Errorf("downloaded mrpack size mismatch: want %d", req.Size)
+		}
 	}
 
 	instID, err := a.ImportMrPack(ImportMrPackRequest{MrPackPath: path, InstanceName: name})
-	_ = os.RemoveAll(tmp) // errcheck:ok temp cleanup is best effort
 	if err != nil {
 		a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = err.Error() })
 		return "", err
 	}
 	a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "complete" })
 	return instID, nil
+}
+
+// mrpackDownloadClient copies the adapter client's transport but replaces the
+// redirect policy: every hop must stay on https, and no hop may inflate beyond
+// the size cap.
+func mrpackDownloadClient(base *http.Client) *http.Client {
+	c := &http.Client{Timeout: base.Timeout, Transport: base.Transport}
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return errors.New("mrpack download redirected away from https")
+		}
+		if len(via) >= 5 {
+			return errors.New("mrpack download: too many redirects")
+		}
+		return nil
+	}
+	return c
 }
 
 // GetMrPackURLImportStatus mirrors the file-import progress for URL imports,

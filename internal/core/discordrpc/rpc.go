@@ -18,7 +18,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -47,24 +46,12 @@ type Activity struct {
 	StartUnix int64  `json:"start,omitempty"`
 }
 
+// pipeNamePrefix is shared by both transports: AF_UNIX files
+// $XDG_RUNTIME_DIR/discord-ipc-N (Unix) and \\.\pipe\discord-ipc-N (Windows).
+const pipeNamePrefix = "discord-ipc-"
+
 // ErrNotConnected is returned when no live Discord pipe is attached.
 var ErrNotConnected = errors.New("discord ipc not connected")
-
-func socketCandidates() []string {
-	var out []string
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			base = filepath.Join(home, ".cache")
-		}
-	}
-	if base != "" {
-		for i := 0; i < 10; i++ {
-			out = append(out, filepath.Join(base, fmt.Sprintf("discord-ipc-%d", i)))
-		}
-	}
-	return out
-}
 
 func writeFrame(w io.Writer, op int, payload []byte) error {
 	var hdr [8]byte
@@ -154,21 +141,7 @@ func NewManager(appID string, opts ...Option) *Manager {
 		o(m)
 	}
 	if m.dialer == nil {
-		m.dialer = func(ctx context.Context, candidates []string) (net.Conn, error) {
-			var lastErr error
-			for _, p := range candidates {
-				var d net.Dialer
-				conn, err := d.DialContext(ctx, "unix", p)
-				if err == nil {
-					return conn, nil
-				}
-				lastErr = err
-			}
-			if lastErr == nil {
-				lastErr = errors.New("no discord ipc candidates")
-			}
-			return nil, lastErr
-		}
+		m.dialer = platformDialer()
 	}
 	return m
 }
@@ -244,7 +217,7 @@ func (m *Manager) loop(stop <-chan struct{}, done chan struct{}) {
 		conn, err := m.dialer(ctx, socketCandidates())
 		cancel()
 		if err != nil {
-			m.recordFailure("discord pipe unavailable")
+			m.recordFailure(dialUnavailableText)
 			if !sleepOr(stop, backoff) {
 				break
 			}

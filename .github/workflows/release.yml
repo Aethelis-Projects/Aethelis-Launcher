@@ -311,6 +311,10 @@ jobs:
           echo "PASS: CHANGELOG.md contains entry for $CLEAN_VER."
         shell: bash
 
+      - name: Version Single-Source Gate (tag == VERSION == package.json == wails.json)
+        run: node scripts/check_version_consistency.js "${{ github.ref_name }}"
+        shell: bash
+
       - name: Validate Ed25519 Secret Guard
         run: |
           if [ -z "${{ secrets.ED25519_PRIVATE_KEY }}" ]; then

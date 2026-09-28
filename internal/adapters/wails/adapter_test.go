@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -363,6 +364,15 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	}
 
 	expectedMethods := []string{
+		// v0.7.2 review: methods invoked from frontend/src/services/api.ts that
+		// were historically missing from the list; the reverse reflect check
+		// keeps this set exactly equal to the webview-facing surface.
+		"GetGameLogs",
+		"SaveGameLog",
+		"ScanOfficialMinecraft",
+		"ImportOfficialMinecraft",
+		"ScanPrismInstance",
+		"ImportPrismInstance",
 		"CheckForUpdates",
 		"ApplyUpdate",
 		"RestartApplication",
@@ -435,9 +445,9 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (66 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 66 {
-		t.Fatalf("expected exactly 66 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (72 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 72 {
+		t.Fatalf("expected exactly 72 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -450,6 +460,62 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		if method == nil {
 			t.Errorf("Method %s was not registered in Wails v3 bindings (expected FQN: %s)", methodName, fqn)
 		}
+	}
+
+	// Reverse check (v0.7.2 review): Wails reflects EVERY exported method on
+	// the receiver into the webview bridge, so the registry must equal the
+	// full exported method set - an unlisted method is an unlisted IPC surface
+	// (safety), and a listed-but-missing method is a broken binding.
+	expected := make(map[string]bool, len(expectedMethods))
+	for _, m := range expectedMethods {
+		expected[m] = true
+	}
+	rt := reflect.TypeOf(adapter)
+	// Host-only plumbing is excluded from the declared registry: Set* wiring
+	// methods and RecordCrash (written by the Go core's crash hook). Their
+	// parameters (*sql.DB, *http.Client, funcs, service pointers) are not
+	// JS-marshallable, so the webview cannot actually invoke them; everything
+	// else exported MUST be declared. Hardening these out of the binding is a
+	// separate refactor (tracked post-v0.7.2).
+	hostOnly := map[string]bool{
+		"RecordCrash": true,
+		// main.go / test wiring: parameters are *http.Client, *sql.DB, funcs,
+		// service pointers - not JS-marshallable, so unreachable from the webview.
+		"SetAllowedHosts": true, "SetAuth": true, "SetContent": true,
+		"SetCurseForgePackImporter": true, "SetDB": true, "SetFilePicker": true,
+		"SetFileSystem": true, "SetGameManifestURL": true, "SetHTTPClient": true,
+		"SetImporter": true, "SetInstalledModsRepo": true, "SetIntegrityVerifier": true,
+		"SetJavaDetector": true, "SetJavaManager": true, "SetLoaderResolver": true,
+		"SetMrPackExporter": true, "SetMrPackImporter": true, "SetOnLogBatch": true,
+		"SetRelauncher": true, "SetSettings": true, "SetUpdater": true, "SetVersion": true,
+	}
+	exported := make(map[string]bool)
+	for i := 0; i < rt.NumMethod(); i++ {
+		m := rt.Method(i)
+		if !m.IsExported() || strings.HasSuffix(m.Name, "Wrapper") {
+			continue
+		}
+		if hostOnly[m.Name] {
+			continue
+		}
+		exported[m.Name] = true
+	}
+	for m := range exported {
+		if !expected[m] {
+			t.Errorf("exported adapter method %q is not declared in expectedMethods (hidden IPC surface)", m)
+		}
+	}
+	for m := range expected {
+		if _, ok := rt.MethodByName(m); !ok {
+			t.Errorf("expectedMethods declares %q but *WailsAdapter has no such exported method", m)
+			continue
+		}
+		if !exported[m] {
+			t.Errorf("registry declares %q but it is excluded as host-only plumbing", m)
+		}
+	}
+	if len(expected) != len(exported) {
+		t.Errorf("registry size %d != webview-facing exported method set size %d", len(expected), len(exported))
 	}
 }
 
@@ -3476,11 +3542,14 @@ func TestWailsAdapter_WizardAndModpacksV072(t *testing.T) {
 	}
 
 	// --- ImportMrPackFromURL validation ------------------------------------
-	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://evil.test/p.mrpack", InstanceName: "x"}); err == nil {
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "http://evil.test/p.mrpack", InstanceName: "x", SHA1: "aa"}); err == nil {
 		t.Fatal("expected https-only rejection")
 	}
-	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://ok.test/p.mrpack", InstanceName: " ../../etc "}); err == nil {
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://ok.test/p.mrpack", InstanceName: " ../../etc ", SHA1: "aa"}); err == nil {
 		t.Fatal("expected name validation error after path-traversal sanitize")
+	}
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{URL: "https://ok.test/p.mrpack", InstanceName: "ok"}); err == nil {
+		t.Fatal("expected sha1-mandatory rejection")
 	}
 
 	// --- GetMrPackURLImportStatus ------------------------------------------

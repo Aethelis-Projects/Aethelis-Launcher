@@ -35,7 +35,7 @@ import (
 )
 
 var (
-	version           = "0.6.1"
+	version           = "0.0.0-dev" // replaced via -ldflags "-X main.version=$(cat VERSION)"; never a stale release number
 	MicrosoftClientID = auth.DefaultClientID
 	UpdateChannel     = "stable"
 )
