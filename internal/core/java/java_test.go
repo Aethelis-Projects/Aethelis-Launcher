@@ -290,3 +290,31 @@ func TestIsNewerVersion(t *testing.T) {
 	}
 }
 
+func TestIsCompatibleJavaMajor(t *testing.T) {
+	tests := []struct {
+		reqMajor    int
+		actualMajor int
+		want        bool
+	}{
+		{21, 21, true},
+		{17, 17, true},
+		{16, 16, true},
+		{8, 8, true},
+		{8, 11, true}, // Java 11 compatible for reqMajor 8
+		{8, 17, false},
+		{8, 21, false},
+		{17, 21, false},
+		{21, 17, false},
+		{0, 21, true},
+		{-1, 17, true},
+	}
+
+	for _, tt := range tests {
+		got := java.IsCompatibleJavaMajor(tt.reqMajor, tt.actualMajor)
+		if got != tt.want {
+			t.Errorf("IsCompatibleJavaMajor(%d, %d) = %v, want %v", tt.reqMajor, tt.actualMajor, got, tt.want)
+		}
+	}
+}
+
+

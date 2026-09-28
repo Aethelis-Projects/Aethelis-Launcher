@@ -34,6 +34,7 @@ type InstanceService struct {
 	activeAccount    *domain.Account
 	sessionRefresher SessionRefresher
 	onCrash          func(instanceID string, report *CrashReport)
+	onExit           func(instanceID string, exitCode int)
 	instances        map[string]*domain.Instance
 	supervisors      map[string]*LogSupervisor
 	mu               sync.RWMutex
@@ -103,6 +104,15 @@ func (s *InstanceService) SetOnCrash(cb func(instanceID string, report *CrashRep
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onCrash = cb
+}
+
+// SetOnExit registers a callback invoked after every monitored game process
+// exits (clean or crashed) once state persistence is done. Used by the
+// Discord RPC layer to clear presence when the game window closes.
+func (s *InstanceService) SetOnExit(cb func(instanceID string, exitCode int)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onExit = cb
 }
 
 func (s *InstanceService) CreateInstance(name, version string, loader domain.LoaderType) (*domain.Instance, error) {
@@ -332,7 +342,7 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 			}
 			return 0, fmt.Errorf("could not determine Java version for %s: %w", javaExec, parseErr)
 		}
-		if !inst.SkipJavaCheck && reqMajor > 0 && major != reqMajor {
+		if !inst.SkipJavaCheck && reqMajor > 0 && !java.IsCompatibleJavaMajor(reqMajor, major) {
 			return 0, fmt.Errorf("Java %d required for Minecraft %s (found Java %d at %s); install Temurin %d via Java Manager or set Java path in instance settings", reqMajor, inst.GameVersion, major, javaExec, reqMajor)
 		}
 	} else if s.java != nil {
@@ -345,6 +355,14 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 			if install.MajorVersion == reqMajor {
 				javaExec = install.Path
 				break
+			}
+		}
+		if javaExec == "" && reqMajor == 8 {
+			for _, install := range installs {
+				if install.MajorVersion == 11 {
+					javaExec = install.Path
+					break
+				}
 			}
 		}
 		if javaExec == "" {
@@ -415,7 +433,12 @@ func (s *InstanceService) Launch(ctx context.Context, id string) (int, error) {
 	s.mu.Unlock()
 
 	// 7. Supervise in background (C2)
-	go MonitorProcess(handle, inst, supervisor, s.onCrash, s.repo, &s.mu)
+	s.mu.RLock()
+	onCrash := s.onCrash
+	onExit := s.onExit
+	s.mu.RUnlock()
+
+	go MonitorProcess(handle, inst, supervisor, onCrash, s.repo, &s.mu, onExit)
 
 	return handle.PID(), nil
 }
@@ -429,6 +452,7 @@ func MonitorProcess(
 	onCrash func(string, *CrashReport),
 	repo ports.InstanceRepository,
 	mu *sync.RWMutex,
+	onExit func(instanceID string, exitCode int),
 ) {
 	exitCode, _ := handle.Wait() // errcheck:ok wait error handled via exit code diagnostics
 
@@ -464,6 +488,10 @@ func MonitorProcess(
 		if onCrash != nil {
 			onCrash(inst.ID, report)
 		}
+	}
+
+	if onExit != nil {
+		onExit(inst.ID, exitCode)
 	}
 }
 

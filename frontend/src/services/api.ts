@@ -38,14 +38,28 @@ import type {
   DeleteScreenshotRequest,
   GetScreenshotDataRequest,
   GetScreenshotDataResponse,
+  PerformancePresetDTO,
+  ListOptimizationModsRequest,
+  IntegrityResultDTO,
+  InstanceIDRequest,
   SaveGameLogRequest,
   SaveGameLogResponse,
   MinecraftImportSummaryDTO,
   ScanOfficialMinecraftRequest,
   ImportOfficialMinecraftRequest,
+  CFPackScanRequest,
+  CFPackPlanDTO,
+  CFPackImportResultDTO,
+  DiscordRpcStatusDTO,
+  DiscordRpcPreviewDTO,
   PrismImportSummaryDTO,
   ScanPrismInstanceRequest,
   ImportPrismInstanceRequest,
+  WorldDTO,
+  DatapackDTO,
+  InstallDatapackRequest,
+  ToggleDatapackRequest,
+  DeleteDatapackRequest,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -96,10 +110,29 @@ interface WailsAdapterBindings {
   CheckJavaRuntimeUpdates?: () => Promise<JavaRuntimeUpdateDTO[]>;
   UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
   OpenPath?: (path: string) => Promise<void>;
+  EnsureInstanceDir?: (instanceId: string, dirType: string) => Promise<string>;
+  GetPerformancePreset?: () => Promise<PerformancePresetDTO>;
+  ListOptimizationMods?: (req: ListOptimizationModsRequest) => Promise<SearchModsResultDTO>;
+  CheckInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
+  RepairInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
+
+  SetDiscordRpcEnabled?: (enabled: boolean) => Promise<void>;
+  GetDiscordRpcStatus?: () => Promise<DiscordRpcStatusDTO>;
+  GetDiscordRpcPreview?: (req: { instance_id: string }) => Promise<DiscordRpcPreviewDTO>;
+  SetDiscordAppID?: (req: { key: string; value: string }) => Promise<void>;
+
+  ScanCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackPlanDTO>;
+  ImportCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackImportResultDTO>;
+
   ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
   ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
   ScanPrismInstance?: (req: ScanPrismInstanceRequest) => Promise<PrismImportSummaryDTO>;
   ImportPrismInstance?: (req: ImportPrismInstanceRequest) => Promise<InstanceDTO>;
+  ListInstanceWorlds?: (instanceId: string) => Promise<WorldDTO[]>;
+  ListWorldDatapacks?: (instanceId: string, worldName: string) => Promise<DatapackDTO[]>;
+  SetDatapackEnabled?: (req: ToggleDatapackRequest) => Promise<void>;
+  DeleteDatapack?: (req: DeleteDatapackRequest) => Promise<void>;
+  InstallDatapack?: (req: InstallDatapackRequest) => Promise<void>;
   [key: string]: unknown;
 }
 
@@ -247,6 +280,29 @@ let mockScreenshots: Record<string, ScreenshotDTO[]> = {
       path: "instances/nord-opti-1/screenshots/2026-09-20_15.30.00.png",
       size: 1048576,
       created_at: new Date().toISOString(),
+    },
+  ],
+};
+
+let mockWorlds: Record<string, WorldDTO[]> = {
+  "nord-opti-1": [
+    {
+      name: "SurvivalWorld",
+      display_name: "SurvivalWorld",
+      last_played: Date.now(),
+      datapack_count: 1,
+    },
+  ],
+};
+
+let mockWorldDatapacks: Record<string, DatapackDTO[]> = {
+  "nord-opti-1:SurvivalWorld": [
+    {
+      file_name: "armor-statues.zip",
+      name: "armor-statues",
+      enabled: true,
+      size_bytes: 524288,
+      world_name: "SurvivalWorld",
     },
   ],
 };
@@ -736,7 +792,7 @@ export const launcherAPI = {
         if (!mockInstalledMods[instanceId]) {
           mockInstalledMods[instanceId] = [];
         }
-        const ext = (projectType === "resourcepack" || projectType === "shader") ? "zip" : "jar";
+        const ext = (projectType === "resourcepack" || projectType === "shader" || projectType === "datapack") ? "zip" : "jar";
         const fileName = `${modSlug}-1.0.0.${ext}`;
         mockInstalledMods[instanceId].push({
           file_name: fileName,
@@ -1044,6 +1100,52 @@ export const launcherAPI = {
     );
   },
 
+  async ensureInstanceDir(instanceId: string, dirType: string): Promise<string> {
+    return invokeWails<string>(
+      "EnsureInstanceDir",
+      () => `${instanceId}/${dirType}`,
+      instanceId,
+      dirType
+    );
+  },
+
+  async getPerformancePreset(): Promise<PerformancePresetDTO> {
+    return invokeWails<PerformancePresetDTO>("GetPerformancePreset", () => ({
+      suggested_ram_mb: 2048,
+      aikar_args: [],
+    }));
+  },
+
+  async listOptimizationMods(req: ListOptimizationModsRequest): Promise<SearchModsResultDTO> {
+    return invokeWails<SearchModsResultDTO>("ListOptimizationMods", () => ({
+      items: [],
+      total_count: 0,
+    }), req);
+  },
+  async checkInstanceFiles(instanceId: string): Promise<IntegrityResultDTO> {
+    return invokeWails<IntegrityResultDTO>("CheckInstanceFiles", () => ({
+      version: "",
+      checked_count: 0,
+      problems_count: 0,
+      repaired_count: 0,
+      problems_capped: false,
+      virtual_assets_skipped: false,
+      items: [],
+    }), { instance_id: instanceId });
+  },
+
+  async repairInstanceFiles(instanceId: string): Promise<IntegrityResultDTO> {
+    return invokeWails<IntegrityResultDTO>("RepairInstanceFiles", () => ({
+      version: "",
+      checked_count: 0,
+      problems_count: 0,
+      repaired_count: 0,
+      problems_capped: false,
+      virtual_assets_skipped: false,
+      items: [],
+    }), { instance_id: instanceId });
+  },
+
   async listScreenshots(instanceId: string): Promise<ScreenshotDTO[]> {
     return invokeWails<ScreenshotDTO[]>(
       "ListScreenshots",
@@ -1071,6 +1173,65 @@ export const launcherAPI = {
       "GetScreenshotData",
       () => ({
         data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+      }),
+      req
+    );
+  },
+
+  async setDiscordRpcEnabled(enabled: boolean): Promise<void> {
+    await invokeWails<void>("SetDiscordRpcEnabled", () => undefined, enabled);
+  },
+
+  async getDiscordRpcStatus(): Promise<DiscordRpcStatusDTO> {
+    return invokeWails<DiscordRpcStatusDTO>("GetDiscordRpcStatus", () => ({
+      enabled: false,
+      connected: false,
+      app_id_set: false,
+      has_activity: false,
+    }));
+  },
+
+  async getDiscordRpcPreview(instanceId: string): Promise<DiscordRpcPreviewDTO> {
+    return invokeWails<DiscordRpcPreviewDTO>(
+      "GetDiscordRpcPreview",
+      () => ({ details: "Minecraft 1.21.1", state: "Preview Instance" }),
+      { instance_id: instanceId }
+    );
+  },
+
+  async setDiscordAppID(value: string): Promise<void> {
+    await invokeWails<void>("SetDiscordAppID", () => undefined, { key: "discord_app_id", value });
+  },
+
+  async scanCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackPlanDTO> {
+    return invokeWails<CFPackPlanDTO>(
+      "ScanCurseForgePackZip",
+      () => ({
+        format: "manifest",
+        instance_name: "CurseForge Pack",
+        game_version: "1.20.1",
+        loader: "forge",
+        files: [],
+        unresolved: [],
+        override_names: [],
+        blocked_names: [],
+        required_total: 0,
+        required_failed: 0,
+      }),
+      req
+    );
+  },
+
+  async importCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackImportResultDTO> {
+    return invokeWails<CFPackImportResultDTO>(
+      "ImportCurseForgePackZip",
+      () => ({
+        instance_id: `cfpack-${Date.now()}`,
+        downloaded: 0,
+        override_files: 0,
+        skipped_credentials: [],
+        failed_files: [],
+        unresolved: [],
       }),
       req
     );
@@ -1179,5 +1340,91 @@ export const launcherAPI = {
 
   setMockJavaRuntimeUpdates(updates: JavaRuntimeUpdateDTO[]): void {
     mockJavaRuntimeUpdates = [...updates];
+  },
+
+  async listInstanceWorlds(instanceId: string): Promise<WorldDTO[]> {
+    return invokeWails<WorldDTO[]>(
+      "ListInstanceWorlds",
+      () => [...(mockWorlds[instanceId] || [])],
+      instanceId
+    );
+  },
+
+  async listWorldDatapacks(instanceId: string, worldName: string): Promise<DatapackDTO[]> {
+    const key = `${instanceId}:${worldName}`;
+    return invokeWails<DatapackDTO[]>(
+      "ListWorldDatapacks",
+      () => [...(mockWorldDatapacks[key] || [])],
+      instanceId,
+      worldName
+    );
+  },
+
+  async setDatapackEnabled(req: ToggleDatapackRequest): Promise<void> {
+    return invokeWails<void>(
+      "SetDatapackEnabled",
+      () => {
+        const key = `${req.instance_id}:${req.world_name}`;
+        if (mockWorldDatapacks[key]) {
+          const item = mockWorldDatapacks[key].find((dp) => dp.file_name === req.file_name);
+          if (item) {
+            item.enabled = req.enabled;
+          }
+        }
+      },
+      req
+    );
+  },
+
+  async deleteDatapack(req: DeleteDatapackRequest): Promise<void> {
+    return invokeWails<void>(
+      "DeleteDatapack",
+      () => {
+        const key = `${req.instance_id}:${req.world_name}`;
+        if (mockWorldDatapacks[key]) {
+          mockWorldDatapacks[key] = mockWorldDatapacks[key].filter(
+            (dp) => dp.file_name !== req.file_name
+          );
+        }
+      },
+      req
+    );
+  },
+
+  async installDatapack(req: InstallDatapackRequest): Promise<void> {
+    return invokeWails<void>(
+      "InstallDatapack",
+      () => {
+        const fileName = req.file_name || `${req.mod_id}.zip`;
+        const packName = fileName.replace(/\.zip$/i, "");
+        if (req.world_names && req.world_names.length > 0) {
+          for (const w of req.world_names) {
+            const key = `${req.instance_id}:${w}`;
+            if (!mockWorldDatapacks[key]) {
+              mockWorldDatapacks[key] = [];
+            }
+            if (!mockWorldDatapacks[key].some((dp) => dp.file_name === fileName)) {
+              mockWorldDatapacks[key].push({
+                file_name: fileName,
+                name: packName,
+                enabled: true,
+                size_bytes: 1024 * 1024,
+                world_name: w,
+              });
+            }
+          }
+        }
+      },
+      req
+    );
+  },
+
+  setMockWorlds(instanceId: string, list: WorldDTO[]): void {
+    mockWorlds[instanceId] = [...list];
+  },
+
+  setMockWorldDatapacks(instanceId: string, worldName: string, list: DatapackDTO[]): void {
+    const key = `${instanceId}:${worldName}`;
+    mockWorldDatapacks[key] = [...list];
   },
 };

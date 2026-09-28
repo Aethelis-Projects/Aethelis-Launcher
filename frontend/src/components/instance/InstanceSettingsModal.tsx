@@ -1,9 +1,11 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices } from "lucide-solid";
+import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database, Gauge, ChevronDown, ShieldCheck } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
+import type { IntegrityResultDTO, ModItemDTO, PerformancePresetDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
 import { ModCatalog } from "../mods/ModCatalog";
+import { DatapackManager } from "./DatapackManager";
 import { PRESET_AVATARS, getRandomAvatar } from "../../assets/avatars";
 
 export function getRecommendedJavaMajor(version: string, manifestMajor?: number): number {
@@ -44,7 +46,7 @@ export function getRecommendedJavaMajor(version: string, manifestMajor?: number)
   return 21;
 }
 
-export type SettingsTab = "general" | "java" | "memory" | "args" | "mods";
+export type SettingsTab = "general" | "java" | "memory" | "args" | "mods" | "datapacks" | "optimization" | "integrity";
 
 interface InstanceSettingsModalProps {
   instance: InstanceDTO;
@@ -71,6 +73,13 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const [availableRuntimes, setAvailableRuntimes] = createSignal<JavaInstallationDTO[]>([]);
   const [installingJava, setInstallingJava] = createSignal(false);
   const [installedJavaToast, setInstalledJavaToast] = createSignal("");
+  const [perfPreset, setPerfPreset] = createSignal<PerformancePresetDTO | null>(null);
+  const [optimizationMods, setOptimizationMods] = createSignal<ModItemDTO[]>([]);
+  const [optimizationLoaded, setOptimizationLoaded] = createSignal(false);
+  const [installedOptimizationIds, setInstalledOptimizationIds] = createSignal<Set<string>>(new Set());
+  const [installingOptimizationId, setInstallingOptimizationId] = createSignal("");
+  const [integrityResult, setIntegrityResult] = createSignal<IntegrityResultDTO | null>(null);
+  const [integrityBusy, setIntegrityBusy] = createSignal<"check" | "repair" | "">("");
 
   const recommendedJava = () => getRecommendedJavaMajor(props.instance.game_version);
 
@@ -112,6 +121,9 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
       setMaxMemoryMb(props.instance.max_ram_mb || 4096);
       setCustomJvmArgs(props.instance.jvm_args ? props.instance.jvm_args.join(" ") : "");
       setError("");
+      setOptimizationMods([]);
+      setOptimizationLoaded(false);
+      launcherAPI.getPerformancePreset().then(setPerfPreset).catch(() => setPerfPreset(null));
 
       // Fetch runtimes for easy selection in Java tab
       loadRuntimes();
@@ -169,6 +181,93 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
     }
   };
 
+  const AIKAR_PREFIXES = [
+    "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:MaxGCPauseMillis", "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+DisableExplicitGC", "-XX:+AlwaysPreTouch", "-XX:G1NewSizePercent", "-XX:G1MaxNewSizePercent",
+    "-XX:G1HeapRegionSize", "-XX:G1ReservePercent", "-XX:G1HeapWastePercent", "-XX:G1MixedGCCountTarget",
+    "-XX:InitiatingHeapOccupancyPercent", "-XX:G1MixedGCLiveThresholdPercent", "-XX:G1RSetUpdatingPauseTimePercent",
+    "-XX:SurvivorRatio", "-XX:+PerfDisableSharedMem", "-XX:MaxTenuringThreshold",
+  ];
+
+  const currentJvmArgList = (): string[] => (customJvmArgs().trim() ? customJvmArgs().trim().split(/\s+/) : []);
+
+  const isAikarPresetActive = (): boolean => {
+    const preset = perfPreset();
+    if (!preset || preset.aikar_args.length === 0) return false;
+    const current = new Set(currentJvmArgList());
+    return preset.aikar_args.every((flag) => current.has(flag));
+  };
+
+  const handleApplyAikarPreset = () => {
+    const preset = perfPreset();
+    if (!preset) return;
+    const rest = currentJvmArgList().filter((a) => !AIKAR_PREFIXES.some((p) => a.startsWith(p)));
+    const merged = [...preset.aikar_args, ...rest];
+    setCustomJvmArgs(merged.join(" "));
+    const suggested = preset.suggested_ram_mb;
+    if (minMemoryMb() === 0 || maxMemoryMb() === 0) {
+      applyMemoryPreset(suggested, suggested);
+    }
+    setError("");
+  };
+
+  const handleResetAikarPreset = () => {
+    const rest = currentJvmArgList().filter((a) => !AIKAR_PREFIXES.some((p) => a.startsWith(p)));
+    setCustomJvmArgs(rest.join(" "));
+  };
+
+  const handleRunIntegrity = async (mode: "check" | "repair") => {
+    setIntegrityBusy(mode);
+    setError("");
+    try {
+      const res = mode === "repair"
+        ? await launcherAPI.repairInstanceFiles(props.instance.id)
+        : await launcherAPI.checkInstanceFiles(props.instance.id);
+      setIntegrityResult(res);
+      if (mode === "repair" && res.problems_count === 0 && res.repaired_count > 0) {
+        setError("");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Не удалось проверить файлы");
+    } finally {
+      setIntegrityBusy("");
+    }
+  };
+
+  const loadOptimizationMods = async () => {
+    if (optimizationLoaded() || !props.instance?.game_version) return;
+    setOptimizationLoaded(true);
+    try {
+      const res = await launcherAPI.listOptimizationMods({
+        game_version: props.instance.game_version,
+        loader: props.instance.loader,
+      });
+      setOptimizationMods(res.items || []);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Не удалось загрузить список оптимизации");
+    }
+  };
+
+  const handleInstallOptimizationMod = async (mod: ModItemDTO) => {
+    setInstallingOptimizationId(mod.id);
+    try {
+      await launcherAPI.installMod(props.instance.id, {
+        id: mod.id,
+        slug: mod.slug,
+        name: mod.name,
+        source: mod.source,
+      });
+      setInstalledOptimizationIds((prev) => new Set([...prev, mod.id]));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Не удалось установить мод");
+    } finally {
+      setInstallingOptimizationId("");
+    }
+  };
+
   const applyMemoryPreset = (min: number, max: number) => {
     setMinMemoryMb(min);
     setMaxMemoryMb(max);
@@ -180,7 +279,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
         data-testid="instance-settings-modal"
       >
-        <div class={`w-full ${activeTab() === "mods" ? "max-w-4xl" : "max-w-2xl"} bg-nord-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-all`}>
+        <div class={`w-full ${activeTab() === "mods" || activeTab() === "datapacks" ? "max-w-4xl" : "max-w-2xl"} bg-nord-surface border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] transition-all`}>
           {/* Header */}
           <div class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-nord-dark/40">
             <div class="flex items-center gap-3">
@@ -273,6 +372,46 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             >
               <Package class="w-4 h-4" />
               <span>Моды</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("datapacks")}
+              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                activeTab() === "datapacks"
+                  ? "border-nord-cyan text-nord-cyan font-semibold"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+              data-testid="tab-datapacks"
+            >
+              <Database class="w-4 h-4" />
+              <span>Датапаки</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab("optimization")}
+              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                activeTab() === "optimization"
+                  ? "border-nord-cyan text-nord-cyan font-semibold"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+              data-testid="tab-optimization"
+            >
+              <Gauge class="w-4 h-4" />
+              <span>Оптимизация</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("integrity")}
+              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+                activeTab() === "integrity"
+                  ? "border-nord-cyan text-nord-cyan font-semibold"
+                  : "border-transparent text-zinc-400 hover:text-zinc-200"
+              }`}
+              data-testid="tab-integrity"
+            >
+              <ShieldCheck class="w-4 h-4" />
+              <span>Файлы</span>
             </button>
           </div>
 
@@ -771,11 +910,164 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                 </Show>
               </div>
             </Show>
+
+            {/* TAB 6: Datapacks */}
+            <Show when={activeTab() === "datapacks"}>
+              <DatapackManager instanceId={props.instance.id} />
+            </Show>
+            {/* TAB 7: Optimization (Feature B) */}
+            <Show when={activeTab() === "optimization"}>
+              <div class="space-y-4">
+                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-zinc-200 font-semibold text-sm">Пресеты производительности</span>
+                    <Show when={isAikarPresetActive()}>
+                      <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium" data-testid="aikar-active-badge">
+                        Применён
+                      </span>
+                    </Show>
+                  </div>
+                  <Show when={perfPreset()}>
+                    <p class="text-xs text-zinc-400 leading-relaxed">
+                      Рекомендация по памяти для этого ПК: <span class="font-mono text-nord-cyan">{perfPreset()!.suggested_ram_mb} МБ</span>. Флаги Aikar G1GC — канонический набор настройки сборщика мусора (источник: aikar.co/mcflags); применять только с G1, не совмещать с -XX:+UseZGC.
+                    </p>
+                  </Show>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleApplyAikarPreset}
+                      disabled={!perfPreset() || perfPreset()!.aikar_args.length === 0}
+                      class="py-2 px-4 rounded-lg bg-[#00D4B2] text-zinc-950 text-xs font-semibold hover:bg-[#00e6c3] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      data-testid="aikar-apply-btn"
+                    >
+                      Применить Aikar G1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetAikarPreset}
+                      class="py-2 px-4 rounded-lg bg-zinc-800 border border-white/10 text-zinc-300 text-xs font-medium hover:bg-zinc-700 transition-colors cursor-pointer"
+                      data-testid="aikar-reset-btn"
+                    >
+                      Сбросить флаги
+                    </button>
+                  </div>
+                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                    Флаги добавляются в пользовательские аргументы JVM — итог виден на вкладке «Аргументы JVM» и сохраняется кнопкой «Сохранить».
+                  </p>
+                </div>
+
+                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
+                  <button
+                    type="button"
+                    onClick={loadOptimizationMods}
+                    class="w-full flex items-center justify-between cursor-pointer group"
+                    data-testid="optimization-catalog-toggle"
+                  >
+                    <span class="text-zinc-200 font-semibold text-sm">Каталог оптимизации (проверенный набор)</span>
+                    <ChevronDown class="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
+                  </button>
+                  <Show when={optimizationLoaded() && optimizationMods().length === 0}>
+                    <p class="text-xs text-zinc-500 leading-relaxed">
+                      Для {props.instance.loader} {props.instance.game_version} проверенного набора нет — установите нужное вручную через вкладку «Моды» → «Каталог».
+                    </p>
+                  </Show>
+                  <Show when={optimizationMods().length > 0}>
+                    <div class="space-y-2">
+                      <For each={optimizationMods()}>
+                        {(mod) => (
+                          <div class="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-zinc-950/60 border border-white/5">
+                            <div class="min-w-0">
+                              <p class="text-xs font-semibold text-zinc-100 truncate">{mod.name}</p>
+                              <p class="text-[10px] text-zinc-500 truncate">{mod.summary || mod.slug}</p>
+                            </div>
+                            <Show
+                              when={!installedOptimizationIds().has(mod.id)}
+                              fallback={
+                                <span class="shrink-0 text-[11px] px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium">
+                                  Установлено
+                                </span>
+                              }
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleInstallOptimizationMod(mod)}
+                                disabled={installingOptimizationId() === mod.id}
+                                class="shrink-0 py-1.5 px-3 rounded-md bg-zinc-800 border border-white/10 text-zinc-200 text-[11px] font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors cursor-pointer"
+                                data-testid={`optimization-install-${mod.slug}`}
+                              >
+                                {installingOptimizationId() === mod.id ? "Установка..." : "Установить"}
+                              </button>
+                            </Show>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                  </Show>
+                </div>
+              </div>
+            </Show>
+            {/* TAB 8: Integrity (D'2) */}
+            <Show when={activeTab() === "integrity"}>
+              <div class="space-y-4">
+                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
+                  <span class="block text-zinc-200 font-semibold text-sm">Целостность файлов игры</span>
+                  <p class="text-xs text-zinc-400 leading-relaxed">
+                    Сверяет кэш Mojang (version JSON, client.jar, библиотеки, нативы, индексы и объекты ассетов) с официальными SHA-1 и докачивает только повреждённое. Библиотеки лоадера и моды проверяются своим механизмом (self-heal) и сюда не входят.
+                  </p>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRunIntegrity("check")}
+                      disabled={integrityBusy() !== ""}
+                      class="py-2 px-4 rounded-lg bg-zinc-800 border border-white/10 text-zinc-100 text-xs font-semibold hover:bg-zinc-700 disabled:opacity-50 transition-colors cursor-pointer"
+                      data-testid="integrity-check-btn"
+                    >
+                      {integrityBusy() === "check" ? "Проверка..." : "Проверить файлы"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRunIntegrity("repair")}
+                      disabled={integrityBusy() !== ""}
+                      class="py-2 px-4 rounded-lg bg-[#00D4B2] text-zinc-950 text-xs font-semibold hover:bg-[#00e6c3] disabled:opacity-50 transition-colors cursor-pointer"
+                      data-testid="integrity-repair-btn"
+                    >
+                      {integrityBusy() === "repair" ? "Починка..." : "Проверить и починить"}
+                    </button>
+                  </div>
+                  <Show when={integrityResult()}>
+                    <div class="p-3 rounded-lg bg-zinc-950/60 border border-white/5 text-xs font-mono space-y-1.5" data-testid="integrity-result">
+                      <p class="text-zinc-300">
+                        Проверено файлов: <span class="text-nord-cyan">{integrityResult()!.checked_count}</span>
+                        <Show when={integrityResult()!.repaired_count > 0}>
+                          {" "}| Починено: <span class="text-emerald-400">{integrityResult()!.repaired_count}</span>
+                        </Show>
+                        {" "}| Проблем: <span class={integrityResult()!.problems_count > 0 ? "text-nord-rose" : "text-emerald-400"}>{integrityResult()!.problems_count}</span>
+                      </p>
+                      <Show when={integrityResult()!.virtual_assets_skipped}>
+                        <p class="text-zinc-500">Виртуальные ассеты (старые версии) пропущены — чинятся пересозданием через Provision.</p>
+                      </Show>
+                      <Show when={integrityResult()!.problems_count > 0}>
+                        <ul class="space-y-0.5 pt-1">
+                          <For each={integrityResult()!.items}>
+                            {(item) => (
+                              <li class="text-nord-rose truncate">{item.path} - {item.reason}</li>
+                            )}
+                          </For>
+                        </ul>
+                        <Show when={integrityResult()!.problems_capped}>
+                          <p class="text-zinc-500">Список усечён до 25 позиций; посчитаны все.</p>
+                        </Show>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+              </div>
+            </Show>
           </div>
 
           {/* Footer Actions */}
           <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-white/5 bg-nord-dark/40">
-            <Show when={activeTab() !== "mods"}>
+            <Show when={activeTab() !== "mods" && activeTab() !== "datapacks"}>
               <button
                 type="button"
                 onClick={props.onClose}
@@ -796,7 +1088,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                 <span>{saving() ? "Сохранение..." : "Сохранить настройки"}</span>
               </button>
             </Show>
-            <Show when={activeTab() === "mods"}>
+            <Show when={activeTab() === "mods" || activeTab() === "datapacks"}>
               <button
                 type="button"
                 onClick={props.onClose}

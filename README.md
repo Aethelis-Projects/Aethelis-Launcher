@@ -119,6 +119,18 @@ Strict Hexagonal Architecture (Ports & Adapters):
 - **Linux**: Ubuntu 22.04 LTS or newer (x64) with GTK4 and WebKitGTK 6.0.
 - **macOS**: planned for a future milestone.
 
+## Java Runtime Matrix
+
+Nord Launcher resolves the required Java version automatically and provisions Temurin JDK runtimes on demand:
+
+| Minecraft Version | Required Java | Compatible / Recommended Runtimes | Notes |
+|:---|:---|:---|:---|
+| 26.1+ | Java 25 | Java 25 LTS | Modern Mojang annual release scheme |
+| 1.20.5 – 26.0 | Java 21 | Java 21 LTS | Modern default runtime |
+| 1.18 – 1.20.4 | Java 17 | Java 17 LTS | Caves & Cliffs Part II through 1.20.4 |
+| 1.17 – 1.17.1 | Java 16 | Java 16 | Non-LTS release specifically required for 1.17 |
+| ≤ 1.16.5 | Java 8 | Java 8 LTS, Java 11 LTS | Java 11 is supported for modern 1.12.2/1.16.5 modpacks |
+
 ## Building from Source
 
 Prerequisites: Go 1.26+, Node.js 22+, pnpm 12+ (plus the Linux GTK4/WebKitGTK packages above when building on Linux).
@@ -150,7 +162,11 @@ Every push and pull request must pass the CI Quality Gate:
 - **Bundle budget** — frontend ≤ 250 KB gzip.
 - **Binary budget** — release binary ≤ 40 MB.
 - **Latency SLA** — in-process IPC dispatch p95 ≤ 5,000 ns.
-- **Wails binding registry** — forward registration parity enforced for all 45 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
+- **Wails binding registry** — forward registration parity enforced for all 61 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
+- **Discord Rich Presence (opt-in)** — `SetDiscordRpcEnabled`/`GetDiscordRpcStatus`/`GetDiscordRpcPreview` drive a local-only IPC client (AF_UNIX / named pipe, never a network socket) with zero account identifiers in the payload, an explicit Application ID field, a live "what others will see" preview, silent degradation when Discord is closed, and auto-resync when Discord restarts.
+- **CurseForge modpack import (`.zip`)** — `ScanCurseForgePackZip`/`ImportCurseForgePackZip` read `manifest.json` (fallback: official-launcher `modlist.html`, which is honestly reported as manual-install-only), resolve each `projectID/fileID` through the CurseForge API (exact-file lookup, never a substitute build; stale files surface as errors), download with SHA-1 verification, and extract `overrides/` through the shared credential blocklist with zip-slip containment. Unresolvable files abort required downloads loudly and are listed for manual install — never silently skipped.
+- **File integrity** — `Check/Repair Instance Files` verifies the Mojang cache (version JSON, client jar, libraries, natives, asset index, asset objects) against official SHA-1 and re-downloads only the broken entries via the atomic downloader; loader-side libraries and mods keep their own self-heal and are outside this scope.
+- **Optimization set** — curated per-loader list (Fabric: sodium/lithium/ferrite-core/modernfix; Quilt: sodium/ferrite-core; Forge/NeoForge: oculus/ferrite-core/modernfix). Entries are resolved live against the instance game version; anything unvetted (e.g. Forge sodium ports, which are not on Modrinth) is intentionally omitted rather than guessed. Aikar flags follow the canonical G1GC set (aikar.co/mcflags); the preset never mixes with ZGC and never overrides -Xms/-Xmx (instance RAM fields own those).
 
 ---
 
@@ -173,7 +189,8 @@ Nord Launcher intentionally omits third-party authentication services (such as E
 
 1. **Session & Credential Security**: Third-party authlib-injector endpoints intercept Minecraft authentication handshakes and session tokens. Pointing authentication traffic to unverified external servers introduces risk of session hijacking, man-in-the-middle exploits, and credential theft. Nord Launcher enforces direct, official Microsoft OAuth2 with PKCE, storing refresh tokens exclusively in the native OS Credential Manager (Windows Credential Manager / Linux Secret Service) with zero telemetry and zero custodial servers.
 2. **Legal Integrity & EULA Compliance**: Nord Launcher complies with the Minecraft End User License Agreement (EULA), Terms of Service, and Microsoft Commercial Usage Guidelines. Maintaining strict separation from unofficial authentication bypasses ensures sustainable distribution, clear copyright compliance, and trust from mod authors and platform maintainers.
-3. **Data Integrity & Non-Custodial Storage**: All configuration, instance states, and credentials remain 100% local on the user's machine. Nord Launcher never operates intermediary proxies or user databases.
+3. **Local-Only Side Channels**: Auxiliary integrations never leave the machine. Discord Rich Presence talks to the locally running Discord client over its named pipe / AF_UNIX socket only (no network sockets, no proxying, no identifiers beyond the two display strings you can preview in Settings), and world datapack toggling uses physical moves into a sibling `datapacks-disabled/` directory instead of in-place renames, so vanilla game data files are never mutated.
+4. **Data Integrity & Non-Custodial Storage**: All configuration, instance states, and credentials remain 100% local on the user's machine. Nord Launcher never operates intermediary proxies or user databases.
 
 ---
 

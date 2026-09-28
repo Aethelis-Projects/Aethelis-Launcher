@@ -15,6 +15,7 @@ import { GameConsoleModal } from "./components/console/GameConsoleModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
 import { StartupUpdateModal } from "./components/updater/StartupUpdateModal";
 import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
+import { DiscordPresenceCard } from "./components/settings/DiscordPresenceCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
@@ -724,7 +725,7 @@ export const App: Component = () => {
                     <div class="flex items-center justify-between">
                       <span class="text-xs font-semibold text-zinc-300">Среда выполнения Java (JavaPath)</span>
                       <span class="text-[11px] font-mono text-zinc-500">
-                        {activeInstance().java_path ? "Пользовательский путь" : "Авто (Java 21 / 17 / 8)"}
+                        {activeInstance().java_path ? "Пользовательский путь" : "Авто (Java 25 / 21 / 17 / 16 / 11 / 8)"}
                       </span>
                     </div>
                     <div class="flex items-center gap-2">
@@ -894,6 +895,7 @@ export const App: Component = () => {
           <Show when={currentNav() === "settings"}>
             <div class="max-w-3xl mx-auto space-y-6">
               <CurseForgeKeyCard />
+              <DiscordPresenceCard />
               <UpdatePanel
                 channel="stable"
                 onUpdateAvailable={(info) => setAvailableUpdate(info)}

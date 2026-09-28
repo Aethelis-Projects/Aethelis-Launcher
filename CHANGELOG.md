@@ -3,6 +3,20 @@
 All notable changes to Nord Launcher are documented in this file.
 The format is based on Keep a Changelog, and this project adheres to Semantic Versioning.
 
+## [0.7.1] - 2026-09-28
+
+### Added
+- Per-world datapack management: catalog tab pinned to Modrinth, install into selected worlds (or unassigned instance storage), enable/disable by physical move between `datapacks/` and `datapacks-disabled/`, delete, world picker with last-played and pack counts (Feature E).
+- Performance preset API: `GetPerformancePreset` (physical-RAM heuristic clamped to 1-4 GB + canonical Aikar G1GC flag set) and `ListOptimizationMods` (curated per-loader optimization catalog resolved against the instance version); Optimization tab in Instance Settings with apply/reset and one-click curated installs (Feature B).
+- File integrity check and repair: `CheckInstanceFiles`/`RepairInstanceFiles` verify the Mojang cache (version JSON, client jar, libraries, natives, asset index and objects) against official SHA-1 and re-download only broken or missing entries through the atomic downloader; Files tab in Instance Settings reports checked/problem/repaired counts with a capped findings list (Feature D'2).
+- CurseForge modpack `.zip` import (D'4b): scan/commit pipeline over `manifest.json` with CF-API file resolution (exact fileID, SHA-1 verified downloads), `overrides/` extraction behind the shared credential blocklist and zip-slip guards, `modlist.html` reported as manual-install-only, and a third tab in the import modal: honest plan card with per-file unresolved reasons, a result view listing failed downloads, manual-install backlog and blocked credentials, and security audit tests (case-insensitive blocklist, nested `..` rejection, mid-import tamper re-check) plus offline e2e STEP 14 covering the full scan-import-verify contract.
+- Discord Rich Presence (D'5): local-IPC-only client with handshake, capped-backoff reconnect and in-flight activity resync; `SetActivity` payload is details/state/timestamps with zero account identifiers; opt-in default off, silent degradation without Discord, graceful CLOSE on toggle-off (<=5s); Settings card with live "what others will see" preview and BYO Application ID field; `MonitorProcess` gained an `onExit` observer so presence clears exactly on game exit; offline fake-Discord lifecycle tests and an adapter no-repo status test.
+- Wails method registry expanded to 61 methods (`SetDiscordRpcEnabled`, `GetDiscordRpcStatus`, `GetDiscordRpcPreview`, `SetDiscordAppID` added) (`EnsureInstanceDir`, `GetPerformancePreset`, `ListOptimizationMods`, `CheckInstanceFiles`, `RepairInstanceFiles`, `ScanCurseForgePackZip`, `ImportCurseForgePackZip`, datapack/world management).
+
+### Fixed
+- `OpenPath` no longer mutates the filesystem: directory creation moved to explicit `EnsureInstanceDir` with strict allowlist and traversal guards (T1).
+- Java 16 wording corrected from "LTS" to "required by 1.17-1.17.1" across matrix, UI and docs (T2).
+
 ## [0.7.0] - 2026-09-26
 
 ### Added
@@ -17,7 +31,7 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ### Fixed
 - Portable sidecar key resolution honoring executable-adjacent ./cf.key and user config directories.
-- Dynamic manifest Java version resolution supporting Java 16 LTS for Minecraft 1.17–1.17.1.
+- Dynamic manifest Java version resolution supporting Java 16 (non-LTS, required by 1.17–1.17.1).
 - Windows explorer file revealing with space handling in instance directory paths via SysProcAttr.CmdLine.
 - Screenshot gallery folder opener targeting the instance screenshots folder with auto-creation on demand.
 

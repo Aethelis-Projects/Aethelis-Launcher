@@ -86,6 +86,31 @@ type GameProvisioner interface {
 	Provision(ctx context.Context, inst *domain.Instance, acc *domain.Account) (*domain.LaunchConfig, error)
 }
 
+// IntegrityFinding is one corrupted/missing file reported by an integrity pass.
+type IntegrityFinding struct {
+	Path   string
+	Reason string
+}
+
+// IntegrityResult is the outcome of a verify (or verify+repair) pass over the
+// Mojang-managed cache files of an instance.
+type IntegrityResult struct {
+	GameVersion          string
+	CheckedCount         int
+	ProblemsCount        int
+	RepairedCount        int
+	ProblemsCapped       bool
+	VirtualAssetsSkipped bool
+	Findings             []IntegrityFinding
+}
+
+// IntegrityVerifier checks and repairs Mojang-managed cache files of an
+// instance against official hashes. Implemented by game.GameService.
+type IntegrityVerifier interface {
+	CheckInstanceFiles(ctx context.Context, inst *domain.Instance) (*IntegrityResult, error)
+	FixInstanceFiles(ctx context.Context, inst *domain.Instance) (*IntegrityResult, error)
+}
+
 // ContentCache defines persistent query caching operations (e.g. SQLite disk cache).
 type ContentCache interface {
 	Get(ctx context.Context, kind, key string) (payload string, expiresAt time.Time, ok bool, err error)
@@ -93,5 +118,3 @@ type ContentCache interface {
 	PruneExpired(ctx context.Context) error
 	Clear(ctx context.Context) error
 }
-
-

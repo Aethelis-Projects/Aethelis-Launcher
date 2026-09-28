@@ -4,7 +4,7 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
-export type ProjectType = "mod" | "resourcepack" | "shader";
+export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack";
 
 
 export interface InstanceDTO {
@@ -416,4 +416,127 @@ export interface ImportPrismInstanceRequest {
   copy_mods: boolean;
   copy_options: boolean;
   copy_servers: boolean;
+}
+
+export interface WorldDTO {
+  name: string;
+  display_name: string;
+  last_played: number;
+  datapack_count: number;
+}
+
+export interface DatapackDTO {
+  file_name: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  size_bytes: number;
+  world_name: string;
+}
+
+export interface InstallDatapackRequest {
+  instance_id: string;
+  world_names: string[];
+  mod_id: string;
+  version_id?: string;
+  file_name?: string;
+  download_url?: string;
+}
+
+export interface ToggleDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
+  enabled: boolean;
+}
+
+export interface DeleteDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
+}
+
+export interface PerformancePresetDTO {
+  suggested_ram_mb: number;
+  aikar_args: string[];
+}
+
+export interface ListOptimizationModsRequest {
+  game_version: string;
+  loader: string;
+}
+
+export interface InstanceIDRequest {
+  instance_id: string;
+}
+
+export interface IntegrityProblemDTO {
+  path: string;
+  reason: string;
+}
+
+export interface IntegrityResultDTO {
+  version: string;
+  checked_count: number;
+  problems_count: number;
+  repaired_count: number;
+  problems_capped: boolean;
+  virtual_assets_skipped: boolean;
+  items: IntegrityProblemDTO[];
+}
+
+export interface CFPackScanRequest {
+  zip_path: string;
+}
+
+export interface CFPackFileDTO {
+  project_id: number;
+  file_id: number;
+  file_name?: string;
+  required: boolean;
+  download_url?: string;
+  sha1?: string;
+  size_bytes?: number;
+  resolve_error?: string;
+}
+
+export interface CFPackPlanDTO {
+  format: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+  files: CFPackFileDTO[];
+  unresolved: CFPackFileDTO[];
+  override_names: string[];
+  blocked_names: string[];
+  required_total: number;
+  required_failed: number;
+}
+
+export interface ImportCFPackRequest {
+  zip_path: string;
+}
+
+export interface CFPackImportResultDTO {
+
+  instance_id: string;
+  downloaded: number;
+  override_files: number;
+  skipped_credentials: string[];
+  failed_files: string[];
+  unresolved: string[];
+}
+
+export interface DiscordRpcStatusDTO {
+  enabled: boolean;
+  connected: boolean;
+  app_id_set: boolean;
+  has_activity: boolean;
+  last_error?: string;
+}
+
+export interface DiscordRpcPreviewDTO {
+  details: string;
+  state: string;
 }

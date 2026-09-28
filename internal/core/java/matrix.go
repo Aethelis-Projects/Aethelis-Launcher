@@ -116,3 +116,18 @@ func ResolveJavaMajor(mcVersion string, manifestJavaMajor ...int) (int, error) {
 	// Default modern fallback
 	return 21, nil
 }
+
+// IsCompatibleJavaMajor returns true if actualMajor satisfies reqMajor requirements.
+// For Minecraft <= 1.16.5 (reqMajor 8), Java 11 is recognized as a compatible runtime for modpacks.
+func IsCompatibleJavaMajor(reqMajor, actualMajor int) bool {
+	if reqMajor <= 0 {
+		return true
+	}
+	if reqMajor == actualMajor {
+		return true
+	}
+	if reqMajor == 8 && actualMajor == 11 {
+		return true
+	}
+	return false
+}

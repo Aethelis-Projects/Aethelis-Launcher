@@ -95,7 +95,7 @@ func (c *Client) SearchMods(
 	}
 
 	if projectType == "" {
-		if category == "resourcepack" || category == "shader" {
+		if category == "resourcepack" || category == "shader" || category == "datapack" {
 			projectType = category
 			category = ""
 		} else if strings.HasPrefix(category, "project_type:") {

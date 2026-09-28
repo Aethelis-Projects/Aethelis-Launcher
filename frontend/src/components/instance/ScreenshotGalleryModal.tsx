@@ -124,16 +124,21 @@ export const ScreenshotGalleryModal: Component<ScreenshotGalleryModalProps> = (p
     }
   };
 
-  const handleOpenFolder = () => {
+  const handleOpenFolder = async () => {
     if (screenshots().length > 0 && screenshots()[0].path) {
       const firstShot = screenshots()[0];
       const sepIdx = Math.max(firstShot.path.lastIndexOf("/"), firstShot.path.lastIndexOf("\\"));
       if (sepIdx > 0) {
-        launcherAPI.openPath(firstShot.path.substring(0, sepIdx));
+        await launcherAPI.openPath(firstShot.path.substring(0, sepIdx));
         return;
       }
     }
-    launcherAPI.openPath(`${props.instanceId}/screenshots`);
+    try {
+      const targetDir = await launcherAPI.ensureInstanceDir(props.instanceId, "screenshots");
+      await launcherAPI.openPath(targetDir);
+    } catch {
+      await launcherAPI.openPath(`${props.instanceId}/screenshots`);
+    }
   };
 
   const formatSize = (bytes: number): string => {

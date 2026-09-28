@@ -407,15 +407,31 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"GetScreenshotData",
 		"SetInstanceFavorite",
 		"SetInstanceGroup",
+		"EnsureInstanceDir",
+		"GetPerformancePreset",
+		"ListOptimizationMods",
+		"CheckInstanceFiles",
+		"RepairInstanceFiles",
+		"ScanCurseForgePackZip",
+		"ImportCurseForgePackZip",
+		"SetDiscordRpcEnabled",
+		"GetDiscordRpcStatus",
+		"GetDiscordRpcPreview",
+		"SetDiscordAppID",
+		"ListInstanceWorlds",
+		"ListWorldDatapacks",
+		"SetDatapackEnabled",
+		"DeleteDatapack",
+		"InstallDatapack",
 	}
 
 	// Architectural Decision (T-Gates Scope):
 	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
 	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
 	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (45 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 45 {
-		t.Fatalf("expected exactly 45 Wails methods, got %d", len(expectedMethods))
+	// parity is strictly enforced via expectedMethods (61 methods) and CI IPC codegen check.
+	if len(expectedMethods) != 61 {
+		t.Fatalf("expected exactly 61 Wails methods, got %d", len(expectedMethods))
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -1922,13 +1938,13 @@ func TestWailsAdapter_ListModVersions(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]any{
 				{
-					"id":          555123,
-					"modId":       123,
-					"fileName":    "jei-1.21.1.jar",
-					"downloadUrl": "https://edge.forgecdn.net/jei.jar",
-					"fileLength":  2097152,
-					"releaseType": 1,
-					"fileDate":    time.Now().Format(time.RFC3339),
+					"id":           555123,
+					"modId":        123,
+					"fileName":     "jei-1.21.1.jar",
+					"downloadUrl":  "https://edge.forgecdn.net/jei.jar",
+					"fileLength":   2097152,
+					"releaseType":  1,
+					"fileDate":     time.Now().Format(time.RFC3339),
 					"gameVersions": []string{"1.21.1", "Fabric"},
 				},
 			},
@@ -2555,18 +2571,49 @@ func TestWailsAdapter_OpenPath(t *testing.T) {
 		t.Error("expected error on non-existent path, got nil")
 	}
 
-	// 5. Screenshots path under instancesDir that does not exist yet (should auto-create and open)
+	// 5. Screenshots path under instancesDir that does not exist yet fails with OpenPath
 	instancesDir := filepath.Join(tempDir, "instances")
 	adapter.SetFileSystem(nil, instancesDir)
-	if err := adapter.OpenPath("inst-new/screenshots"); err != nil {
-		t.Fatalf("OpenPath new screenshots dir failed: %v", err)
+	if err := adapter.OpenPath("inst-new/screenshots"); err == nil {
+		t.Error("expected error opening non-existent instance dir with OpenPath, got nil")
+	}
+
+	// 6. EnsureInstanceDir creates directory safely
+	createdPath, err := adapter.EnsureInstanceDir("inst-new", "screenshots")
+	if err != nil {
+		t.Fatalf("EnsureInstanceDir failed: %v", err)
 	}
 	expectedScreenshotsDir := filepath.Join(instancesDir, "inst-new", "screenshots")
-	if recordedPath != expectedScreenshotsDir || !recordedIsDir {
-		t.Errorf("expected clean dir path %s, isDir=true; got %s, %v", expectedScreenshotsDir, recordedPath, recordedIsDir)
+	if createdPath != expectedScreenshotsDir {
+		t.Errorf("expected clean dir path %s; got %s", expectedScreenshotsDir, createdPath)
 	}
 	if fi, err := os.Stat(expectedScreenshotsDir); err != nil || !fi.IsDir() {
 		t.Errorf("expected screenshots directory to be created on disk, got err: %v", err)
+	}
+
+	// 7. Now OpenPath succeeds
+	if err := adapter.OpenPath("inst-new/screenshots"); err != nil {
+		t.Fatalf("OpenPath new screenshots dir failed after EnsureInstanceDir: %v", err)
+	}
+	if recordedPath != expectedScreenshotsDir || !recordedIsDir {
+		t.Errorf("expected clean dir path %s, isDir=true; got %s, %v", expectedScreenshotsDir, recordedPath, recordedIsDir)
+	}
+
+	// 8. EnsureInstanceDir error cases
+	if _, err := adapter.EnsureInstanceDir("", "screenshots"); err == nil {
+		t.Error("expected error on empty instanceID, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("inst-new", ""); err == nil {
+		t.Error("expected error on empty dirType, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("../escape", "screenshots"); err == nil {
+		t.Error("expected error on traversal instanceID, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("inst-new", "../escape"); err == nil {
+		t.Error("expected error on traversal dirType, got nil")
+	}
+	if _, err := adapter.EnsureInstanceDir("inst-new", "unauthorized"); err == nil {
+		t.Error("expected error on unauthorized dirType, got nil")
 	}
 }
 
@@ -2963,6 +3010,322 @@ func TestWailsAdapter_ImportOfficialAndPrism(t *testing.T) {
 	}
 }
 
+func TestWailsAdapter_Datapacks_PerWorldManagement(t *testing.T) {
+	tempDir := t.TempDir()
+	instancesDir := filepath.Join(tempDir, "instances")
+	if err := os.MkdirAll(instancesDir, 0o755); err != nil {
+		t.Fatalf("mkdir instancesDir: %v", err)
+	}
 
+	clk := clock.NewMockClock(time.Now())
+	fileSys := fs.NewOSFileSystem()
+	procMgr := &mockProcMgr{}
+	kr := keyring.NewMemoryKeyring()
+	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetFileSystem(fileSys, instancesDir)
 
+	instDTO, err := adapter.CreateInstance(wails.CreateInstanceRequest{
+		Name:        "DatapackInstance",
+		GameVersion: "1.21.1",
+		Loader:      "vanilla",
+	})
+	if err != nil {
+		t.Fatalf("CreateInstance error: %v", err)
+	}
 
+	instDir := filepath.Join(instancesDir, instDTO.ID)
+	w1Dir := filepath.Join(instDir, "saves", "SurvivalWorld")
+	w2Dir := filepath.Join(instDir, "saves", "CreativeWorld")
+	if err := os.MkdirAll(w1Dir, 0o755); err != nil {
+		t.Fatalf("mkdir w1: %v", err)
+	}
+	if err := os.MkdirAll(w2Dir, 0o755); err != nil {
+		t.Fatalf("mkdir w2: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w1Dir, "level.dat"), []byte("level1"), 0o644); err != nil {
+		t.Fatalf("write level1: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(w2Dir, "level.dat"), []byte("level2"), 0o644); err != nil {
+		t.Fatalf("write level2: %v", err)
+	}
+
+	// 1. ListInstanceWorlds
+	worlds, err := adapter.ListInstanceWorlds(instDTO.ID)
+	if err != nil {
+		t.Fatalf("ListInstanceWorlds error: %v", err)
+	}
+	if len(worlds) != 2 {
+		t.Fatalf("expected 2 worlds, got %d", len(worlds))
+	}
+
+	// 2. InstallDatapack using local file
+	dummyZip := filepath.Join(tempDir, "armor-statues.zip")
+	if err := os.WriteFile(dummyZip, []byte("fake-zip-data"), 0o644); err != nil {
+		t.Fatalf("write dummyZip: %v", err)
+	}
+
+	err = adapter.InstallDatapack(wails.InstallDatapackRequest{
+		InstanceID:  instDTO.ID,
+		WorldNames:  []string{"SurvivalWorld"},
+		ModID:       "armor-statues",
+		DownloadURL: dummyZip,
+		FileName:    "armor-statues.zip",
+	})
+	if err != nil {
+		t.Fatalf("InstallDatapack error: %v", err)
+	}
+
+	activePath := filepath.Join(w1Dir, "datapacks", "armor-statues.zip")
+	disabledPath := filepath.Join(w1Dir, "datapacks-disabled", "armor-statues.zip")
+	if _, err := os.Stat(activePath); err != nil {
+		t.Fatalf("expected installed datapack at %s: %v", activePath, err)
+	}
+
+	// 3. ListWorldDatapacks
+	dps, err := adapter.ListWorldDatapacks(instDTO.ID, "SurvivalWorld")
+	if err != nil {
+		t.Fatalf("ListWorldDatapacks error: %v", err)
+	}
+	if len(dps) != 1 {
+		t.Fatalf("expected 1 datapack, got %d", len(dps))
+	}
+	if !dps[0].Enabled || dps[0].Name != "armor-statues" {
+		t.Fatalf("unexpected datapack DTO: %+v", dps[0])
+	}
+
+	// 4. SetDatapackEnabled (disable -> physical move to datapacks-disabled/)
+	err = adapter.SetDatapackEnabled(wails.ToggleDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "armor-statues.zip",
+		Enabled:    false,
+	})
+	if err != nil {
+		t.Fatalf("SetDatapackEnabled disable error: %v", err)
+	}
+	if _, err := os.Stat(activePath); err == nil {
+		t.Errorf("active file should not exist after disable")
+	}
+	if _, err := os.Stat(disabledPath); err != nil {
+		t.Errorf("disabled file should exist at %s: %v", disabledPath, err)
+	}
+
+	dpsDisabled, err := adapter.ListWorldDatapacks(instDTO.ID, "SurvivalWorld")
+	if err != nil {
+		t.Fatalf("ListWorldDatapacks error: %v", err)
+	}
+	if len(dpsDisabled) != 1 || dpsDisabled[0].Enabled {
+		t.Fatalf("expected 1 disabled datapack, got: %+v", dpsDisabled)
+	}
+
+	// 5. SetDatapackEnabled (enable -> physical move back to datapacks/)
+	err = adapter.SetDatapackEnabled(wails.ToggleDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "armor-statues.zip",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatalf("SetDatapackEnabled enable error: %v", err)
+	}
+	if _, err := os.Stat(activePath); err != nil {
+		t.Errorf("active file should exist after enable: %v", err)
+	}
+	if _, err := os.Stat(disabledPath); err == nil {
+		t.Errorf("disabled file should not exist after enable")
+	}
+
+	// 6. DeleteDatapack
+	err = adapter.DeleteDatapack(wails.DeleteDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "armor-statues.zip",
+	})
+	if err != nil {
+		t.Fatalf("DeleteDatapack error: %v", err)
+	}
+	if _, err := os.Stat(activePath); err == nil {
+		t.Errorf("active file should not exist after delete")
+	}
+
+	dpsEmpty, err := adapter.ListWorldDatapacks(instDTO.ID, "SurvivalWorld")
+	if err != nil {
+		t.Fatalf("ListWorldDatapacks error: %v", err)
+	}
+	if len(dpsEmpty) != 0 {
+		t.Fatalf("expected 0 datapacks, got %d", len(dpsEmpty))
+	}
+
+	// 7. Install to instance root when WorldNames is empty
+	err = adapter.InstallDatapack(wails.InstallDatapackRequest{
+		InstanceID:  instDTO.ID,
+		WorldNames:  nil,
+		ModID:       "global-pack",
+		DownloadURL: dummyZip,
+		FileName:    "global-pack.zip",
+	})
+	if err != nil {
+		t.Fatalf("InstallDatapack unassigned error: %v", err)
+	}
+	instPack := filepath.Join(instDir, "datapacks", "global-pack.zip")
+	if _, err := os.Stat(instPack); err != nil {
+		t.Errorf("expected global pack at %s: %v", instPack, err)
+	}
+
+	// 8. Path traversal attack checks
+	if err := adapter.SetDatapackEnabled(wails.ToggleDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "../../etc/passwd",
+		Enabled:    true,
+	}); err == nil {
+		t.Errorf("expected error for traversal fileName")
+	}
+
+	if err := adapter.DeleteDatapack(wails.DeleteDatapackRequest{
+		InstanceID: instDTO.ID,
+		WorldName:  "SurvivalWorld",
+		FileName:   "../malicious.zip",
+	}); err == nil {
+		t.Errorf("expected error for traversal delete")
+	}
+}
+
+func TestWailsAdapter_GetPerformancePreset(t *testing.T) {
+	adapter := wails.NewWailsAdapter(nil)
+	res, err := adapter.GetPerformancePreset()
+	if err != nil {
+		t.Fatalf("GetPerformancePreset failed: %v", err)
+	}
+	if res.SuggestedRAMMB < 1024 || res.SuggestedRAMMB > 4096 {
+		t.Errorf("suggested RAM %d outside clamp [1024,4096]", res.SuggestedRAMMB)
+	}
+	if len(res.AikarArgs) == 0 {
+		t.Fatal("empty Aikar preset")
+	}
+	joined := strings.Join(res.AikarArgs, " ")
+	if !strings.Contains(joined, "-XX:+UseG1GC") || !strings.Contains(joined, "-XX:MaxGCPauseMillis=200") {
+		t.Error("preset missing canonical G1 anchors")
+	}
+	if strings.Contains(joined, "-Xm") {
+		t.Error("preset must not carry -Xms/-Xmx (owned by instance RAM fields)")
+	}
+}
+
+func TestWailsAdapter_ListOptimizationMods(t *testing.T) {
+	hits := map[string]string{
+		"sodium":       "Sodium",
+		"lithium":      "Lithium",
+		"ferrite-core": "FerriteCore",
+	}
+	var mu sync.Mutex
+	var seenQueries []string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("query")
+		mu.Lock()
+		seenQueries = append(seenQueries, query)
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if title, ok := hits[query]; ok {
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"hits": []map[string]interface{}{
+					{
+						"project_id":   "proj-" + query,
+						"slug":         query,
+						"title":        title,
+						"description":  "curated optimization entry",
+						"author":       "curated-author",
+						"downloads":    1000,
+						"categories":   []string{"fabric", "performance"},
+						"project_type": "mod",
+					},
+					{
+						"project_id":   "noise-" + query,
+						"slug":         query + "-unofficial-fork",
+						"title":        "Noise Fork",
+						"downloads":    5,
+						"project_type": "mod",
+					},
+				},
+				"total_hits": 2,
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"hits": []interface{}{}, "total_hits": 0})
+	}))
+	defer ts.Close()
+
+	adapter := wails.NewWailsAdapter(nil)
+	adapter.SetContent(modrinth.NewClient(ts.URL, ts.Client()), nil)
+
+	res, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "fabric"})
+	if err != nil {
+		t.Fatalf("ListOptimizationMods failed: %v", err)
+	}
+	if len(res.Items) != len(hits) {
+		t.Fatalf("expected %d curated items (modernfix has no hit -> skipped), got %d: %+v", len(hits), len(res.Items), res.Items)
+	}
+	for _, it := range res.Items {
+		if _, ok := hits[it.Slug]; !ok {
+			t.Errorf("unexpected slug returned: %q", it.Slug)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seenQueries) != 4 {
+		t.Errorf("expected one lookup per curated slug (4), got %d: %v", len(seenQueries), seenQueries)
+	}
+
+	empty, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "vanilla"})
+	if err != nil {
+		t.Fatalf("vanilla must not error: %v", err)
+	}
+	if len(empty.Items) != 0 {
+		t.Fatalf("vanilla must return empty curated set, got %d", len(empty.Items))
+	}
+
+	// A loader with a curated set but no content client must fail loudly, not fake data.
+	bare := wails.NewWailsAdapter(nil)
+	if _, err := bare.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "forge"}); err == nil {
+		t.Fatal("expected error when modrinth client is not initialized")
+	}
+}
+
+type stubIntegrityVerifier struct {
+	checkCalls int
+	fixCalls   int
+	lastID     string
+}
+
+func (v *stubIntegrityVerifier) CheckInstanceFiles(_ context.Context, inst *domain.Instance) (*ports.IntegrityResult, error) {
+	v.checkCalls++
+	v.lastID = inst.ID
+	return &ports.IntegrityResult{
+		GameVersion: inst.GameVersion, CheckedCount: 10, ProblemsCount: 2,
+		Findings: []ports.IntegrityFinding{{Path: "Client JAR", Reason: "ChecksumMismatch"}, {Path: "Asset abc", Reason: "Missing"}},
+	}, nil
+}
+
+func (v *stubIntegrityVerifier) FixInstanceFiles(_ context.Context, inst *domain.Instance) (*ports.IntegrityResult, error) {
+	v.fixCalls++
+	v.lastID = inst.ID
+	return &ports.IntegrityResult{GameVersion: inst.GameVersion, CheckedCount: 10, ProblemsCount: 0, RepairedCount: 2}, nil
+}
+
+func TestWailsAdapter_IntegrityWiring(t *testing.T) {
+	stub := &stubIntegrityVerifier{}
+	svc := launch.NewInstanceService(nil, nil, nil, nil, nil)
+	adapter := wails.NewWailsAdapter(svc)
+	adapter.SetIntegrityVerifier(stub)
+
+	if _, err := adapter.CheckInstanceFiles(wails.InstanceIDRequest{InstanceID: "missing-inst"}); err == nil || !strings.Contains(err.Error(), "instance not found") {
+		t.Fatalf("expected 'instance not found' error, got %v", err)
+	}
+
+	// no verifier wired: loud failure, never a silent zero-problem report
+	bare := wails.NewWailsAdapter(svc)
+	if _, err := bare.CheckInstanceFiles(wails.InstanceIDRequest{InstanceID: "missing-inst"}); err == nil || !strings.Contains(err.Error(), "integrity verifier not initialized") {
+		t.Fatalf("expected 'verifier not initialized' error, got %v", err)
+	}
+}

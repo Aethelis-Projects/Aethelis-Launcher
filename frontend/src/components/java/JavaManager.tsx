@@ -316,7 +316,7 @@ export const JavaManager: Component<JavaManagerProps> = (props) => {
               <Download class="w-4 h-4 text-zinc-500 group-hover:text-nord-cyan transition-colors" />
             </div>
             <p class="text-[11px] text-zinc-400">
-              Minecraft 1.17 - 1.17.1 (Temurin 16)
+              Minecraft 1.17 – 1.17.1 (non-LTS)
             </p>
           </button>
 

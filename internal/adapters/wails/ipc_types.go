@@ -188,13 +188,13 @@ type ModFileDTO struct {
 }
 
 type ModUpdateItemDTO struct {
-	FileName        string `json:"file_name"`
-	ModID           string `json:"mod_id"`
-	Source          string `json:"source"`
-	CurrentVersion  string `json:"current_version"`
-	LatestVersion   string `json:"latest_version"`
-	LatestVersionID string `json:"latest_version_id"`
-	ReleaseType     string `json:"release_type"`
+	FileName        string   `json:"file_name"`
+	ModID           string   `json:"mod_id"`
+	Source          string   `json:"source"`
+	CurrentVersion  string   `json:"current_version"`
+	LatestVersion   string   `json:"latest_version"`
+	LatestVersionID string   `json:"latest_version_id"`
+	ReleaseType     string   `json:"release_type"`
 	Dependencies    []string `json:"dependencies,omitempty"`
 	Changelog       string   `json:"changelog,omitempty"`
 }
@@ -412,4 +412,126 @@ type ImportPrismInstanceRequest struct {
 	CopyMods          bool   `json:"copy_mods"`
 	CopyOptions       bool   `json:"copy_options"`
 	CopyServers       bool   `json:"copy_servers"`
+}
+
+type WorldDTO struct {
+	Name          string `json:"name"`
+	DisplayName   string `json:"display_name"`
+	LastPlayed    int64  `json:"last_played"`
+	DatapackCount int    `json:"datapack_count"`
+}
+
+type DatapackDTO struct {
+	FileName    string `json:"file_name"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Enabled     bool   `json:"enabled"`
+	SizeBytes   int64  `json:"size_bytes"`
+	WorldName   string `json:"world_name"`
+}
+
+type InstallDatapackRequest struct {
+	InstanceID  string   `json:"instance_id"`
+	WorldNames  []string `json:"world_names"`
+	ModID       string   `json:"mod_id"`
+	VersionID   string   `json:"version_id,omitempty"`
+	FileName    string   `json:"file_name,omitempty"`
+	DownloadURL string   `json:"download_url,omitempty"`
+}
+
+type ToggleDatapackRequest struct {
+	InstanceID string `json:"instance_id"`
+	WorldName  string `json:"world_name"`
+	FileName   string `json:"file_name"`
+	Enabled    bool   `json:"enabled"`
+}
+
+type DeleteDatapackRequest struct {
+	InstanceID string `json:"instance_id"`
+	WorldName  string `json:"world_name"`
+	FileName   string `json:"file_name"`
+}
+
+type PerformancePresetDTO struct {
+	SuggestedRAMMB int      `json:"suggested_ram_mb"`
+	AikarArgs      []string `json:"aikar_args"`
+}
+
+type ListOptimizationModsRequest struct {
+	GameVersion string `json:"game_version"`
+	Loader      string `json:"loader"`
+}
+
+type InstanceIDRequest struct {
+	InstanceID string `json:"instance_id"`
+}
+
+type IntegrityProblemDTO struct {
+	Path   string `json:"path"`
+	Reason string `json:"reason"`
+}
+
+type IntegrityResultDTO struct {
+	Version              string                `json:"version"`
+	CheckedCount         int                   `json:"checked_count"`
+	ProblemsCount        int                   `json:"problems_count"`
+	RepairedCount        int                   `json:"repaired_count"`
+	ProblemsCapped       bool                  `json:"problems_capped"`
+	VirtualAssetsSkipped bool                  `json:"virtual_assets_skipped"`
+	Items                []IntegrityProblemDTO `json:"items"`
+}
+
+type CFPackScanRequest struct {
+	ZipPath string `json:"zip_path"`
+}
+
+type CFPackFileDTO struct {
+	ProjectID   int64  `json:"project_id"`
+	FileID      int64  `json:"file_id"`
+	FileName    string `json:"file_name,omitempty"`
+	Required    bool   `json:"required"`
+	DownloadURL string `json:"download_url,omitempty"`
+	SHA1        string `json:"sha1,omitempty"`
+	SizeBytes   int64  `json:"size_bytes,omitempty"`
+	ResolveErr  string `json:"resolve_error,omitempty"`
+}
+
+type CFPackPlanDTO struct {
+	Format         string          `json:"format"`
+	InstanceName   string          `json:"instance_name"`
+	GameVersion    string          `json:"game_version"`
+	Loader         string          `json:"loader"`
+	LoaderVersion  string          `json:"loader_version,omitempty"`
+	Files          []CFPackFileDTO `json:"files"`
+	Unresolved     []CFPackFileDTO `json:"unresolved"`
+	OverrideNames  []string        `json:"override_names"`
+	BlockedNames   []string        `json:"blocked_names"`
+	RequiredTotal  int             `json:"required_total"`
+	RequiredFailed int             `json:"required_failed"`
+}
+
+type ImportCFPackRequest struct {
+	ZipPath string `json:"zip_path"`
+}
+
+type CFPackImportResultDTO struct {
+	InstanceID    string   `json:"instance_id"`
+	Downloaded    int      `json:"downloaded"`
+	OverrideFiles int      `json:"override_files"`
+	SkippedCred   []string `json:"skipped_credentials"`
+	FailedFiles   []string `json:"failed_files"`
+	Unresolved    []string `json:"unresolved"`
+}
+
+type DiscordRpcStatusDTO struct {
+	Enabled     bool   `json:"enabled"`
+	Connected   bool   `json:"connected"`
+	AppIDSet    bool   `json:"app_id_set"`
+	HasActivity bool   `json:"has_activity"`
+	LastError   string `json:"last_error,omitempty"`
+}
+
+type DiscordRpcPreviewDTO struct {
+	Details string `json:"details"`
+	State   string `json:"state"`
 }

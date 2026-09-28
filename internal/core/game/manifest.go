@@ -12,8 +12,8 @@ import (
 
 const (
 	PistonMetaManifestURL = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
-	MojangLibrariesURL   = "https://libraries.minecraft.net"
-	MojangResourcesURL   = "https://resources.download.minecraft.net"
+	MojangLibrariesURL    = "https://libraries.minecraft.net"
+	MojangResourcesURL    = "https://resources.download.minecraft.net"
 )
 
 // VersionManifestV2 represents Mojang's root version manifest catalog.
@@ -39,6 +39,9 @@ type VersionManifestEntry struct {
 // AssetIndex represents the contents of an asset index json file.
 type AssetIndex struct {
 	Objects map[string]AssetObject `json:"objects"`
+	// Virtual marks pre-1.13 indexes whose objects expand into a tree layout;
+	// integrity treats those as repair-by-Provision and reports them as skipped.
+	Virtual bool `json:"virtual,omitempty"`
 }
 
 // AssetObject represents a single hash-addressed resource file.

@@ -1,7 +1,7 @@
 import { Component, createSignal, createResource, For, Show, onMount, onCleanup } from "solid-js";
-import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle, ChevronDown, AlertTriangle, FileText } from "lucide-solid";
+import { Download, Search, Check, Loader2, Layers, Globe, AlertCircle, ChevronDown, AlertTriangle, FileText, X, Database } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
-import type { ModItemDTO, ModSource, ModFileDTO, ModInstallProgressDTO, ProjectType } from "../../bindings/ipc_types";
+import type { ModItemDTO, ModSource, ModFileDTO, ModInstallProgressDTO, ProjectType, WorldDTO } from "../../bindings/ipc_types";
 import { renderMarkdownLite } from "../common/MarkdownLite";
 
 interface ModCatalogProps {
@@ -56,7 +56,7 @@ const CURSEFORGE_SORTS = [
 
 export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const initialProjectType: ProjectType =
-    savedFilters.project_type === "resourcepack" || savedFilters.project_type === "shader"
+    savedFilters.project_type === "resourcepack" || savedFilters.project_type === "shader" || savedFilters.project_type === "datapack"
       ? savedFilters.project_type
       : "mod";
 
@@ -273,7 +273,83 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
     }
   };
 
+  // Datapack world selection state
+  const [datapackInstallTarget, setDatapackInstallTarget] = createSignal<{ mod: ModItemDTO; versionId?: string } | null>(null);
+  const [datapackWorlds, setDatapackWorlds] = createSignal<WorldDTO[]>([]);
+  const [selectedWorldNames, setSelectedWorldNames] = createSignal<string[]>([]);
+  const [loadingWorldsForInstall, setLoadingWorldsForInstall] = createSignal(false);
+  const [datapackInstallError, setDatapackInstallError] = createSignal("");
+  const [installingDatapack, setInstallingDatapack] = createSignal(false);
+
+  const openDatapackInstallModal = async (mod: ModItemDTO, versionId?: string) => {
+    setDatapackInstallTarget({ mod, versionId });
+    setDatapackInstallError("");
+    setLoadingWorldsForInstall(true);
+    try {
+      const list = await launcherAPI.listInstanceWorlds(props.activeInstanceId);
+      setDatapackWorlds(list);
+      setSelectedWorldNames(list.map((w) => w.name));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDatapackInstallError(msg || "Failed to load worlds");
+    } finally {
+      setLoadingWorldsForInstall(false);
+    }
+  };
+
+  const closeDatapackInstallModal = () => {
+    if (installingDatapack()) return;
+    setDatapackInstallTarget(null);
+    setDatapackWorlds([]);
+    setSelectedWorldNames([]);
+    setDatapackInstallError("");
+  };
+
+  const toggleWorldSelection = (worldName: string) => {
+    setSelectedWorldNames((prev) =>
+      prev.includes(worldName) ? prev.filter((w) => w !== worldName) : [...prev, worldName]
+    );
+  };
+
+  const selectAllWorlds = () => {
+    setSelectedWorldNames(datapackWorlds().map((w) => w.name));
+  };
+
+  const deselectAllWorlds = () => {
+    setSelectedWorldNames([]);
+  };
+
+  const confirmDatapackInstall = async (unassigned = false) => {
+    const target = datapackInstallTarget();
+    if (!target) return;
+    setInstallingDatapack(true);
+    setDatapackInstallError("");
+    try {
+      const targetWorlds = unassigned ? [] : selectedWorldNames();
+      await launcherAPI.installDatapack({
+        instance_id: props.activeInstanceId,
+        world_names: targetWorlds,
+        mod_id: target.mod.id,
+        version_id: target.versionId,
+      });
+      setInstalledIds((prev) => new Set([...prev, target.mod.id]));
+      if (props.onModInstalled) {
+        props.onModInstalled(target.mod);
+      }
+      closeDatapackInstallModal();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setDatapackInstallError(msg || "Failed to install datapack");
+    } finally {
+      setInstallingDatapack(false);
+    }
+  };
+
   const handleInstall = async (mod: ModItemDTO, versionId?: string) => {
+    if (projectType() === "datapack") {
+      openDatapackInstallModal(mod, versionId);
+      return;
+    }
     setInstallingId(mod.id);
     setInstallError("");
     setInstallProgress({
@@ -338,7 +414,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
             Каталог модификаций
           </h2>
           <p class="text-xs text-zinc-400 mt-0.5">
-            Поиск {projectType() === "resourcepack" ? "ресурспаков" : projectType() === "shader" ? "шейдеров" : "проверенных модификаций"} для {props.loader} {props.gameVersion}
+            Поиск {projectType() === "resourcepack" ? "ресурспаков" : projectType() === "shader" ? "шейдеров" : projectType() === "datapack" ? "датапаков" : "проверенных модификаций"} для {props.loader} {props.gameVersion}
             <Show when={totalCount() > 0}>
               <span class="ml-1 text-zinc-500 font-mono">({totalCount()})</span>
             </Show>
@@ -383,6 +459,18 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
               data-testid="project-type-shader"
             >
               Шейдеры
+            </button>
+            <button
+              type="button"
+              onClick={() => handleProjectTypeChange("datapack")}
+              class={`px-3 py-1 rounded transition-colors cursor-pointer ${
+                projectType() === "datapack"
+                  ? "bg-[#00D4B2] text-zinc-950 font-medium"
+                  : "text-zinc-400 hover:text-zinc-100"
+              }`}
+              data-testid="project-type-datapack"
+            >
+              Датапаки
             </button>
           </div>
 
@@ -836,6 +924,145 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
           }}
         </For>
       </div>
+
+      {/* Datapack Install-to-World Modal */}
+      <Show when={datapackInstallTarget()}>
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm"
+          data-testid="datapack-install-modal"
+        >
+          <div class="w-full max-w-md bg-nord-surface border border-white/10 rounded-xl shadow-2xl p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-white/5 pb-3">
+              <div class="flex items-center gap-2">
+                <Database class="w-5 h-5 text-nord-cyan" />
+                <h3 class="text-sm font-semibold text-zinc-100">Установка датапака</h3>
+              </div>
+              <button
+                type="button"
+                onClick={closeDatapackInstallModal}
+                class="p-1 rounded text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                data-testid="datapack-modal-close-btn"
+              >
+                <X class="w-4 h-4" />
+              </button>
+            </div>
+
+            <div>
+              <p class="text-xs text-zinc-300">
+                Выберите миры, в которые необходимо установить датапак <strong class="text-white">{datapackInstallTarget()?.mod.name}</strong>:
+              </p>
+            </div>
+
+            <Show when={datapackInstallError()}>
+              <div class="p-2.5 rounded bg-nord-rose/10 border border-nord-rose/20 text-xs text-nord-rose flex items-center gap-2 font-mono">
+                <AlertCircle class="w-4 h-4 shrink-0" />
+                <span>{datapackInstallError()}</span>
+              </div>
+            </Show>
+
+            <Show
+              when={!loadingWorldsForInstall()}
+              fallback={<div class="py-6 text-center text-xs text-zinc-500 font-mono">Загрузка миров...</div>}
+            >
+              <Show
+                when={datapackWorlds().length > 0}
+                fallback={
+                  <div class="p-4 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-300 space-y-2">
+                    <p>
+                      В этом инстансе пока нет миров. Датапак будет сохранен в папку датапаков инстанса (<code class="text-nord-cyan font-mono">datapacks/</code>).
+                    </p>
+                    <p class="text-zinc-400">
+                      При создании нового мира вы сможете скопировать его в мир.
+                    </p>
+                  </div>
+                }
+              >
+                <div class="flex items-center justify-between text-xs text-zinc-400">
+                  <span>Доступные миры:</span>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllWorlds}
+                      class="text-nord-cyan hover:underline cursor-pointer"
+                    >
+                      Выбрать все
+                    </button>
+                    <span>|</span>
+                    <button
+                      type="button"
+                      onClick={deselectAllWorlds}
+                      class="text-zinc-400 hover:text-zinc-200 cursor-pointer"
+                    >
+                      Снять выбор
+                    </button>
+                  </div>
+                </div>
+
+                <div class="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  <For each={datapackWorlds()}>
+                    {(w) => {
+                      const isChecked = () => selectedWorldNames().includes(w.name);
+                      return (
+                        <label
+                          class={`flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer transition-colors ${
+                            isChecked()
+                              ? "bg-zinc-800/80 border-nord-cyan/40 text-zinc-100"
+                              : "bg-zinc-900/60 border-zinc-800 text-zinc-400 hover:bg-zinc-900"
+                          }`}
+                        >
+                          <div class="flex items-center gap-2.5">
+                            <input
+                              type="checkbox"
+                              checked={isChecked()}
+                              onChange={() => toggleWorldSelection(w.name)}
+                              class="rounded border-zinc-700 text-nord-cyan focus:ring-0 cursor-pointer"
+                              data-testid={`datapack-world-checkbox-${w.name}`}
+                            />
+                            <span class="font-medium text-zinc-200">{w.display_name}</span>
+                          </div>
+                          <span class="text-[11px] font-mono text-zinc-500">
+                            {w.datapack_count} датапак.
+                          </span>
+                        </label>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Show>
+            </Show>
+
+            <div class="flex items-center justify-end gap-2 pt-2 border-t border-white/5">
+              <Show when={datapackWorlds().length > 0}>
+                <button
+                  type="button"
+                  onClick={() => confirmDatapackInstall(true)}
+                  disabled={installingDatapack()}
+                  class="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono transition-colors cursor-pointer"
+                  data-testid="datapack-install-unassigned-btn"
+                >
+                  Без привязки
+                </button>
+              </Show>
+              <button
+                type="button"
+                onClick={() => confirmDatapackInstall(datapackWorlds().length === 0)}
+                disabled={installingDatapack() || (datapackWorlds().length > 0 && selectedWorldNames().length === 0)}
+                class="px-4 py-1.5 rounded-lg bg-nord-cyan hover:bg-nord-cyan/90 text-nord-dark text-xs font-bold transition-all cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                data-testid="datapack-confirm-install-btn"
+              >
+                <Show when={installingDatapack()}>
+                  <Loader2 class="w-3.5 h-3.5 animate-spin" />
+                </Show>
+                <span>
+                  {datapackWorlds().length === 0
+                    ? "Установить в инстанс"
+                    : `Установить (${selectedWorldNames().length})`}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
     </div>
   );
 };

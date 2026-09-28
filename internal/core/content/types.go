@@ -24,6 +24,7 @@ const (
 	ProjectTypeMod          ProjectType = "mod"
 	ProjectTypeResourcePack ProjectType = "resourcepack"
 	ProjectTypeShader       ProjectType = "shader"
+	ProjectTypeDatapack     ProjectType = "datapack"
 )
 
 // ModItem is the unified metadata model across Modrinth and CurseForge.

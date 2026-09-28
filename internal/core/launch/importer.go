@@ -537,12 +537,7 @@ func copyFileSafely(src, dst string) error {
 	cleanDst := filepath.Clean(dst)
 
 	// Block credentials/token leakage
-	baseName := strings.ToLower(filepath.Base(cleanSrc))
-	if baseName == "launcher_accounts.json" ||
-		baseName == "launcher_msa_credentials.bin" ||
-		baseName == "usercache.json" ||
-		strings.HasSuffix(baseName, ".token") ||
-		strings.HasSuffix(baseName, ".auth") {
+	if domain.IsCredentialFilename(filepath.Base(cleanSrc)) {
 		return nil
 	}
 
@@ -611,13 +606,8 @@ func copyDirectorySafely(srcDir, dstDir string) error {
 
 		target := filepath.Join(cleanDst, rel)
 
-		// Sanitize credentials
-		baseName := strings.ToLower(filepath.Base(path))
-		if baseName == "launcher_accounts.json" ||
-			baseName == "launcher_msa_credentials.bin" ||
-			baseName == "usercache.json" ||
-			strings.HasSuffix(baseName, ".token") ||
-			strings.HasSuffix(baseName, ".auth") {
+		// Sanitize credentials via the shared blocklist.
+		if domain.IsCredentialFilename(filepath.Base(path)) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}

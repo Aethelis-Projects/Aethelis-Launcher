@@ -196,13 +196,13 @@ type ModFileDTO struct {
 }
 
 type ModUpdateItemDTO struct {
-	FileName        string ` + "`" + `json:"file_name"` + "`" + `
-	ModID           string ` + "`" + `json:"mod_id"` + "`" + `
-	Source          string ` + "`" + `json:"source"` + "`" + `
-	CurrentVersion  string ` + "`" + `json:"current_version"` + "`" + `
-	LatestVersion   string ` + "`" + `json:"latest_version"` + "`" + `
-	LatestVersionID string ` + "`" + `json:"latest_version_id"` + "`" + `
-	ReleaseType     string ` + "`" + `json:"release_type"` + "`" + `
+	FileName        string   ` + "`" + `json:"file_name"` + "`" + `
+	ModID           string   ` + "`" + `json:"mod_id"` + "`" + `
+	Source          string   ` + "`" + `json:"source"` + "`" + `
+	CurrentVersion  string   ` + "`" + `json:"current_version"` + "`" + `
+	LatestVersion   string   ` + "`" + `json:"latest_version"` + "`" + `
+	LatestVersionID string   ` + "`" + `json:"latest_version_id"` + "`" + `
+	ReleaseType     string   ` + "`" + `json:"release_type"` + "`" + `
 	Dependencies    []string ` + "`" + `json:"dependencies,omitempty"` + "`" + `
 	Changelog       string   ` + "`" + `json:"changelog,omitempty"` + "`" + `
 }
@@ -421,8 +421,129 @@ type ImportPrismInstanceRequest struct {
 	CopyOptions       bool   ` + "`" + `json:"copy_options"` + "`" + `
 	CopyServers       bool   ` + "`" + `json:"copy_servers"` + "`" + `
 }
-`
 
+type WorldDTO struct {
+	Name          string ` + "`" + `json:"name"` + "`" + `
+	DisplayName   string ` + "`" + `json:"display_name"` + "`" + `
+	LastPlayed    int64  ` + "`" + `json:"last_played"` + "`" + `
+	DatapackCount int    ` + "`" + `json:"datapack_count"` + "`" + `
+}
+
+type DatapackDTO struct {
+	FileName    string ` + "`" + `json:"file_name"` + "`" + `
+	Name        string ` + "`" + `json:"name"` + "`" + `
+	Description string ` + "`" + `json:"description,omitempty"` + "`" + `
+	Enabled     bool   ` + "`" + `json:"enabled"` + "`" + `
+	SizeBytes   int64  ` + "`" + `json:"size_bytes"` + "`" + `
+	WorldName   string ` + "`" + `json:"world_name"` + "`" + `
+}
+
+type InstallDatapackRequest struct {
+	InstanceID  string   ` + "`" + `json:"instance_id"` + "`" + `
+	WorldNames  []string ` + "`" + `json:"world_names"` + "`" + `
+	ModID       string   ` + "`" + `json:"mod_id"` + "`" + `
+	VersionID   string   ` + "`" + `json:"version_id,omitempty"` + "`" + `
+	FileName    string   ` + "`" + `json:"file_name,omitempty"` + "`" + `
+	DownloadURL string   ` + "`" + `json:"download_url,omitempty"` + "`" + `
+}
+
+type ToggleDatapackRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	WorldName  string ` + "`" + `json:"world_name"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+	Enabled    bool   ` + "`" + `json:"enabled"` + "`" + `
+}
+
+type DeleteDatapackRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+	WorldName  string ` + "`" + `json:"world_name"` + "`" + `
+	FileName   string ` + "`" + `json:"file_name"` + "`" + `
+}
+
+type PerformancePresetDTO struct {
+	SuggestedRAMMB int      ` + "`" + `json:"suggested_ram_mb"` + "`" + `
+	AikarArgs      []string ` + "`" + `json:"aikar_args"` + "`" + `
+}
+
+type ListOptimizationModsRequest struct {
+	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
+	Loader      string ` + "`" + `json:"loader"` + "`" + `
+}
+
+type InstanceIDRequest struct {
+	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
+}
+
+type IntegrityProblemDTO struct {
+	Path   string ` + "`" + `json:"path"` + "`" + `
+	Reason string ` + "`" + `json:"reason"` + "`" + `
+}
+
+type IntegrityResultDTO struct {
+	Version              string                ` + "`" + `json:"version"` + "`" + `
+	CheckedCount         int                   ` + "`" + `json:"checked_count"` + "`" + `
+	ProblemsCount        int                   ` + "`" + `json:"problems_count"` + "`" + `
+	RepairedCount        int                   ` + "`" + `json:"repaired_count"` + "`" + `
+	ProblemsCapped       bool                  ` + "`" + `json:"problems_capped"` + "`" + `
+	VirtualAssetsSkipped bool                  ` + "`" + `json:"virtual_assets_skipped"` + "`" + `
+	Items                []IntegrityProblemDTO ` + "`" + `json:"items"` + "`" + `
+}
+
+type CFPackScanRequest struct {
+	ZipPath string ` + "`" + `json:"zip_path"` + "`" + `
+}
+
+type CFPackFileDTO struct {
+	ProjectID   int64  ` + "`" + `json:"project_id"` + "`" + `
+	FileID      int64  ` + "`" + `json:"file_id"` + "`" + `
+	FileName    string ` + "`" + `json:"file_name,omitempty"` + "`" + `
+	Required    bool   ` + "`" + `json:"required"` + "`" + `
+	DownloadURL string ` + "`" + `json:"download_url,omitempty"` + "`" + `
+	SHA1        string ` + "`" + `json:"sha1,omitempty"` + "`" + `
+	SizeBytes   int64  ` + "`" + `json:"size_bytes,omitempty"` + "`" + `
+	ResolveErr  string ` + "`" + `json:"resolve_error,omitempty"` + "`" + `
+}
+
+type CFPackPlanDTO struct {
+	Format         string          ` + "`" + `json:"format"` + "`" + `
+	InstanceName   string          ` + "`" + `json:"instance_name"` + "`" + `
+	GameVersion    string          ` + "`" + `json:"game_version"` + "`" + `
+	Loader         string          ` + "`" + `json:"loader"` + "`" + `
+	LoaderVersion  string          ` + "`" + `json:"loader_version,omitempty"` + "`" + `
+	Files          []CFPackFileDTO ` + "`" + `json:"files"` + "`" + `
+	Unresolved     []CFPackFileDTO ` + "`" + `json:"unresolved"` + "`" + `
+	OverrideNames  []string        ` + "`" + `json:"override_names"` + "`" + `
+	BlockedNames   []string        ` + "`" + `json:"blocked_names"` + "`" + `
+	RequiredTotal  int             ` + "`" + `json:"required_total"` + "`" + `
+	RequiredFailed int             ` + "`" + `json:"required_failed"` + "`" + `
+}
+
+type ImportCFPackRequest struct {
+	ZipPath string ` + "`" + `json:"zip_path"` + "`" + `
+}
+
+type CFPackImportResultDTO struct {
+	InstanceID    string   ` + "`" + `json:"instance_id"` + "`" + `
+	Downloaded    int      ` + "`" + `json:"downloaded"` + "`" + `
+	OverrideFiles int      ` + "`" + `json:"override_files"` + "`" + `
+	SkippedCred   []string ` + "`" + `json:"skipped_credentials"` + "`" + `
+	FailedFiles   []string ` + "`" + `json:"failed_files"` + "`" + `
+	Unresolved    []string ` + "`" + `json:"unresolved"` + "`" + `
+}
+
+type DiscordRpcStatusDTO struct {
+	Enabled     bool   ` + "`" + `json:"enabled"` + "`" + `
+	Connected   bool   ` + "`" + `json:"connected"` + "`" + `
+	AppIDSet    bool   ` + "`" + `json:"app_id_set"` + "`" + `
+	HasActivity bool   ` + "`" + `json:"has_activity"` + "`" + `
+	LastError   string ` + "`" + `json:"last_error,omitempty"` + "`" + `
+}
+
+type DiscordRpcPreviewDTO struct {
+	Details string ` + "`" + `json:"details"` + "`" + `
+	State   string ` + "`" + `json:"state"` + "`" + `
+}
+`
 
 	tsContent := `// Code generated by ipc/codegen/generate.go; DO NOT EDIT.
 
@@ -430,7 +551,7 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
-export type ProjectType = "mod" | "resourcepack" | "shader";
+export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack";
 
 
 export interface InstanceDTO {
@@ -843,8 +964,130 @@ export interface ImportPrismInstanceRequest {
   copy_options: boolean;
   copy_servers: boolean;
 }
-`
 
+export interface WorldDTO {
+  name: string;
+  display_name: string;
+  last_played: number;
+  datapack_count: number;
+}
+
+export interface DatapackDTO {
+  file_name: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  size_bytes: number;
+  world_name: string;
+}
+
+export interface InstallDatapackRequest {
+  instance_id: string;
+  world_names: string[];
+  mod_id: string;
+  version_id?: string;
+  file_name?: string;
+  download_url?: string;
+}
+
+export interface ToggleDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
+  enabled: boolean;
+}
+
+export interface DeleteDatapackRequest {
+  instance_id: string;
+  world_name: string;
+  file_name: string;
+}
+
+export interface PerformancePresetDTO {
+  suggested_ram_mb: number;
+  aikar_args: string[];
+}
+
+export interface ListOptimizationModsRequest {
+  game_version: string;
+  loader: string;
+}
+
+export interface InstanceIDRequest {
+  instance_id: string;
+}
+
+export interface IntegrityProblemDTO {
+  path: string;
+  reason: string;
+}
+
+export interface IntegrityResultDTO {
+  version: string;
+  checked_count: number;
+  problems_count: number;
+  repaired_count: number;
+  problems_capped: boolean;
+  virtual_assets_skipped: boolean;
+  items: IntegrityProblemDTO[];
+}
+
+export interface CFPackScanRequest {
+  zip_path: string;
+}
+
+export interface CFPackFileDTO {
+  project_id: number;
+  file_id: number;
+  file_name?: string;
+  required: boolean;
+  download_url?: string;
+  sha1?: string;
+  size_bytes?: number;
+  resolve_error?: string;
+}
+
+export interface CFPackPlanDTO {
+  format: string;
+  instance_name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+  files: CFPackFileDTO[];
+  unresolved: CFPackFileDTO[];
+  override_names: string[];
+  blocked_names: string[];
+  required_total: number;
+  required_failed: number;
+}
+
+export interface ImportCFPackRequest {
+  zip_path: string;
+}
+
+export interface CFPackImportResultDTO {
+
+  instance_id: string;
+  downloaded: number;
+  override_files: number;
+  skipped_credentials: string[];
+  failed_files: string[];
+  unresolved: string[];
+}
+
+export interface DiscordRpcStatusDTO {
+  enabled: boolean;
+  connected: boolean;
+  app_id_set: boolean;
+  has_activity: boolean;
+  last_error?: string;
+}
+
+export interface DiscordRpcPreviewDTO {
+  details: string;
+  state: string;
+}
+`
 
 	if err := os.WriteFile("internal/adapters/wails/ipc_types.go", []byte(goContent), 0644); err != nil {
 		fmt.Printf("failed to write go types: %v\n", err)
