@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/nord-launcher/launcher/internal/releasetool"
 	"time"
 )
 
@@ -368,7 +370,7 @@ func TestClientPackageCarriesNoSigningMaterial(t *testing.T) {
 			"NewKeyFromSeed",
 			"ed25519.GenerateKey",
 			"PrivateKeyHex",
-			"88ec59f652844aded5ef72635fd0621042ffff0b75ec7c0e20185255b374f9af",
+			releasetool.StagingPrivateKeyHex, // single source of truth, not a copy
 			"internal/releasetool",
 		} {
 			if strings.Contains(text, banned) {

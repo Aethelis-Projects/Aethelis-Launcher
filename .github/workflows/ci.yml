@@ -102,7 +102,15 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          SEED="88ec59f652844aded5ef72635fd0621042ffff0b75ec7c0e20185255b374f9af"
+          # Derived from the single source of truth (internal/releasetool), never
+          # copied here: a duplicated literal is how a gate ends up grepping for a
+          # value that no longer exists and passing vacuously. If the constant is
+          # renamed or reformatted, this fails loudly instead.
+          SEED=$(sed -n 's/.*StagingPrivateKeyHex = "\([0-9a-f]\{64\}\)".*/\1/p' internal/releasetool/stagingkey.go | head -1)
+          if [ -z "$SEED" ]; then
+            echo "ERROR: could not read StagingPrivateKeyHex from internal/releasetool - this gate would be blind."
+            exit 1
+          fi
           mkdir -p /tmp/ci-bins
           go build -o /tmp/ci-bins/launcher ./cmd/launcher
           go build -o /tmp/ci-bins/genmanifest ./scripts/generate_manifest.go
