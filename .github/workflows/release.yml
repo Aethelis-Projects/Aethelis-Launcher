@@ -501,7 +501,7 @@ jobs:
             exit 1
           fi
           EXTRA=""
-          if [ "$STAGING" = "true" ]; then EXTRA="--allow-insecure-dev-key"; fi
+          if [ "$STAGING" = "true" ]; then EXTRA="--allow-insecure-dev-key --staging-key"; fi
           go run scripts/generate_manifest.go \
             -version "${{ env.RELEASE_TAG }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
