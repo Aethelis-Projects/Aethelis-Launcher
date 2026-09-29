@@ -107,7 +107,7 @@ Strict Hexagonal Architecture (Ports & Adapters):
 ## Requirements
 
 - **Windows**: Windows 10 (1809+ / Build 17763 or newer) and Windows 11, 64-bit x64. Older Windows is explicitly rejected at the installer level.
-- **Linux**: Ubuntu 22.04 LTS or newer (x64) with GTK4 and WebKitGTK 6.0.
+- **Linux**: Ubuntu 22.04 LTS or newer (x64) with GTK4 and WebKitGTK 6.0. (the default build backend - CI and release builds compile it with no build tags; `-tags gtk3` is the optional webkit2gtk-4.1 variant for distros without WebKitGTK 6.0).
 - **macOS**: planned for a future milestone.
 
 ## Java Runtime Matrix

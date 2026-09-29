@@ -27,7 +27,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag || github.sha }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -179,7 +179,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag || github.sha }}
 
       - name: Resolve Release Tag
         id: tag
@@ -284,12 +284,19 @@ jobs:
     # for, and it can only exist because dispatch sits BESIDE on: push: tags.
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     env:
-      RELEASE_TAG: ${{ needs.build-linux.outputs.release_tag }}
+      # Tag pushes: the real tag. Dispatch (dry-run/rehearsal, incl. before any
+      # tag exists): v$(cat VERSION) from the checked-out commit - the version
+      # gates below are tag-push-only, so the rehearsal never dies on a
+      # pseudo-tag; metrics.json is still stamped with the VERSION it builds.
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ github.event.inputs.tag || github.sha }}
+          # merge-base --is-ancestor in the placement gate needs real history;
+          # shallow default (depth 1) makes it "Not a git repository"-grade fail.
+          fetch-depth: ${{ startsWith(github.ref, 'refs/tags/') && 0 || 50 }}
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -349,7 +356,17 @@ jobs:
           echo "PASS: CI status verified on release commit."
         shell: bash
 
+      - name: Resolve Release Tag (audit echo only; env.RELEASE_TAG above is authoritative)
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "release tag: ${GITHUB_REF_NAME}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "dispatch rehearsal of v$(cat VERSION) (no publication: version/changelog gates are tag-push-only)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+        shell: bash
+
       - name: Release Placement Gate (tag must be reachable from master)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         # Mechanically enforces docs/RELEASE.md: tags belong on the merged
         # default-branch commit (a tag on a branch head differs from the
         # squash-merge result and silently escapes master).
@@ -369,6 +386,7 @@ jobs:
         shell: bash
 
       - name: Verify Changelog Entry Exists for Version (DEFECT-3 Gate)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: |
           TAG="${{ env.RELEASE_TAG }}"
           CLEAN_VER="${TAG#v}"
@@ -382,6 +400,7 @@ jobs:
         shell: bash
 
       - name: Version Single-Source Gate (tag == VERSION == package.json == wails.json)
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
         run: node scripts/check_version_consistency.js "${{ env.RELEASE_TAG }}"
         shell: bash
 

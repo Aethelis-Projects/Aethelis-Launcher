@@ -772,6 +772,9 @@ func (a *WailsAdapter) LoginMicrosoft() (*AccountDTO, error) {
 }
 
 func openBrowserCrossPlatform(url string) error {
+	if err := validateExternalURL(url); err != nil {
+		return err
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -4335,4 +4338,22 @@ func (a *WailsAdapter) GetDiscordRpcPreview(req InstanceIDRequest) (*DiscordRpcP
 	dto.Details = "Minecraft " + inst.GameVersion
 	dto.State = inst.Name
 	return dto, nil
+}
+
+// validateExternalURL gates every URL handed to the OS browser opener
+// (rundll32/xdg-open/open). URLs reaching this point can originate from
+// user-authored Modrinth/CurseForge data (source_url etc.); scheme-only is
+// the whole defence against launching arbitrary protocol handlers.
+func validateExternalURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("open-url: unparseable URL: %w", err)
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("open-url: refusing scheme %q (only http/https may reach the OS handler)", u.Scheme)
+	}
+	if u.Host == "" {
+		return errors.New("open-url: refusing URL without a host")
+	}
+	return nil
 }
