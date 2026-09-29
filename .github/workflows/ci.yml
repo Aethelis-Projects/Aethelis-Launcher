@@ -93,6 +93,34 @@ jobs:
           echo "PASS: no workflow parse/expression errors."
         shell: bash
 
+      - name: Release Signing Material Stays Out of the Client Binary
+        # v0.7.2 round-6 (owner p1): internal/releasetool holds the published
+        # staging SEED (a private key). It is only safe while the client cannot
+        # see it, so the gate greps the actual binaries - and carries a positive
+        # control (the generator must contain the seed) so a broken grep, a wrong
+        # path or a silent build failure cannot fake a pass.
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          SEED="88ec59f652844aded5ef72635fd0621042ffff0b75ec7c0e20185255b374f9af"
+          mkdir -p /tmp/ci-bins
+          go build -o /tmp/ci-bins/launcher ./cmd/launcher
+          go build -o /tmp/ci-bins/genmanifest ./scripts/generate_manifest.go
+          if go list -deps ./cmd/launcher | grep -q "internal/releasetool"; then
+            echo "ERROR: cmd/launcher transitively imports internal/releasetool"
+            exit 1
+          fi
+          if grep -aq "$SEED" /tmp/ci-bins/launcher; then
+            echo "ERROR: the staging private seed is embedded in the shipped client binary"
+            exit 1
+          fi
+          if ! grep -aq "$SEED" /tmp/ci-bins/genmanifest; then
+            echo "ERROR: positive control failed - the generator does not contain the seed, so the client grep proves nothing"
+            exit 1
+          fi
+          echo "PASS: client binary free of signing material (positive control on the generator binary verified)."
+        shell: bash
+
       - name: Verify gofmt (CI-measured, keeps the README claim honest)
         # Command substitution is not portable: Git Bash on Windows execs
         # real gofmt but /usr/bin/bash for `$(...)`, so capture the list via

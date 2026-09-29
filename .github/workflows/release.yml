@@ -392,7 +392,8 @@ jobs:
         shell: bash
 
       - name: Verify Changelog Entry Exists for Version (DEFECT-3 Gate)
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        # Runs on rehearsals too (owner p1) - a missing release-notes section is
+        # exactly the kind of thing that must not first surface on the tag.
         run: |
           TAG="${{ env.RELEASE_TAG }}"
           CLEAN_VER="${TAG#v}"
@@ -406,35 +407,85 @@ jobs:
         shell: bash
 
       - name: Version Single-Source Gate (tag == VERSION == package.json == wails.json)
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        # On dispatch RELEASE_TAG is v$(cat VERSION), i.e. the same shape a tag run
+        # gets, so the gate is exercised rather than skipped.
         run: node scripts/check_version_consistency.js "${{ env.RELEASE_TAG }}"
         shell: bash
 
-      - name: Ed25519 Key Selection (hard-fail on tag pushes, staging key for rehearsal)
+      - name: Preflight Production Signing Key (format + trust-root match)
+        # v0.7.2 round-6 (owner p2): a dispatch rehearsal signs with the staging
+        # key, so nothing else in CI ever proves that ED25519_PRIVATE_KEY parses
+        # under the SAME parser the generator uses and derives to the public key
+        # pinned in internal/core/updater. A mismatch is unfixable once the tag is
+        # out (every installed client would reject the update), so it is checked
+        # here, before signing, and never after publishing. Only public halves are
+        # printed; the secret itself is never read into a log or a file.
+        env:
+          ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          go run ./scripts/check_signing_key.go -selftest
+          # Build then exec: `go run` collapses any non-zero program exit to 1,
+          # which would erase the difference between "secret missing" (rc 3, a
+          # warning on rehearsals) and "secret wrong" (rc 1, always fatal).
+          go build -o /tmp/check_signing_key ./scripts/check_signing_key.go
+          rc=0
+          /tmp/check_signing_key -env ED25519_PRIVATE_KEY || rc=$?
+          if [ "$rc" -eq 3 ]; then
+            if [ "$IS_TAG" = "true" ]; then
+              echo "CRITICAL ERROR: tag release without ED25519_PRIVATE_KEY - refusing to fall back to the staging key."
+              exit 1
+            fi
+            echo "::warning::ED25519_PRIVATE_KEY is not configured in this repository: the rehearsal proceeds with the staging key, but 'gh workflow run' cannot prove the production key. Set it before cutting v0.7.2."
+            exit 0
+          fi
+          exit "$rc"
+        shell: bash
+
+      - name: Ed25519 Key Selection (tag runs MUST use the prod secret; dispatch is always staging)
         id: key
         env:
           SECRET: ${{ secrets.ED25519_PRIVATE_KEY }}
         run: |
-          if [ -z "$SECRET" ]; then
-            if [ "$IS_TAG" = "true" ]; then
-              echo "CRITICAL ERROR: ED25519_PRIVATE_KEY repository secret is not configured!"
-              echo "Official releases cannot be signed without a secure cryptographic key."
-              exit 1
-            fi
-            echo "REHEARSAL: signing with the repo staging key so the signature path is exercised; the verify step checks the matching public half."
+          set -euo pipefail
+          # IS_TAG comes from github.ref (job env: IS_TAG = startsWith(github.ref,
+          # 'refs/tags/')), NOT from inputs.tag: a dispatch pointed at an existing tag
+          # still runs as a rehearsal, so it can never acquire production authority.
+          # (An actionlint lesson: never write an unclosed expression inside a run block.)
+          if [ "$IS_TAG" != "true" ]; then
+            echo "REHEARSAL: signing with the repo staging key so the signature path is exercised."
+            echo "The rehearsal manifest is deliberately NOT production-valid: its asset signatures"
+            echo "must be rejected by the shipped client (cmd/e2e stage 16 asserts exactly that)."
             echo "staging=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "staging=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          if [ -z "$SECRET" ]; then
+            echo "CRITICAL ERROR: ED25519_PRIVATE_KEY repository secret is not configured!"
+            echo "Official releases cannot be signed without it - and no staging fallback exists here."
+            exit 1
+          fi
+          echo "staging=false" >> "$GITHUB_OUTPUT"
         shell: bash
 
       - name: Generate Signed Ed25519 Update Manifest
-        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
+        # Ungated on purpose (owner p1): the signature path is the thing that first
+        # runs on a tag otherwise. Publication below stays tag-only, so a rehearsal
+        # only ever writes files inside this job.
         env:
           ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
         run: |
+          set -euo pipefail
+          STAGING="${{ steps.key.outputs.staging }}"
+          if [ "$STAGING" = "true" ] && [ "$IS_TAG" = "true" ]; then
+            echo "CRITICAL ERROR: a tag release resolved to the staging key. Refusing to publish a manifest no client will trust."
+            exit 1
+          fi
+          if [ "$STAGING" != "true" ] && [ -z "${ED25519_PRIVATE_KEY:-}" ]; then
+            echo "CRITICAL ERROR: prod signing requested but ED25519_PRIVATE_KEY is empty at this step."
+            exit 1
+          fi
           EXTRA=""
-          if [ "${{ steps.key.outputs.staging }}" = "true" ]; then EXTRA="--allow-insecure-dev-key"; fi
+          if [ "$STAGING" = "true" ]; then EXTRA="--allow-insecure-dev-key"; fi
           go run scripts/generate_manifest.go \
             -version "${{ env.RELEASE_TAG }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
@@ -456,7 +507,19 @@ jobs:
         run: |
           FLAG=""
           if [ "${{ steps.key.outputs.staging }}" = "true" ]; then FLAG="--staging-pubkey"; fi
+          # No flag on a tag run => verification uses updater.GetDefaultPublicKey(),
+          # i.e. exactly the trust root the shipped client has, after signing and
+          # before publication (owner p2).
           go run ./scripts/verify_manifest_sig.go --dist release-assets --channel "${{ steps.meta.outputs.channel }}" $FLAG
+          if [ "${{ steps.key.outputs.staging }}" = "true" ]; then
+            # Prove the rehearsal artifact really is rehearsal-only: the production
+            # client's key must reject what the staging key signed.
+            if go run ./scripts/verify_manifest_sig.go --dist release-assets --channel "${{ steps.meta.outputs.channel }}" >/dev/null 2>&1; then
+              echo "CRITICAL ERROR: a staging-signed manifest verified against the PRODUCTION client key - the two keys are not isolated."
+              exit 1
+            fi
+            echo "PASS: the production client key rejects the rehearsal signature (staging isolation holds in CI, not only in tests)."
+          fi
         shell: bash
 
       - name: Generate Release Body with Complete 6-Row Artifact Table (DEFECT-2 Fix)
@@ -470,7 +533,6 @@ jobs:
             -body-only
 
       - name: Verify Release Body Length & Content
-        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         run: |
           if [ ! -f "release-body.md" ]; then
             echo "ERROR: release-body.md was not generated!"

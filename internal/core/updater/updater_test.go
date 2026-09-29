@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -345,28 +346,42 @@ func TestCheckForUpdates_DevVersionIsSilent(t *testing.T) {
 	}
 }
 
-// v0.7.2 round-5: CI dispatch rehearsals sign with the staging key and verify
-// with StagingPublicKey(), while shipped clients only trust GetDefaultPublicKey.
-// If those two ever coincide, a rehearsal artifact becomes a production-valid
-// signature - this test is the tripwire. It also proves the sign/verify circle
-// (same construction as scripts/generate_manifest.go) is internally sound.
-func TestStagingKeyIsIsolatedFromProduction(t *testing.T) {
-	staging := StagingPublicKey()
-	prod := GetDefaultPublicKey()
-	if staging.Equal(ed25519.PublicKey(prod)) {
-		t.Fatal("staging key must never equal the production key")
+// v0.7.2 round-6 (owner p1): the client trust root must stay a trust root - no
+// staging material, no overridable key. Signing lives in internal/releasetool
+// (which the client never imports); this test fails if anyone moves a private
+// key or a "trust this instead" knob back into the client package.
+func TestClientPackageCarriesNoSigningMaterial(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
 	}
-	seed, err := hex.DecodeString(StagingPrivateKeyHex)
-	if err != nil || len(seed) != ed25519.SeedSize {
-		t.Fatalf("staging constant must be a 32-byte seed, got len=%d err=%v", len(seed), err)
-	}
-	priv := ed25519.NewKeyFromSeed(seed)
-	payload := []byte("nord-launcher-rehearsal-payload")
-	sig := SignPayload(priv, payload)
-	if !VerifyPayload(staging, payload, sig) {
-		t.Fatal("signer and verifier disagree on the staging key")
-	}
-	if VerifyPayload(prod, payload, sig) {
-		t.Fatal("staging signature must not verify against the production key")
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		text := string(data)
+		for _, banned := range []string{
+			"NewKeyFromSeed",
+			"ed25519.GenerateKey",
+			"PrivateKeyHex",
+			"88ec59f652844aded5ef72635fd0621042ffff0b75ec7c0e20185255b374f9af",
+			"internal/releasetool",
+		} {
+			if strings.Contains(text, banned) {
+				t.Errorf("%s contains %q - private-key material belongs in internal/releasetool, not in the client", e.Name(), banned)
+			}
+		}
+		if strings.Contains(text, "ED25519_PRIVATE_KEY") {
+			t.Errorf("%s reads a signing key from the environment: the client must never be able to sign or to re-trust", e.Name())
+		}
+		for _, knob := range []string{"SetPublicKey", "WithPublicKey", "TrustedPublicKey", "InsecureSkipVerify"} {
+			if strings.Contains(text, knob) {
+				t.Errorf("%s exposes %q: an override of the pinned trust root is the bug this test exists to catch", e.Name(), knob)
+			}
+		}
 	}
 }

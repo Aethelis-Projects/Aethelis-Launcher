@@ -15,11 +15,14 @@ import (
 	"time"
 
 	"github.com/nord-launcher/launcher/internal/core/updater"
+	"github.com/nord-launcher/launcher/internal/releasetool"
 )
 
-// DefaultStagingPrivateKeyHex is declared once, in the updater package, next to
-// the verifier's trust root (v0.7.2 round-5: signer and verifier cannot drift).
-const DefaultStagingPrivateKeyHex = updater.StagingPrivateKeyHex
+// DefaultStagingPrivateKeyHex now lives in internal/releasetool (v0.7.2 round-6,
+// owner p1): the staging SEED is private key material published in a public
+// repo, so it must not be compiled into the client. The signer (here) and the
+// verifier tool share one constant and one parser, so they cannot drift.
+const DefaultStagingPrivateKeyHex = releasetool.StagingPrivateKeyHex
 
 func main() {
 	var (
@@ -58,12 +61,16 @@ func main() {
 			fmt.Println("[SECURITY WARNING] Manifest signed with INSECURE dev key! Do not deploy to production.")
 		}
 
-		privSeed, err := hex.DecodeString(privHex)
-		if err != nil || len(privSeed) != ed25519.SeedSize {
-			fmt.Fprintf(os.Stderr, "Error: invalid ed25519 private key seed (must be 32 hex bytes): %v\n", err)
+		// Single parser (internal/releasetool): accepts a 32-byte seed or a
+		// 64-byte full key, rejects base64/PEM with the contract text, and never
+		// echoes the secret. The first rehearsal panicked precisely because this
+		// file assumed SeedSize while a helper assumed PrivateKeySize.
+		parsed, err := releasetool.PrivateKeyFromHex(privHex)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
-		privKey = ed25519.NewKeyFromSeed(privSeed)
+		privKey = parsed
 	}
 
 	rawVersion := *versionFlag

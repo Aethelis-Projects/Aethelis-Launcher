@@ -32,35 +32,6 @@ var (
 // DefaultPublicKeyHex is the official release manifest Ed25519 public key.
 const DefaultPublicKeyHex = "c11aa844849500fb8bc9d6dd006ee3fcafafecac638ae3fedcce6a4553be0af3"
 
-// StagingPrivateKeyHex is the dev/test-only signing key that
-// scripts/generate_manifest.go falls back to when ED25519_PRIVATE_KEY is unset
-// (CI dispatch rehearsals use it so the signature path is exercised). It lives
-// in the CLIENT package because the only honest way to verify a
-// staging-signed manifest is the public half derived by the same code that
-// produced it - duplicating either half invites silent drift.
-const StagingPrivateKeyHex = "88ec59f652844aded5ef72635fd0621042ffff0b75ec7c0e20185255b374f9af"
-
-// StagingPublicKey derives the staging key half used for rehearsal signing.
-// Production clients never accept it: they pin GetDefaultPublicKey only.
-func StagingPublicKey() ed25519.PublicKey {
-	raw, err := hex.DecodeString(StagingPrivateKeyHex)
-	if err != nil {
-		panic("invalid staging ed25519 key constant")
-	}
-	// Same construction as scripts/generate_manifest.go: the constant is the
-	// 32-byte SEED (ed25519.NewKeyFromSeed), not a 64-byte private key.
-	var priv ed25519.PrivateKey
-	switch len(raw) {
-	case ed25519.SeedSize:
-		priv = ed25519.NewKeyFromSeed(raw)
-	case ed25519.PrivateKeySize:
-		priv = ed25519.PrivateKey(raw)
-	default:
-		panic("invalid staging ed25519 key constant length")
-	}
-	return priv.Public().(ed25519.PublicKey)
-}
-
 // GetDefaultPublicKey returns the decoded Ed25519 public key.
 func GetDefaultPublicKey() ed25519.PublicKey {
 	b, err := hex.DecodeString(DefaultPublicKeyHex)

@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 
 	"github.com/nord-launcher/launcher/internal/core/updater"
+	"github.com/nord-launcher/launcher/internal/releasetool"
 )
 
 func main() {
@@ -54,7 +55,11 @@ func main() {
 		}
 		pub = pk.Public().(ed25519.PublicKey)
 	case *staging:
-		pub = updater.StagingPublicKey()
+		stagingPub, perr := releasetool.StagingPublicKey()
+		if perr != nil {
+			fail("staging public half: %v", perr)
+		}
+		pub = stagingPub
 	default:
 		pub = updater.GetDefaultPublicKey()
 	}

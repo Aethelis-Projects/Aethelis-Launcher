@@ -45,6 +45,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
+	"github.com/nord-launcher/launcher/internal/releasetool"
 )
 
 func main() {
@@ -1797,8 +1798,152 @@ func main() {
 	}
 	logf("PASS: Step 15 catalog provider parity: CF modpack gate + Modrinth live tags (%d).", len(tagz))
 
+	// ---------------------------------------------------------------------
+	// Stage 16 (v0.7.2 round-6, owner p1): the staging seed is published in this
+	// repository, so the whole safety argument is "the client trusts exactly one
+	// key". Here that argument is executed, not asserted in prose: a real
+	// manifest is signed by the real generator with the STAGING key, then fed
+	// through the real client update path (updater.AutoUpdater with
+	// GetDefaultPublicKey) - the update must be refused and the running
+	// executable left untouched. A control pass with the staging public half
+	// proves the refusal came from the trust root and not from a broken fixture.
+	// ---------------------------------------------------------------------
+	{
+		step16Tmp, err := os.MkdirTemp("", "nord-e2e-step16-*")
+		if err != nil {
+			logf("FAIL: Step 16 tmpdir: %v", err)
+			os.Exit(1)
+		}
+		defer os.RemoveAll(step16Tmp) // errcheck:ok cleanup e2e scratch directory
+		step16Dist := filepath.Join(step16Tmp, "dist")
+		if err := os.MkdirAll(step16Dist, 0755); err != nil {
+			logf("FAIL: Step 16 mkdir dist: %v", err)
+			os.Exit(1)
+		}
+		step16Payload := []byte("nord-launcher-v0.9.8-staging-signed-update-payload")
+		step16Name := "nord-launcher-0.9.8.tar.gz"
+		if runtime.GOOS == "windows" {
+			step16Name = "NordLauncher.exe"
+		}
+		step16Artifact := filepath.Join(step16Dist, step16Name)
+		if err := os.WriteFile(step16Artifact, step16Payload, 0644); err != nil {
+			logf("FAIL: Step 16 write artifact: %v", err)
+			os.Exit(1)
+		}
+		step16Manifest := filepath.Join(step16Dist, "manifest-stable.json")
+		stagingPriv, err := releasetool.StagingPrivateKey()
+		if err != nil {
+			logf("FAIL: Step 16 staging key: %v", err)
+			os.Exit(1)
+		}
+		gen16 := exec.Command(genmanifestBin,
+			"-version", "0.9.8",
+			"-channel", "stable",
+			"-dist", step16Dist,
+			"-out", step16Manifest,
+			"-privkey-hex", hex.EncodeToString(stagingPriv.Seed()),
+			"-allow-insecure-dev-key",
+		)
+		if out, err := gen16.CombinedOutput(); err != nil {
+			logf("FAIL: Step 16 staging signing: %v\n%s", err, out)
+			os.Exit(1)
+		}
+		raw16, err := os.ReadFile(step16Manifest)
+		if err != nil {
+			logf("FAIL: Step 16 read manifest: %v", err)
+			os.Exit(1)
+		}
+		var manifest16 updater.UpdateManifest
+		if err := json.Unmarshal(raw16, &manifest16); err != nil {
+			logf("FAIL: Step 16 parse manifest: %v", err)
+			os.Exit(1)
+		}
+		plat16 := updater.CurrentPlatformKey()
+		asset16, ok := manifest16.Platforms[plat16]
+		if !ok || asset16.Signature == "" {
+			logf("FAIL: Step 16 manifest lacks the current platform %s", plat16)
+			os.Exit(1)
+		}
+		var srv16 *httptest.Server
+		srv16 = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/payload":
+				_, _ = w.Write(step16Payload) // errcheck:ok mock update server
+			case "/manifest":
+				// Re-point the asset URL at this server, keeping signature/hash/size
+				// untouched - same trick step 8 uses, so the client exercises its real
+				// download path instead of 404ing on a github.com URL.
+				served := manifest16
+				served.Platforms = make(map[string]updater.PlatformAsset)
+				for k, v := range manifest16.Platforms {
+					v.URL = srv16.URL + "/payload"
+					served.Platforms[k] = v
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(served) // errcheck:ok mock update server
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer srv16.Close()
+
+		step16Exe := filepath.Join(step16Tmp, "launcher-under-test")
+		if err := os.WriteFile(step16Exe, []byte("ORIGINAL-CLIENT-BINARY"), 0755); err != nil {
+			logf("FAIL: Step 16 seed exe: %v", err)
+			os.Exit(1)
+		}
+
+		// 1) The shipped trust root must refuse a staging-signed update.
+		prodClient := updater.NewAutoUpdater("0.7.1", srv16.URL+"/manifest", updater.GetDefaultPublicKey(), srv16.Client())
+		info16, err := prodClient.CheckForUpdates(context.Background())
+		if err != nil || info16 == nil || !info16.Available {
+			logf("FAIL: Step 16 the manifest should be offered (0.9.8 > 0.7.1) so the refusal happens at apply time, got %+v err=%v", info16, err)
+			os.Exit(1)
+		}
+		if err := prodClient.DownloadAndApply(context.Background(), info16.Asset, step16Exe); err == nil {
+			logf("FAIL: Step 16 CRITICAL: a staging-signed update was APPLIED by a production client")
+			os.Exit(1)
+		} else if !strings.Contains(err.Error(), updater.ErrSignatureInvalid.Error()) {
+			logf("FAIL: Step 16 expected signature rejection, got: %v", err)
+			os.Exit(1)
+		}
+		kept, err := os.ReadFile(step16Exe)
+		if err != nil || string(kept) != "ORIGINAL-CLIENT-BINARY" {
+			logf("FAIL: Step 16 the refused update touched the running executable (err=%v)", err)
+			os.Exit(1)
+		}
+		if _, err := os.Stat(step16Exe + ".new"); !os.IsNotExist(err) {
+			logf("FAIL: Step 16 a rejected download left .new staged next to the executable")
+			os.Exit(1)
+		}
+
+		// 2) Control: same bytes, staging trust root -> applies. Without this the
+		//    check above would also pass on a fixture that fails for the wrong reason.
+		stagingPub, err := releasetool.StagingPublicKey()
+		if err != nil {
+			logf("FAIL: Step 16 staging pubkey: %v", err)
+			os.Exit(1)
+		}
+		testClient := updater.NewAutoUpdater("0.7.1", srv16.URL+"/manifest", stagingPub, srv16.Client())
+		info16b, err := testClient.CheckForUpdates(context.Background())
+		if err != nil {
+			logf("FAIL: Step 16 control check: %v", err)
+			os.Exit(1)
+		}
+		if err := testClient.DownloadAndApply(context.Background(), info16b.Asset, step16Exe); err != nil {
+			logf("FAIL: Step 16 control (staging trust root) could not apply the same manifest - the fixture is broken, not the trust check: %v", err)
+			os.Exit(1)
+		}
+		applied, _ := os.ReadFile(step16Exe)
+		if string(applied) != string(step16Payload) {
+			logf("FAIL: Step 16 control applied the wrong bytes (%d)", len(applied))
+			os.Exit(1)
+		}
+		logf("PASS: Step 16 a staging-signed manifest is refused by the production client (signature, not parsing) and the control trust root accepts the same bytes.")
+	}
+
 	logf("\n=================================================================")
-	logf(" ALL 15 E2E STAGES PASSED")
+	logf(" ALL 16 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt
