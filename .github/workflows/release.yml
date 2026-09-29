@@ -266,11 +266,27 @@ jobs:
       - name: Frontend Bundle Size (README metrics, gzip)
         id: assetmeta
         run: |
-          DIST=$(ls -d frontend/dist dist/linux/frontend 2>/dev/null | head -1)
-          TOTAL=$(find "$DIST" \( -name "*.js" -o -name "*.css" \) -print0 | xargs -0 -r gzip -9 -c 2>/dev/null | wc -c)
+          # `ls -d a b` exits 2 when ANY operand is missing - even if the other one
+          # exists - and `set -o pipefail` turns that into a failed assignment. That
+          # is how the v0.7.2 dispatch rehearsal died here (nothing else was wrong).
+          # Probe the candidates instead, and fail loudly if none is a directory:
+          # silently reporting 0 KB would poison metrics.json and the README number.
+          DIST=""
+          for candidate in frontend/dist dist/linux/frontend; do
+            if [ -d "$candidate" ]; then DIST="$candidate"; break; fi
+          done
+          if [ -z "$DIST" ]; then
+            echo "ERROR: no frontend bundle found after the release build (looked at: frontend/dist, dist/linux/frontend) - the tarball step must have produced it."
+            exit 1
+          fi
+          TOTAL=$(find "$DIST" \( -name "*.js" -o -name "*.css" \) -print0 | xargs -0 -r gzip -9 -c | wc -c)
+          if [ "${TOTAL:-0}" -le 0 ]; then
+            echo "ERROR: $DIST contains no .js/.css to measure - the frontend build did not produce a bundle."
+            exit 1
+          fi
           KB=$(( (TOTAL + 1023) / 1024 ))
           echo "bundle_gzip_kb=${KB}" >> "$GITHUB_OUTPUT"
-          echo "frontend bundle gzip from ${DIST}: ${KB} KB"
+          echo "frontend bundle gzip from ${DIST}: ${KB} KB (${TOTAL} bytes)"
         shell: bash
 
       - name: Upload Linux Artifacts
