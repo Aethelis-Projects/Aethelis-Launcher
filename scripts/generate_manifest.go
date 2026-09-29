@@ -32,6 +32,7 @@ func main() {
 		outputFile          = flag.String("out", "", "Output manifest path (default: dist/manifest-{channel}.json)")
 		privKeyEnv          = flag.String("privkey-hex", "", "Hex-encoded Ed25519 private key (optional, falls back to ED25519_PRIVATE_KEY)")
 		allowInsecureDevKey = flag.Bool("allow-insecure-dev-key", false, "Allow fallback to insecure hardcoded staging private key for local development")
+		forceStagingFlag    = flag.Bool("staging-key", false, "Force the repo staging seed and IGNORE ED25519_PRIVATE_KEY (CI rehearsals: a rehearsal artifact must never be production-valid)")
 		changelogFile       = flag.String("changelog-file", "CHANGELOG.md", "Path to CHANGELOG.md to extract release notes")
 		bodyFile            = flag.String("out-body", "", "Output release notes markdown path for GitHub Release body (optional)")
 		bodyOnlyFlag        = flag.Bool("body-only", false, "Only generate release body, do not sign or write update manifest")
@@ -44,6 +45,16 @@ func main() {
 		privHex := *privKeyEnv
 		if privHex == "" {
 			privHex = os.Getenv("ED25519_PRIVATE_KEY")
+		}
+		if *forceStagingFlag {
+			// CI rehearsals (owner p2, v0.7.2 round 6): "staging mode" must be a
+			// property of the run, not of which env vars happen to be exported.
+			// Before this, a dispatch rehearsal with the production secret present
+			// silently signed with the PROD key - the verify step then rejected it
+			// (so the rehearsal went red for the wrong reason) and, worse, the
+			// rehearsal artifact was production-valid. Overriding the env here makes
+			// "rehearsal => staging, tag => prod secret" mechanically true.
+			privHex = DefaultStagingPrivateKeyHex
 		}
 		if privHex == "" {
 			if !*allowInsecureDevKey {

@@ -1939,6 +1939,61 @@ func main() {
 			logf("FAIL: Step 16 control applied the wrong bytes (%d)", len(applied))
 			os.Exit(1)
 		}
+		// 3) Regression for the round-6 rehearsal bug: "rehearsal mode" must be a
+		// property of the run, not of which env vars happen to be exported. With a
+		// foreign production-shaped seed in ED25519_PRIVATE_KEY, -staging-key has to
+		// ignore it and sign with the repo staging seed anyway.
+		_, foreignPriv, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			logf("FAIL: Step 16 ephemeral key: %v", err)
+			os.Exit(1)
+		}
+		forceDist := filepath.Join(step16Tmp, "forced")
+		if err := os.MkdirAll(forceDist, 0755); err != nil {
+			logf("FAIL: Step 16 mkdir forced dist: %v", err)
+			os.Exit(1)
+		}
+		forceArtifact := filepath.Join(forceDist, step16Name)
+		if err := os.WriteFile(forceArtifact, step16Payload, 0644); err != nil {
+			logf("FAIL: Step 16 forced artifact: %v", err)
+			os.Exit(1)
+		}
+		forceManifest := filepath.Join(forceDist, "manifest-stable.json")
+		forceCmd := exec.Command(genmanifestBin,
+			"-version", "0.9.7", "-channel", "stable",
+			"-dist", forceDist, "-out", forceManifest,
+			"-staging-key", "-allow-insecure-dev-key",
+		)
+		forceCmd.Env = append(os.Environ(), "ED25519_PRIVATE_KEY="+hex.EncodeToString(foreignPriv.Seed()))
+		if out, err := forceCmd.CombinedOutput(); err != nil {
+			logf("FAIL: Step 16 generator with -staging-key: %v\n%s", err, out)
+			os.Exit(1)
+		}
+		forceRaw, err := os.ReadFile(forceManifest)
+		if err != nil {
+			logf("FAIL: Step 16 read forced manifest: %v", err)
+			os.Exit(1)
+		}
+		var forcedManifest updater.UpdateManifest
+		if err := json.Unmarshal(forceRaw, &forcedManifest); err != nil {
+			logf("FAIL: Step 16 parse forced manifest: %v", err)
+			os.Exit(1)
+		}
+		forcedAsset := forcedManifest.Platforms[plat16]
+		forcedSig, err := base64.StdEncoding.DecodeString(forcedAsset.Signature)
+		if err != nil {
+			logf("FAIL: Step 16 decode forced signature: %v", err)
+			os.Exit(1)
+		}
+		if !updater.VerifyPayload(stagingPub, step16Payload, forcedSig) {
+			logf("FAIL: Step 16 -staging-key did not sign with the staging seed")
+			os.Exit(1)
+		}
+		if updater.VerifyPayload(foreignPriv.Public().(ed25519.PublicKey), step16Payload, forcedSig) {
+			logf("FAIL: Step 16 CRITICAL: -staging-key still honoured ED25519_PRIVATE_KEY, so a rehearsal artifact could be production-valid")
+			os.Exit(1)
+		}
+
 		logf("PASS: Step 16 a staging-signed manifest is refused by the production client (signature, not parsing) and the control trust root accepts the same bytes.")
 	}
 
