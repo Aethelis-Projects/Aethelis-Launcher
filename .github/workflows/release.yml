@@ -632,6 +632,13 @@ jobs:
         shell: bash
 
       - name: Verify Published Release Assets (N2 Assert 4)
+        # Runs only when a release actually exists: it queries `gh release view`,
+        # and a dispatch rehearsal publishes nothing (that is the whole point of
+        # the rehearsal), so the check used to die with "release not found" as the
+        # final step of an otherwise green rehearsal - which trains everyone to
+        # ignore the last red X. The security assertion itself stays on every real
+        # publication.
+        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
