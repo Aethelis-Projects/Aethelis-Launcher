@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go/format"
 	"os"
 )
 
@@ -118,6 +119,74 @@ type SearchModsRequest struct {
 	Offset      int    ` + "`" + `json:"offset"` + "`" + `
 	Sort        string ` + "`" + `json:"sort,omitempty"` + "`" + `
 	Category    string ` + "`" + `json:"category,omitempty"` + "`" + `
+	ProjectType string ` + "`" + `json:"project_type,omitempty"` + "`" + `
+}
+
+type GameVersionDTO struct {
+	ID string      ` + "`" + `json:"id"` + "`" + `
+	Type string      ` + "`" + `json:"type"` + "`" + `
+	ReleaseTime string ` + "`" + `json:"release_time"` + "`" + `
+}
+
+type ListMinecraftVersionsRequest struct {
+	Channel string ` + "`" + `json:"channel,omitempty"` + "`" + `
+}
+
+type ListLoaderVersionsRequest struct {
+	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
+	Loader string ` + "`" + `json:"loader"` + "`" + `
+}
+
+type LoaderResolutionDTO struct {
+	Loader string   ` + "`" + `json:"loader"` + "`" + `
+	Default string   ` + "`" + `json:"default"` + "`" + `
+	Options []string ` + "`" + `json:"options"` + "`" + `
+	Source string   ` + "`" + `json:"source"` + "`" + `
+	Note string ` + "`" + `json:"note,omitempty"` + "`" + `
+}
+
+type CreateInstanceWithLoaderRequest struct {
+	Name string ` + "`" + `json:"name"` + "`" + `
+	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
+	Loader string ` + "`" + `json:"loader"` + "`" + `
+	LoaderVersion string ` + "`" + `json:"loader_version,omitempty"` + "`" + `
+}
+
+type ListMrPackVersionsRequest struct {
+	ProjectSlug string ` + "`" + `json:"project_slug"` + "`" + `
+	GameVersion string ` + "`" + `json:"game_version,omitempty"` + "`" + `
+	Loader string ` + "`" + `json:"loader,omitempty"` + "`" + `
+}
+
+type MrPackVersionDTO struct {
+	VersionID string    ` + "`" + `json:"version_id"` + "`" + `
+	Name string    ` + "`" + `json:"name"` + "`" + `
+	VersionType string    ` + "`" + `json:"version_type"` + "`" + `
+	GameVersion string    ` + "`" + `json:"game_version"` + "`" + `
+	Loaders []string ` + "`" + `json:"loaders"` + "`" + `
+	URL string    ` + "`" + `json:"url"` + "`" + `
+	Filename string    ` + "`" + `json:"filename"` + "`" + `
+	Size int64     ` + "`" + `json:"size"` + "`" + `
+	SHA1 string ` + "`" + `json:"sha1,omitempty"` + "`" + `
+	SHA512 string ` + "`" + `json:"sha512,omitempty"` + "`" + `
+}
+
+type ImportMrPackURLRequest struct {
+	InstanceName string ` + "`" + `json:"instance_name"` + "`" + `
+	ProjectSlug string ` + "`" + `json:"project_slug"` + "`" + `
+	VersionID string ` + "`" + `json:"version_id"` + "`" + `
+	SHA1 string ` + "`" + `json:"sha1,omitempty"` + "`" + `
+	Size int64 ` + "`" + `json:"size,omitempty"` + "`" + `
+}
+
+type ProjectTagDTO struct {
+	ID         string ` + "`" + `json:"id"` + "`" + `
+	Label      string ` + "`" + `json:"label"` + "`" + `
+	Searchable bool   ` + "`" + `json:"searchable"` + "`" + `
+}
+
+type ListProjectTagsRequest struct {
+	Provider    string ` + "`" + `json:"provider,omitempty"` + "`" + `
 	ProjectType string ` + "`" + `json:"project_type,omitempty"` + "`" + `
 }
 
@@ -465,11 +534,6 @@ type PerformancePresetDTO struct {
 	AikarArgs      []string ` + "`" + `json:"aikar_args"` + "`" + `
 }
 
-type ListOptimizationModsRequest struct {
-	GameVersion string ` + "`" + `json:"game_version"` + "`" + `
-	Loader      string ` + "`" + `json:"loader"` + "`" + `
-}
-
 type InstanceIDRequest struct {
 	InstanceID string ` + "`" + `json:"instance_id"` + "`" + `
 }
@@ -551,7 +615,7 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
-export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack";
+export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack" | "modpack";
 
 
 export interface InstanceDTO {
@@ -662,6 +726,74 @@ export interface SearchModsRequest {
   sort?: string;
   category?: string;
   project_type?: ProjectType;
+}
+
+export interface GameVersionDTO {
+  id: string;
+  type: string;
+  release_time: string;
+}
+
+export interface ListMinecraftVersionsRequest {
+  channel?: string;
+}
+
+export interface ListLoaderVersionsRequest {
+  game_version: string;
+  loader: string;
+}
+
+export interface LoaderResolutionDTO {
+  loader: string;
+  default: string;
+  options: string[];
+  source: string;
+  note?: string;
+}
+
+export interface CreateInstanceWithLoaderRequest {
+  name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+}
+
+export interface ListMrPackVersionsRequest {
+  project_slug: string;
+  game_version?: string;
+  loader?: string;
+}
+
+export interface MrPackVersionDTO {
+  version_id: string;
+  name: string;
+  version_type: string;
+  game_version: string;
+  loaders: string[];
+  url: string;
+  filename: string;
+  size: number;
+  sha1?: string;
+  sha512?: string;
+}
+
+export interface ImportMrPackURLRequest {
+  instance_name: string;
+  project_slug: string;
+  version_id: string;
+  sha1?: string;
+  size?: number;
+}
+
+export interface ProjectTagDTO {
+  id: string;
+  label: string;
+  searchable: boolean;
+}
+
+export interface ListProjectTagsRequest {
+  provider?: string;
+  project_type?: string;
 }
 
 export interface SearchModsResultDTO {
@@ -1008,11 +1140,6 @@ export interface PerformancePresetDTO {
   aikar_args: string[];
 }
 
-export interface ListOptimizationModsRequest {
-  game_version: string;
-  loader: string;
-}
-
 export interface InstanceIDRequest {
   instance_id: string;
 }
@@ -1089,7 +1216,17 @@ export interface DiscordRpcPreviewDTO {
 }
 `
 
-	if err := os.WriteFile("internal/adapters/wails/ipc_types.go", []byte(goContent), 0644); err != nil {
+	// Canonicalize the generated Go through gofmt (go/format) *inside* the
+	// generator, so "run generator" and "gofmt -l" are a fixed point:
+	// without this, CI (gofmt + parity) and a local gofmt pass oscillate
+	// between two different ipc_types.go (seen on 0b852ab).
+	formattedGo, err := format.Source([]byte(goContent))
+	if err != nil {
+		fmt.Printf("failed to format generated go types: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := os.WriteFile("internal/adapters/wails/ipc_types.go", formattedGo, 0644); err != nil {
 		fmt.Printf("failed to write go types: %v\n", err)
 		os.Exit(1)
 	}

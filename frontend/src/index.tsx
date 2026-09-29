@@ -2,6 +2,7 @@
 import { render } from "solid-js/web";
 import "./index.css";
 import { App } from "./App";
+import { installExternalLinkGuard } from "./services/externalLinks";
 
 const root = document.getElementById("root");
 
@@ -10,6 +11,12 @@ if (import.meta.env.DEV && !(root instanceof HTMLElement)) {
     "Root element not found. Did you forget to add it to your index.html? Or maybe the id attribute got misspelled?"
   );
 }
+
+// v0.7.2 round-5 (owner): clicking an <a> in Modrinth/CurseForge content must
+// not navigate the app webview away and must not spawn an embedded webview
+// popup - external http(s) links go to the system browser instead. Installed
+// before render so no anchor can be clicked before the guard exists.
+installExternalLinkGuard();
 
 render(() => <App />, root!);
 

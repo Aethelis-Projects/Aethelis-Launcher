@@ -39,7 +39,6 @@ import type {
   GetScreenshotDataRequest,
   GetScreenshotDataResponse,
   PerformancePresetDTO,
-  ListOptimizationModsRequest,
   IntegrityResultDTO,
   InstanceIDRequest,
   SaveGameLogRequest,
@@ -60,6 +59,16 @@ import type {
   InstallDatapackRequest,
   ToggleDatapackRequest,
   DeleteDatapackRequest,
+  ListProjectTagsRequest,
+  ProjectTagDTO,
+  ListMinecraftVersionsRequest,
+  GameVersionDTO,
+  ListLoaderVersionsRequest,
+  LoaderResolutionDTO,
+  CreateInstanceWithLoaderRequest,
+  ListMrPackVersionsRequest,
+  MrPackVersionDTO,
+  ImportMrPackURLRequest,
 } from "../bindings/ipc_types";
 
 interface WailsAdapterBindings {
@@ -76,7 +85,9 @@ interface WailsAdapterBindings {
   SetInstanceGroup?: (req: SetGroupRequest) => Promise<InstanceDTO>;
   ListScreenshots?: (instanceId: string) => Promise<ScreenshotDTO[]>;
   DeleteScreenshot?: (req: DeleteScreenshotRequest) => Promise<void>;
-  GetScreenshotData?: (req: GetScreenshotDataRequest) => Promise<GetScreenshotDataResponse>;
+  GetScreenshotData?: (
+    req: GetScreenshotDataRequest,
+  ) => Promise<GetScreenshotDataResponse>;
   LaunchInstance?: (id: string) => Promise<LaunchResponse>;
   ListAccounts?: () => Promise<AccountDTO[]>;
   SetActiveAccount?: (uuid: string) => Promise<void>;
@@ -105,31 +116,62 @@ interface WailsAdapterBindings {
   PickMrPackFile?: () => Promise<string>;
   GetMrPackImportPlan?: (mrpackPath: string) => Promise<MrPackImportPlanDTO>;
   ImportMrPack?: (req: ImportMrPackRequest) => Promise<InstanceDTO>;
-  GetMrPackImportStatus?: (instanceName: string) => Promise<MrPackImportStatusDTO>;
+  GetMrPackImportStatus?: (
+    instanceName: string,
+  ) => Promise<MrPackImportStatusDTO>;
+  ListMinecraftVersions?: (
+    req: ListMinecraftVersionsRequest,
+  ) => Promise<GameVersionDTO[]>;
+  ListLoaderVersions?: (
+    req: ListLoaderVersionsRequest,
+  ) => Promise<LoaderResolutionDTO>;
+  CreateInstanceWithLoader?: (
+    req: CreateInstanceWithLoaderRequest,
+  ) => Promise<InstanceDTO>;
+  ListMrPackVersions?: (
+    req: ListMrPackVersionsRequest,
+  ) => Promise<MrPackVersionDTO[]>;
+  ImportMrPackFromURL?: (req: ImportMrPackURLRequest) => Promise<string>;
+  GetMrPackURLImportStatus?: (
+    req: InstanceIDRequest,
+  ) => Promise<MrPackImportStatusDTO>;
   ExportMrPack?: (req: ExportMrPackRequest) => Promise<string>;
   CheckJavaRuntimeUpdates?: () => Promise<JavaRuntimeUpdateDTO[]>;
   UpgradeJavaRuntime?: (major: number) => Promise<JavaInstallationDTO>;
   OpenPath?: (path: string) => Promise<void>;
   EnsureInstanceDir?: (instanceId: string, dirType: string) => Promise<string>;
   GetPerformancePreset?: () => Promise<PerformancePresetDTO>;
-  ListOptimizationMods?: (req: ListOptimizationModsRequest) => Promise<SearchModsResultDTO>;
   CheckInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
   RepairInstanceFiles?: (req: InstanceIDRequest) => Promise<IntegrityResultDTO>;
 
   SetDiscordRpcEnabled?: (enabled: boolean) => Promise<void>;
   GetDiscordRpcStatus?: () => Promise<DiscordRpcStatusDTO>;
-  GetDiscordRpcPreview?: (req: { instance_id: string }) => Promise<DiscordRpcPreviewDTO>;
-  SetDiscordAppID?: (req: { key: string; value: string }) => Promise<void>;
+  GetDiscordRpcPreview?: (req: {
+    instance_id: string;
+  }) => Promise<DiscordRpcPreviewDTO>;
 
   ScanCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackPlanDTO>;
-  ImportCurseForgePackZip?: (req: CFPackScanRequest) => Promise<CFPackImportResultDTO>;
+  ImportCurseForgePackZip?: (
+    req: CFPackScanRequest,
+  ) => Promise<CFPackImportResultDTO>;
 
-  ScanOfficialMinecraft?: (req: ScanOfficialMinecraftRequest) => Promise<MinecraftImportSummaryDTO>;
-  ImportOfficialMinecraft?: (req: ImportOfficialMinecraftRequest) => Promise<InstanceDTO>;
-  ScanPrismInstance?: (req: ScanPrismInstanceRequest) => Promise<PrismImportSummaryDTO>;
-  ImportPrismInstance?: (req: ImportPrismInstanceRequest) => Promise<InstanceDTO>;
+  ScanOfficialMinecraft?: (
+    req: ScanOfficialMinecraftRequest,
+  ) => Promise<MinecraftImportSummaryDTO>;
+  ImportOfficialMinecraft?: (
+    req: ImportOfficialMinecraftRequest,
+  ) => Promise<InstanceDTO>;
+  ScanPrismInstance?: (
+    req: ScanPrismInstanceRequest,
+  ) => Promise<PrismImportSummaryDTO>;
+  ImportPrismInstance?: (
+    req: ImportPrismInstanceRequest,
+  ) => Promise<InstanceDTO>;
   ListInstanceWorlds?: (instanceId: string) => Promise<WorldDTO[]>;
-  ListWorldDatapacks?: (instanceId: string, worldName: string) => Promise<DatapackDTO[]>;
+  ListWorldDatapacks?: (
+    instanceId: string,
+    worldName: string,
+  ) => Promise<DatapackDTO[]>;
   SetDatapackEnabled?: (req: ToggleDatapackRequest) => Promise<void>;
   DeleteDatapack?: (req: DeleteDatapackRequest) => Promise<void>;
   InstallDatapack?: (req: InstallDatapackRequest) => Promise<void>;
@@ -192,8 +234,8 @@ export async function getWailsCall(): Promise<WailsRuntimeCall | null> {
 function isDevEnvironment(): boolean {
   return Boolean(
     typeof import.meta !== "undefined" &&
-      import.meta.env &&
-      (import.meta.env.DEV || import.meta.env.MODE === "test")
+    import.meta.env &&
+    (import.meta.env.DEV || import.meta.env.MODE === "test"),
   );
 }
 
@@ -205,13 +247,16 @@ async function invokeWails<T>(
   if (typeof window !== "undefined") {
     const fn = window.go?.wails?.WailsAdapter?.[methodName];
     if (typeof fn === "function") {
-      return (await (fn as (...args: unknown[]) => Promise<T>)(...args));
+      return await (fn as (...args: unknown[]) => Promise<T>)(...args);
     }
   }
 
   const call = await getWailsCall();
   if (call) {
-    return (await call.ByName(`${WAILS_ADAPTER_PREFIX}.${methodName}`, ...args)) as T;
+    return (await call.ByName(
+      `${WAILS_ADAPTER_PREFIX}.${methodName}`,
+      ...args,
+    )) as T;
   }
 
   // P1 Blocker: Silent mocks are strictly forbidden in production.
@@ -221,7 +266,7 @@ async function invokeWails<T>(
   }
 
   throw new Error(
-    `Wails IPC bridge unavailable for ${methodName}. Application is not connected to desktop runtime.`
+    `Wails IPC bridge unavailable for ${methodName}. Application is not connected to desktop runtime.`,
   );
 }
 
@@ -343,7 +388,8 @@ const mockModCatalog: ModItemDTO[] = [
     source: "modrinth",
     name: "Sodium",
     author: "jellysquid3",
-    summary: "Modern rendering engine for Minecraft that greatly improves frame rates and reduces micro-stutter",
+    summary:
+      "Modern rendering engine for Minecraft that greatly improves frame rates and reduces micro-stutter",
     icon_url: "https://cdn.modrinth.com/sodium.png",
     downloads: 18500000,
     categories: ["fabric", "optimization"],
@@ -355,7 +401,8 @@ const mockModCatalog: ModItemDTO[] = [
     source: "modrinth",
     name: "Iris Shaders",
     author: "coderbot",
-    summary: "A modern shaders mod for Minecraft compatible with existing Shaderspacks",
+    summary:
+      "A modern shaders mod for Minecraft compatible with existing Shaderspacks",
     icon_url: "https://cdn.modrinth.com/iris.png",
     downloads: 12400000,
     categories: ["fabric", "shaders"],
@@ -391,7 +438,8 @@ const mockModCatalog: ModItemDTO[] = [
     source: "modrinth",
     name: "Faithful 32x",
     author: "FaithfulTeam",
-    summary: "Classic high-resolution texture pack maintaining original Minecraft aesthetic",
+    summary:
+      "Classic high-resolution texture pack maintaining original Minecraft aesthetic",
     icon_url: "https://cdn.modrinth.com/faithful.png",
     downloads: 3200000,
     categories: ["textures"],
@@ -403,7 +451,8 @@ const mockModCatalog: ModItemDTO[] = [
     source: "modrinth",
     name: "Complementary Reimagined",
     author: "EminGT",
-    summary: "Exceptional shaderpack with tailored performance and stunning lighting",
+    summary:
+      "Exceptional shaderpack with tailored performance and stunning lighting",
     icon_url: "https://cdn.modrinth.com/complementary.png",
     downloads: 8900000,
     categories: ["shaders"],
@@ -424,7 +473,8 @@ let mockUpdateInfo: UpdateInfoDTO = {
 
 let mockApplyResult: UpdateApplyResultDTO = {
   success: true,
-  message: "Update applied successfully. Restart required for changes to take effect.",
+  message:
+    "Update applied successfully. Restart required for changes to take effect.",
   restart_required: true,
 };
 
@@ -491,6 +541,24 @@ let mockJavaRuntimeUpdates: JavaRuntimeUpdateDTO[] = [
   },
 ];
 
+/**
+ * Routes a link click to the OS browser. The Go side re-validates the scheme
+ * (http/https only); we pre-filter here so `javascript:`/relative hrefs never
+ * even leave the renderer.
+ */
+export async function openExternal(url: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url, window.location.href);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return;
+  }
+  await invokeWails<void>("OpenExternal", async () => undefined, parsed.href);
+}
+
 export const launcherAPI = {
   setMockUpdateInfo(info: UpdateInfoDTO): void {
     mockUpdateInfo = { ...info };
@@ -513,7 +581,8 @@ export const launcherAPI = {
     };
     mockApplyResult = {
       success: true,
-      message: "Update applied successfully. Restart required for changes to take effect.",
+      message:
+        "Update applied successfully. Restart required for changes to take effect.",
       restart_required: true,
     };
   },
@@ -547,7 +616,7 @@ export const launcherAPI = {
         mockInstances.push(newInst);
         return newInst;
       },
-      req
+      req,
     );
   },
 
@@ -568,13 +637,14 @@ export const launcherAPI = {
         if (req.min_ram_mb !== undefined) inst.min_ram_mb = req.min_ram_mb;
         if (req.max_ram_mb !== undefined) inst.max_ram_mb = req.max_ram_mb;
         if (req.jvm_args !== undefined) inst.jvm_args = req.jvm_args;
-        if (req.skip_java_check !== undefined) inst.skip_java_check = req.skip_java_check;
+        if (req.skip_java_check !== undefined)
+          inst.skip_java_check = req.skip_java_check;
         if (req.group !== undefined) inst.group = req.group;
         if (req.is_favorite !== undefined) inst.is_favorite = req.is_favorite;
         if (req.icon_path !== undefined) inst.icon_path = req.icon_path;
         return { ...inst };
       },
-      req
+      req,
     );
   },
 
@@ -589,7 +659,7 @@ export const launcherAPI = {
         inst.is_favorite = req.is_favorite;
         return { ...inst };
       },
-      req
+      req,
     );
   },
 
@@ -604,7 +674,7 @@ export const launcherAPI = {
         inst.group = req.group;
         return { ...inst };
       },
-      req
+      req,
     );
   },
 
@@ -619,7 +689,7 @@ export const launcherAPI = {
         inst.state = "running";
         return { success: true, pid: Math.floor(Math.random() * 8000) + 1000 };
       },
-      id
+      id,
     );
   },
 
@@ -636,7 +706,7 @@ export const launcherAPI = {
           is_active: a.uuid === uuid,
         }));
       },
-      uuid
+      uuid,
     );
   },
 
@@ -654,7 +724,7 @@ export const launcherAPI = {
         mockAccounts.push(newAcc);
         return newAcc;
       },
-      username
+      username,
     );
   },
 
@@ -672,6 +742,85 @@ export const launcherAPI = {
     });
   },
 
+  async listProjectTags(req: ListProjectTagsRequest): Promise<ProjectTagDTO[]> {
+    return invokeWails<ProjectTagDTO[]>("ListProjectTags", () => [], req);
+  },
+
+  // v0.7.2 G10: instance creation wizard sources.
+  async listMinecraftVersions(
+    req: ListMinecraftVersionsRequest = {},
+  ): Promise<GameVersionDTO[]> {
+    return invokeWails<GameVersionDTO[]>(
+      "ListMinecraftVersions",
+      () => [],
+      req,
+    );
+  },
+
+  async listLoaderVersions(
+    req: ListLoaderVersionsRequest,
+  ): Promise<LoaderResolutionDTO> {
+    return invokeWails<LoaderResolutionDTO>(
+      "ListLoaderVersions",
+      () => ({
+        loader: req.loader,
+        default: "",
+        options: [],
+        source: req.loader,
+      }),
+      req,
+    );
+  },
+
+  async createInstanceWithLoader(
+    req: CreateInstanceWithLoaderRequest,
+  ): Promise<InstanceDTO> {
+    return invokeWails<InstanceDTO | null>(
+      "CreateInstanceWithLoader",
+      () => null,
+      req,
+    ).then((dto) => {
+      if (!dto) throw new Error("create instance failed");
+      return dto;
+    });
+  },
+
+  // v0.7.2 G5: Modrinth modpack storefront (files filtered to .mrpack).
+  async listMrPackVersions(
+    req: ListMrPackVersionsRequest,
+  ): Promise<MrPackVersionDTO[]> {
+    return invokeWails<MrPackVersionDTO[]>("ListMrPackVersions", () => [], req);
+  },
+
+  async importMrPackFromURL(req: ImportMrPackURLRequest): Promise<string> {
+    return invokeWails<string>(
+      "ImportMrPackFromURL",
+      () => {
+        throw new Error("import unavailable");
+      },
+      req,
+    );
+  },
+
+  async getMrPackURLImportStatus(
+    instanceName: string,
+  ): Promise<MrPackImportStatusDTO> {
+    return invokeWails<MrPackImportStatusDTO>(
+      "GetMrPackURLImportStatus",
+      () => ({
+        task_id: instanceName,
+        status: "idle",
+        current_file: "",
+        files_done: 0,
+        total_files: 0,
+        bytes_read: 0,
+        total_bytes: 0,
+        percentage: 0,
+      }),
+      { instance_id: instanceName },
+    );
+  },
+
   async searchMods(req: SearchModsRequest): Promise<SearchModsResultDTO> {
     return invokeWails(
       "SearchMods",
@@ -682,7 +831,8 @@ export const launcherAPI = {
         const filtered = mockModCatalog.filter((m) => {
           if ((m.project_type || "mod") !== targetType) return false;
           if (req.source && m.source !== req.source) return false;
-          if (cat && !m.categories.some((c) => c.toLowerCase().includes(cat))) return false;
+          if (cat && !m.categories.some((c) => c.toLowerCase().includes(cat)))
+            return false;
           if (!q) return true;
           return (
             m.name.toLowerCase().includes(q) ||
@@ -695,7 +845,7 @@ export const launcherAPI = {
           total_count: filtered.length,
         };
       },
-      req
+      req,
     );
   },
 
@@ -716,11 +866,13 @@ export const launcherAPI = {
           download_url: "https://cdn.modrinth.com/mock.jar",
         },
       ],
-      req
+      req,
     );
   },
 
-  async getModInstallStatus(instanceId: string): Promise<ModInstallProgressDTO> {
+  async getModInstallStatus(
+    instanceId: string,
+  ): Promise<ModInstallProgressDTO> {
     return invokeWails<ModInstallProgressDTO>(
       "GetModInstallStatus",
       () => ({
@@ -733,7 +885,7 @@ export const launcherAPI = {
         total_bytes: 0,
         percentage: 0,
       }),
-      instanceId
+      instanceId,
     );
   },
 
@@ -741,7 +893,7 @@ export const launcherAPI = {
     return invokeWails(
       "ListInstalledMods",
       () => [...(mockInstalledMods[instanceId] || [])],
-      instanceId
+      instanceId,
     );
   },
 
@@ -760,7 +912,7 @@ export const launcherAPI = {
           }
         }
       },
-      req
+      req,
     );
   },
 
@@ -770,29 +922,46 @@ export const launcherAPI = {
       () => {
         const list = mockInstalledMods[req.instance_id] || [];
         mockInstalledMods[req.instance_id] = list.filter(
-          (m) => m.file_name !== req.file_name
+          (m) => m.file_name !== req.file_name,
         );
       },
-      req
+      req,
     );
   },
 
   async installMod(
     instanceId: string,
-    mod: ModItemDTO | { id: string; source: ModSource; name?: string; slug?: string; project_type?: ProjectType | string },
+    mod:
+      | ModItemDTO
+      | {
+          id: string;
+          source: ModSource;
+          name?: string;
+          slug?: string;
+          project_type?: ProjectType | string;
+        },
     versionId?: string,
-    overrideProjectType?: ProjectType
+    overrideProjectType?: ProjectType,
   ): Promise<InstallModResponse> {
-    const modSlug = ("slug" in mod && mod.slug) ? mod.slug : mod.id;
-    const modName = ("name" in mod && mod.name) ? mod.name : mod.id;
-    const projectType = overrideProjectType || (("project_type" in mod && mod.project_type) ? (mod.project_type as ProjectType) : undefined);
+    const modSlug = "slug" in mod && mod.slug ? mod.slug : mod.id;
+    const modName = "name" in mod && mod.name ? mod.name : mod.id;
+    const projectType =
+      overrideProjectType ||
+      ("project_type" in mod && mod.project_type
+        ? (mod.project_type as ProjectType)
+        : undefined);
     const res = await invokeWails<InstallModResponse>(
       "InstallMod",
       () => {
         if (!mockInstalledMods[instanceId]) {
           mockInstalledMods[instanceId] = [];
         }
-        const ext = (projectType === "resourcepack" || projectType === "shader" || projectType === "datapack") ? "zip" : "jar";
+        const ext =
+          projectType === "resourcepack" ||
+          projectType === "shader" ||
+          projectType === "datapack"
+            ? "zip"
+            : "jar";
         const fileName = `${modSlug}-1.0.0.${ext}`;
         mockInstalledMods[instanceId].push({
           file_name: fileName,
@@ -817,7 +986,7 @@ export const launcherAPI = {
         source: mod.source,
         version_id: versionId,
         project_type: projectType,
-      } as InstallModRequest
+      } as InstallModRequest,
     );
     if (!res.success) {
       throw new Error(res.message || "Failed to install mod");
@@ -830,7 +999,9 @@ export const launcherAPI = {
       "UpdateMod",
       () => {
         const instMods = mockInstalledMods[req.instance_id] || [];
-        const oldIdx = instMods.findIndex((m) => m.file_name === req.old_file_name);
+        const oldIdx = instMods.findIndex(
+          (m) => m.file_name === req.old_file_name,
+        );
         const newFileName = `${req.mod_id}-${req.target_version_id || "latest"}.jar`;
         if (oldIdx !== -1) {
           instMods.splice(oldIdx, 1);
@@ -850,7 +1021,7 @@ export const launcherAPI = {
           message: `Mod ${newFileName} updated successfully`,
         };
       },
-      req
+      req,
     );
     if (!res.success) {
       throw new Error(res.message || "Failed to update mod");
@@ -879,7 +1050,9 @@ export const launcherAPI = {
   },
 
   async getSettings(): Promise<GetSettingsResponse> {
-    return invokeWails("GetSettings", () => ({ settings: { ...mockSettings } }));
+    return invokeWails("GetSettings", () => ({
+      settings: { ...mockSettings },
+    }));
   },
 
   async setSetting(key: string, value: string): Promise<void> {
@@ -888,7 +1061,7 @@ export const launcherAPI = {
       () => {
         mockSettings[key] = value;
       },
-      { key, value }
+      { key, value },
     );
   },
 
@@ -897,7 +1070,10 @@ export const launcherAPI = {
   },
 
   async hasBuiltinCurseForgeKey(): Promise<boolean> {
-    return invokeWails("HasBuiltinCurseForgeKey", () => mockHasBuiltinCurseForgeKey);
+    return invokeWails(
+      "HasBuiltinCurseForgeKey",
+      () => mockHasBuiltinCurseForgeKey,
+    );
   },
 
   async getLogTail(instanceId: string, n = 100): Promise<string[]> {
@@ -912,7 +1088,7 @@ export const launcherAPI = {
         `[${new Date().toISOString().slice(11, 19)}] [main/INFO]: Setting up window and rendering context`,
         `[${new Date().toISOString().slice(11, 19)}] [main/WARN]: Sound engine pitch variance out of bounds, using default`,
       ],
-      instanceId
+      instanceId,
     );
   },
 
@@ -921,14 +1097,18 @@ export const launcherAPI = {
       "SaveGameLog",
       () => ({
         success: true,
-        file_path: req.target_path || `C:\\Nord\\instances\\${req.instance_id}\\logs\\game_log_saved.txt`,
+        file_path:
+          req.target_path ||
+          `C:\\Nord\\instances\\${req.instance_id}\\logs\\game_log_saved.txt`,
       }),
-      req
+      req,
     );
   },
 
   async listJavaRuntimes(): Promise<JavaInstallationDTO[]> {
-    return invokeWails<JavaInstallationDTO[]>("ListJavaRuntimes", () => [...mockJavaRuntimes]);
+    return invokeWails<JavaInstallationDTO[]>("ListJavaRuntimes", () => [
+      ...mockJavaRuntimes,
+    ]);
   },
 
   async downloadJavaRuntime(major: number): Promise<void> {
@@ -944,12 +1124,14 @@ export const launcherAPI = {
           percentage: 50,
         };
       },
-      major
+      major,
     );
   },
 
   async getJavaDownloadStatus(): Promise<JavaDownloadStatusDTO> {
-    return invokeWails<JavaDownloadStatusDTO>("GetJavaDownloadStatus", () => ({ ...mockJavaDownloadStatus }));
+    return invokeWails<JavaDownloadStatusDTO>("GetJavaDownloadStatus", () => ({
+      ...mockJavaDownloadStatus,
+    }));
   },
 
   async removeJavaRuntime(path: string): Promise<void> {
@@ -958,7 +1140,7 @@ export const launcherAPI = {
       () => {
         mockJavaRuntimes = mockJavaRuntimes.filter((r) => r.path !== path);
       },
-      path
+      path,
     );
   },
 
@@ -978,7 +1160,7 @@ export const launcherAPI = {
         mockJavaRuntimes.push(added);
         return added;
       },
-      path
+      path,
     );
   },
 
@@ -986,15 +1168,16 @@ export const launcherAPI = {
     return invokeWails<ModUpdateItemDTO[]>(
       "CheckModUpdates",
       () => [],
-      instanceId
+      instanceId,
     );
   },
 
   async getDiagnosticReport(instanceId: string): Promise<string> {
     return invokeWails<string>(
       "GetDiagnosticReport",
-      () => "=== Nord Launcher Diagnostic Report (Mock) ===\nLauncher Version: 0.6.1",
-      instanceId
+      () =>
+        "=== Nord Launcher Diagnostic Report (Mock) ===\nLauncher Version: 0.6.1",
+      instanceId,
     );
   },
 
@@ -1011,14 +1194,17 @@ export const launcherAPI = {
   },
 
   async pickMrPackFile(): Promise<string> {
-    return invokeWails<string>("PickMrPackFile", () => "C:\\Downloads\\Nordic-Optimized.mrpack");
+    return invokeWails<string>(
+      "PickMrPackFile",
+      () => "C:\\Downloads\\Nordic-Optimized.mrpack",
+    );
   },
 
   async getMrPackImportPlan(mrpackPath: string): Promise<MrPackImportPlanDTO> {
     return invokeWails<MrPackImportPlanDTO>(
       "GetMrPackImportPlan",
       () => ({ ...mockMrPackPlan }),
-      mrpackPath
+      mrpackPath,
     );
   },
 
@@ -1042,15 +1228,17 @@ export const launcherAPI = {
         mockInstances.push(newInst);
         return newInst;
       },
-      req
+      req,
     );
   },
 
-  async getMrPackImportStatus(instanceName: string): Promise<MrPackImportStatusDTO> {
+  async getMrPackImportStatus(
+    instanceName: string,
+  ): Promise<MrPackImportStatusDTO> {
     return invokeWails<MrPackImportStatusDTO>(
       "GetMrPackImportStatus",
       () => ({ ...mockMrPackStatus }),
-      instanceName
+      instanceName,
     );
   },
 
@@ -1058,14 +1246,14 @@ export const launcherAPI = {
     return invokeWails<string>(
       "ExportMrPack",
       () => `C:\\Exports\\${req.name}.mrpack`,
-      req
+      req,
     );
   },
 
   async checkJavaRuntimeUpdates(): Promise<JavaRuntimeUpdateDTO[]> {
     return invokeWails<JavaRuntimeUpdateDTO[]>(
       "CheckJavaRuntimeUpdates",
-      () => [...mockJavaRuntimeUpdates]
+      () => [...mockJavaRuntimeUpdates],
     );
   },
 
@@ -1088,24 +1276,23 @@ export const launcherAPI = {
           used_by: [],
         };
       },
-      major
+      major,
     );
   },
 
   async openPath(path: string): Promise<void> {
-    return invokeWails<void>(
-      "OpenPath",
-      () => Promise.resolve(),
-      path
-    );
+    return invokeWails<void>("OpenPath", () => Promise.resolve(), path);
   },
 
-  async ensureInstanceDir(instanceId: string, dirType: string): Promise<string> {
+  async ensureInstanceDir(
+    instanceId: string,
+    dirType: string,
+  ): Promise<string> {
     return invokeWails<string>(
       "EnsureInstanceDir",
       () => `${instanceId}/${dirType}`,
       instanceId,
-      dirType
+      dirType,
     );
   },
 
@@ -1115,42 +1302,43 @@ export const launcherAPI = {
       aikar_args: [],
     }));
   },
-
-  async listOptimizationMods(req: ListOptimizationModsRequest): Promise<SearchModsResultDTO> {
-    return invokeWails<SearchModsResultDTO>("ListOptimizationMods", () => ({
-      items: [],
-      total_count: 0,
-    }), req);
-  },
   async checkInstanceFiles(instanceId: string): Promise<IntegrityResultDTO> {
-    return invokeWails<IntegrityResultDTO>("CheckInstanceFiles", () => ({
-      version: "",
-      checked_count: 0,
-      problems_count: 0,
-      repaired_count: 0,
-      problems_capped: false,
-      virtual_assets_skipped: false,
-      items: [],
-    }), { instance_id: instanceId });
+    return invokeWails<IntegrityResultDTO>(
+      "CheckInstanceFiles",
+      () => ({
+        version: "",
+        checked_count: 0,
+        problems_count: 0,
+        repaired_count: 0,
+        problems_capped: false,
+        virtual_assets_skipped: false,
+        items: [],
+      }),
+      { instance_id: instanceId },
+    );
   },
 
   async repairInstanceFiles(instanceId: string): Promise<IntegrityResultDTO> {
-    return invokeWails<IntegrityResultDTO>("RepairInstanceFiles", () => ({
-      version: "",
-      checked_count: 0,
-      problems_count: 0,
-      repaired_count: 0,
-      problems_capped: false,
-      virtual_assets_skipped: false,
-      items: [],
-    }), { instance_id: instanceId });
+    return invokeWails<IntegrityResultDTO>(
+      "RepairInstanceFiles",
+      () => ({
+        version: "",
+        checked_count: 0,
+        problems_count: 0,
+        repaired_count: 0,
+        problems_capped: false,
+        virtual_assets_skipped: false,
+        items: [],
+      }),
+      { instance_id: instanceId },
+    );
   },
 
   async listScreenshots(instanceId: string): Promise<ScreenshotDTO[]> {
     return invokeWails<ScreenshotDTO[]>(
       "ListScreenshots",
       () => [...(mockScreenshots[instanceId] || [])],
-      instanceId
+      instanceId,
     );
   },
 
@@ -1159,22 +1347,25 @@ export const launcherAPI = {
       "DeleteScreenshot",
       () => {
         if (mockScreenshots[req.instance_id]) {
-          mockScreenshots[req.instance_id] = mockScreenshots[req.instance_id].filter(
-            (s) => s.file_name !== req.file_name
-          );
+          mockScreenshots[req.instance_id] = mockScreenshots[
+            req.instance_id
+          ].filter((s) => s.file_name !== req.file_name);
         }
       },
-      req
+      req,
     );
   },
 
-  async getScreenshotData(req: GetScreenshotDataRequest): Promise<GetScreenshotDataResponse> {
+  async getScreenshotData(
+    req: GetScreenshotDataRequest,
+  ): Promise<GetScreenshotDataResponse> {
     return invokeWails<GetScreenshotDataResponse>(
       "GetScreenshotData",
       () => ({
-        data_url: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+        data_url:
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
       }),
-      req
+      req,
     );
   },
 
@@ -1191,18 +1382,15 @@ export const launcherAPI = {
     }));
   },
 
-  async getDiscordRpcPreview(instanceId: string): Promise<DiscordRpcPreviewDTO> {
+  async getDiscordRpcPreview(
+    instanceId: string,
+  ): Promise<DiscordRpcPreviewDTO> {
     return invokeWails<DiscordRpcPreviewDTO>(
       "GetDiscordRpcPreview",
       () => ({ details: "Minecraft 1.21.1", state: "Preview Instance" }),
-      { instance_id: instanceId }
+      { instance_id: instanceId },
     );
   },
-
-  async setDiscordAppID(value: string): Promise<void> {
-    await invokeWails<void>("SetDiscordAppID", () => undefined, { key: "discord_app_id", value });
-  },
-
   async scanCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackPlanDTO> {
     return invokeWails<CFPackPlanDTO>(
       "ScanCurseForgePackZip",
@@ -1218,11 +1406,13 @@ export const launcherAPI = {
         required_total: 0,
         required_failed: 0,
       }),
-      req
+      req,
     );
   },
 
-  async importCurseForgePackZip(req: CFPackScanRequest): Promise<CFPackImportResultDTO> {
+  async importCurseForgePackZip(
+    req: CFPackScanRequest,
+  ): Promise<CFPackImportResultDTO> {
     return invokeWails<CFPackImportResultDTO>(
       "ImportCurseForgePackZip",
       () => ({
@@ -1233,11 +1423,13 @@ export const launcherAPI = {
         failed_files: [],
         unresolved: [],
       }),
-      req
+      req,
     );
   },
 
-  async scanOfficialMinecraft(req: ScanOfficialMinecraftRequest = {}): Promise<MinecraftImportSummaryDTO> {
+  async scanOfficialMinecraft(
+    req: ScanOfficialMinecraftRequest = {},
+  ): Promise<MinecraftImportSummaryDTO> {
     return invokeWails<MinecraftImportSummaryDTO>(
       "ScanOfficialMinecraft",
       () => ({
@@ -1251,11 +1443,13 @@ export const launcherAPI = {
         has_options: true,
         has_servers: true,
       }),
-      req
+      req,
     );
   },
 
-  async importOfficialMinecraft(req: ImportOfficialMinecraftRequest): Promise<InstanceDTO> {
+  async importOfficialMinecraft(
+    req: ImportOfficialMinecraftRequest,
+  ): Promise<InstanceDTO> {
     return invokeWails<InstanceDTO>(
       "ImportOfficialMinecraft",
       () => {
@@ -1276,11 +1470,13 @@ export const launcherAPI = {
         mockInstances.push(newInst);
         return newInst;
       },
-      req
+      req,
     );
   },
 
-  async scanPrismInstance(req: ScanPrismInstanceRequest): Promise<PrismImportSummaryDTO> {
+  async scanPrismInstance(
+    req: ScanPrismInstanceRequest,
+  ): Promise<PrismImportSummaryDTO> {
     return invokeWails<PrismImportSummaryDTO>(
       "ScanPrismInstance",
       () => ({
@@ -1296,11 +1492,13 @@ export const launcherAPI = {
         has_options: true,
         has_servers: true,
       }),
-      req
+      req,
     );
   },
 
-  async importPrismInstance(req: ImportPrismInstanceRequest): Promise<InstanceDTO> {
+  async importPrismInstance(
+    req: ImportPrismInstanceRequest,
+  ): Promise<InstanceDTO> {
     return invokeWails<InstanceDTO>(
       "ImportPrismInstance",
       () => {
@@ -1322,7 +1520,7 @@ export const launcherAPI = {
         mockInstances.push(newInst);
         return newInst;
       },
-      req
+      req,
     );
   },
 
@@ -1346,17 +1544,20 @@ export const launcherAPI = {
     return invokeWails<WorldDTO[]>(
       "ListInstanceWorlds",
       () => [...(mockWorlds[instanceId] || [])],
-      instanceId
+      instanceId,
     );
   },
 
-  async listWorldDatapacks(instanceId: string, worldName: string): Promise<DatapackDTO[]> {
+  async listWorldDatapacks(
+    instanceId: string,
+    worldName: string,
+  ): Promise<DatapackDTO[]> {
     const key = `${instanceId}:${worldName}`;
     return invokeWails<DatapackDTO[]>(
       "ListWorldDatapacks",
       () => [...(mockWorldDatapacks[key] || [])],
       instanceId,
-      worldName
+      worldName,
     );
   },
 
@@ -1366,13 +1567,15 @@ export const launcherAPI = {
       () => {
         const key = `${req.instance_id}:${req.world_name}`;
         if (mockWorldDatapacks[key]) {
-          const item = mockWorldDatapacks[key].find((dp) => dp.file_name === req.file_name);
+          const item = mockWorldDatapacks[key].find(
+            (dp) => dp.file_name === req.file_name,
+          );
           if (item) {
             item.enabled = req.enabled;
           }
         }
       },
-      req
+      req,
     );
   },
 
@@ -1383,11 +1586,11 @@ export const launcherAPI = {
         const key = `${req.instance_id}:${req.world_name}`;
         if (mockWorldDatapacks[key]) {
           mockWorldDatapacks[key] = mockWorldDatapacks[key].filter(
-            (dp) => dp.file_name !== req.file_name
+            (dp) => dp.file_name !== req.file_name,
           );
         }
       },
-      req
+      req,
     );
   },
 
@@ -1403,7 +1606,9 @@ export const launcherAPI = {
             if (!mockWorldDatapacks[key]) {
               mockWorldDatapacks[key] = [];
             }
-            if (!mockWorldDatapacks[key].some((dp) => dp.file_name === fileName)) {
+            if (
+              !mockWorldDatapacks[key].some((dp) => dp.file_name === fileName)
+            ) {
               mockWorldDatapacks[key].push({
                 file_name: fileName,
                 name: packName,
@@ -1415,7 +1620,7 @@ export const launcherAPI = {
           }
         }
       },
-      req
+      req,
     );
   },
 
@@ -1423,7 +1628,11 @@ export const launcherAPI = {
     mockWorlds[instanceId] = [...list];
   },
 
-  setMockWorldDatapacks(instanceId: string, worldName: string, list: DatapackDTO[]): void {
+  setMockWorldDatapacks(
+    instanceId: string,
+    worldName: string,
+    list: DatapackDTO[],
+  ): void {
     const key = `${instanceId}:${worldName}`;
     mockWorldDatapacks[key] = [...list];
   },

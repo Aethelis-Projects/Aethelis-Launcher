@@ -26,6 +26,7 @@ describe("ImportInstanceModal Component (Feature D'4a)", () => {
       <ImportInstanceModal
         isOpen={true}
         onClose={() => {}}
+        initialSource="minecraft"
       />
     ));
 
@@ -69,6 +70,7 @@ describe("ImportInstanceModal Component (Feature D'4a)", () => {
       <ImportInstanceModal
         isOpen={true}
         onClose={() => {}}
+        initialSource="minecraft"
       />
     ));
 
@@ -129,6 +131,7 @@ describe("ImportInstanceModal Component (Feature D'4a)", () => {
       <ImportInstanceModal
         isOpen={true}
         onClose={() => {}}
+        initialSource="minecraft"
         onImported={onImported}
       />
     ));
@@ -179,7 +182,7 @@ describe("ImportInstanceModal CurseForge .zip tab (Feature D'4b)", () => {
     });
     const scanSpy = vi.spyOn(launcherAPI, "scanCurseForgePackZip").mockResolvedValue(plan);
 
-    render(() => <ImportInstanceModal isOpen={true} onClose={() => {}} />);
+    render(() => <ImportInstanceModal isOpen={true} onClose={() => {}} initialSource="minecraft" />);
     fireEvent.click(screen.getByTestId("source-tab-curseforge"));
     fireEvent.input(screen.getByTestId("cf-zip-path-input"), { target: { value: "C:\\Downloads\\Vault.zip" } });
     await new Promise((r) => setTimeout(r, 10)); // let solid flush the signal update before clicking
@@ -209,7 +212,7 @@ describe("ImportInstanceModal CurseForge .zip tab (Feature D'4b)", () => {
     });
     const onImported = vi.fn();
 
-    render(() => <ImportInstanceModal isOpen={true} onClose={() => {}} onImported={onImported} />);
+    render(() => <ImportInstanceModal isOpen={true} onClose={() => {}} onImported={onImported} initialSource="minecraft" />);
     fireEvent.click(screen.getByTestId("source-tab-curseforge"));
     fireEvent.input(screen.getByTestId("cf-zip-path-input"), { target: { value: "C:\\Downloads\\Vault.zip" } });
     await new Promise((r) => setTimeout(r, 10)); // solid signal flush
@@ -235,7 +238,7 @@ describe("ImportInstanceModal CurseForge .zip tab (Feature D'4b)", () => {
       override_names: [], blocked_names: [], required_failed: 0,
     });
 
-    render(() => <ImportInstanceModal isOpen={true} onClose={() => {}} />);
+    render(() => <ImportInstanceModal isOpen={true} onClose={() => {}} initialSource="minecraft" />);
     fireEvent.click(screen.getByTestId("source-tab-curseforge"));
     fireEvent.input(screen.getByTestId("cf-zip-path-input"), { target: { value: "C:\\pack.zip" } });
     await new Promise((r) => setTimeout(r, 10)); // solid signal flush
@@ -245,4 +248,17 @@ describe("ImportInstanceModal CurseForge .zip tab (Feature D'4b)", () => {
     expect(screen.getByTestId("cf-import-warning-banner").textContent).toContain("modlist.html");
     expect(screen.getByText("modlist.html")).toBeTruthy();
   });
+
+  it("v0.7.2 G6: defaults to the embedded .mrpack panel", async () => {
+    vi.spyOn(launcherAPI, "pickMrPackFile").mockResolvedValue("");
+    render(() => <ImportInstanceModal isOpen={true} onClose={() => {}} />);
+    expect(screen.getByTestId("source-tab-mrpack")).toBeTruthy();
+    expect(screen.getByTestId("mrpack-import-panel")).toBeTruthy();
+    expect(screen.queryByTestId("scan-btn")).toBeNull();
+    // switching away hides the panel and reveals the source content again
+    fireEvent.click(screen.getByTestId("source-tab-minecraft"));
+    await waitFor(() => expect(screen.getByTestId("scan-btn")).toBeTruthy());
+    expect(screen.queryByTestId("mrpack-import-panel")).toBeNull();
+  });
 });
+

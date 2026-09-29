@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -98,6 +99,19 @@ func (s *InstanceService) SetSessionRefresher(r SessionRefresher) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sessionRefresher = r
+}
+
+// FireCrashForTest routes a crash report through the registered onCrash hook,
+// exactly as MonitorProcess would on a real crash. Test-only: it lets adapter
+// tests exercise the wiring installed by NewWailsAdapter instead of reaching
+// for an exported-but-should-be-internal record method on the bound struct.
+func (s *InstanceService) FireCrashForTest(instanceID string, report *CrashReport) {
+	s.mu.Lock()
+	cb := s.onCrash
+	s.mu.Unlock()
+	if cb != nil {
+		cb(instanceID, report)
+	}
 }
 
 func (s *InstanceService) SetOnCrash(cb func(instanceID string, report *CrashReport)) {
@@ -594,4 +608,25 @@ func (s *InstanceService) GetSupervisor(instanceID string) *LogSupervisor {
 		return nil
 	}
 	return s.supervisors[instanceID]
+}
+
+// CreateInstanceWithLoader creates an instance pinned to an explicit loader
+// version (v0.7.2 G10 wizard). An empty loaderVersion is valid for vanilla and
+// means "let provisioning resolve the loader itself" for mod loaders.
+func (s *InstanceService) CreateInstanceWithLoader(name, version, loader string, loaderVersion string) (*domain.Instance, error) {
+	inst, err := s.CreateInstance(name, version, domain.LoaderType(loader))
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(loaderVersion) != "" {
+		s.mu.Lock()
+		inst.LoaderVer = strings.TrimSpace(loaderVersion)
+		s.mu.Unlock()
+		if s.repo != nil {
+			if err := s.repo.Save(context.Background(), inst); err != nil {
+				return nil, fmt.Errorf("persist loader version: %w", err)
+			}
+		}
+	}
+	return inst, nil
 }

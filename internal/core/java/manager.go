@@ -173,12 +173,58 @@ func (m *JavaManager) ListRuntimes(ctx context.Context) ([]ports.JavaInstallatio
 		}
 	}
 
+	// Usage attribution. Explicit paths win; instances with no java_path are
+	// attributed to the runtime auto-resolution would actually pick (by major
+	// requirement from the matrix) — otherwise "recommended auto" runtimes
+	// were forever reported as unused (v0.7.2 G7 bug).
+	explicit := make(map[string][]string)
+	autoMajors := make(map[int][]string)
+	for _, inst := range instances {
+		if pth := strings.TrimSpace(inst.JavaPath); pth != "" {
+			explicit[normalizeJavaPath(pth)] = append(explicit[normalizeJavaPath(pth)], inst.Name)
+			continue
+		}
+		major, err := ResolveJavaMajor(inst.GameVersion)
+		if err != nil {
+			continue
+		}
+		autoMajors[major] = append(autoMajors[major], inst.Name)
+	}
+
+	// Mirror the launcher's Java-8 -> Java-11 auto-fallback so attribution
+	// matches what actually executes.
+	if names, ok := autoMajors[8]; ok && len(names) > 0 {
+		if _, has11 := autoMajors[11]; !has11 {
+			autoMajors[11] = append(autoMajors[11], names...)
+		}
+	}
+
+	// First install per major receives auto-attribution (same first-match
+	// order as the launcher loop).
+	autoTargetByMajor := make(map[int]string)
+	sortedPaths := make([]string, 0, len(installsMap))
+	for k := range installsMap {
+		sortedPaths = append(sortedPaths, k)
+	}
+	sort.Strings(sortedPaths)
+	for _, k := range sortedPaths {
+		major := installsMap[k].MajorVersion
+		if major <= 0 {
+			continue
+		}
+		if _, exists := autoTargetByMajor[major]; !exists {
+			autoTargetByMajor[major] = k
+		}
+	}
+
 	for key, install := range installsMap {
-		install.UsedBy = make([]string, 0)
-		for _, inst := range instances {
-			if inst.JavaPath != "" && filepath.Clean(inst.JavaPath) == key {
-				install.UsedBy = append(install.UsedBy, inst.Name)
-			}
+		used := append([]string{}, explicit[normalizeJavaPath(key)]...)
+		if target, ok := autoTargetByMajor[install.MajorVersion]; ok && target == key {
+			used = append(used, autoMajors[install.MajorVersion]...)
+		}
+		install.UsedBy = used
+		if install.UsedBy == nil {
+			install.UsedBy = []string{}
 		}
 		installsMap[key] = install
 	}
@@ -528,4 +574,13 @@ func ParseJavaMajorFromOutput(output string) (int, string) {
 		}
 	}
 	return 0, ""
+}
+
+// normalizeJavaPath makes Windows path comparisons robust: instances may
+// store backslashes while detectors return forward slashes and different
+// drive-letter case.
+func normalizeJavaPath(p string) string {
+	p = filepath.ToSlash(strings.TrimSpace(p))
+	p = strings.TrimSuffix(p, "/")
+	return strings.ToLower(p)
 }

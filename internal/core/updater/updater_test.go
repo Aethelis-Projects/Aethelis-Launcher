@@ -12,7 +12,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+
+	"github.com/nord-launcher/launcher/internal/releasetool"
 	"time"
 )
 
@@ -314,5 +318,72 @@ func TestSignAndVerifyPayload_CanonicalDomain(t *testing.T) {
 	// 4. Mismatched public key
 	if VerifyPayload(otherPubKey, payload, sig) {
 		t.Errorf("expected verification with mismatched public key to fail")
+	}
+}
+
+// v0.7.2 review: dev builds (0.0.0-dev fallback when no ldflags injection)
+// must not offer or apply updates, and must not even touch the network.
+func TestCheckForUpdates_DevVersionIsSilent(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"version":"9.9.9"}`)) // errcheck:ok test fixture
+	}))
+	defer srv.Close()
+
+	u := NewAutoUpdater("0.0.0-dev", srv.URL, GetDefaultPublicKey(), srv.Client())
+	info, err := u.CheckForUpdates(context.Background())
+	if err != nil {
+		t.Fatalf("dev check must not error: %v", err)
+	}
+	if info.Available {
+		t.Fatal("dev build must never report an update available")
+	}
+	if atomic.LoadInt32(&hits) != 0 {
+		t.Fatal("dev build must not contact the update manifest")
+	}
+	if !IsDevVersion("0.0.0-dev") || IsDevVersion("0.7.2") {
+		t.Fatal("IsDevVersion misclassified")
+	}
+}
+
+// v0.7.2 round-6 (owner p1): the client trust root must stay a trust root - no
+// staging material, no overridable key. Signing lives in internal/releasetool
+// (which the client never imports); this test fails if anyone moves a private
+// key or a "trust this instead" knob back into the client package.
+func TestClientPackageCarriesNoSigningMaterial(t *testing.T) {
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read package dir: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(e.Name())
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		text := string(data)
+		for _, banned := range []string{
+			"NewKeyFromSeed",
+			"ed25519.GenerateKey",
+			"PrivateKeyHex",
+			releasetool.StagingPrivateKeyHex, // single source of truth, not a copy
+			"internal/releasetool",
+		} {
+			if strings.Contains(text, banned) {
+				t.Errorf("%s contains %q - private-key material belongs in internal/releasetool, not in the client", e.Name(), banned)
+			}
+		}
+		if strings.Contains(text, "ED25519_PRIVATE_KEY") {
+			t.Errorf("%s reads a signing key from the environment: the client must never be able to sign or to re-trust", e.Name())
+		}
+		for _, knob := range []string{"SetPublicKey", "WithPublicKey", "TrustedPublicKey", "InsecureSkipVerify"} {
+			if strings.Contains(text, knob) {
+				t.Errorf("%s exposes %q: an override of the pinned trust root is the bug this test exists to catch", e.Name(), knob)
+			}
+		}
 	}
 }

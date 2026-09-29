@@ -647,7 +647,6 @@ func TestInstanceService_Launch_Java11_CompatibleWithLegacy(t *testing.T) {
 	}
 }
 
-
 func TestInstanceService_Launch_FailClosed_NoJava(t *testing.T) {
 	now := time.Now()
 	clk := clock.NewMockClock(now)
@@ -953,5 +952,31 @@ func TestInstanceService_SetInstanceFavorite_And_Group(t *testing.T) {
 	sup := svc.GetSupervisor(inst.ID)
 	if sup != nil {
 		t.Errorf("expected nil supervisor for idle instance")
+	}
+}
+
+func TestCreateInstanceWithLoaderPinsLoaderVersion(t *testing.T) {
+	svc := launch.NewInstanceService(nil, nil, nil, nil, clock.NewMockClock(time.Unix(1700000000, 0)))
+	inst, err := svc.CreateInstanceWithLoader("wizard-pack", "1.21.4", "fabric", "0.16.4")
+	if err != nil {
+		t.Fatalf("create with loader: %v", err)
+	}
+	if inst.LoaderVer != "0.16.4" {
+		t.Fatalf("LoaderVer = %q, want 0.16.4", inst.LoaderVer)
+	}
+	if inst.GameVersion != "1.21.4" || string(inst.Loader) != "fabric" {
+		t.Fatalf("unexpected instance %+v", inst)
+	}
+
+	vanilla, err := svc.CreateInstanceWithLoader("plain", "26.3", "vanilla", "")
+	if err != nil {
+		t.Fatalf("create vanilla: %v", err)
+	}
+	if vanilla.LoaderVer != "" {
+		t.Fatalf("vanilla LoaderVer = %q, want empty", vanilla.LoaderVer)
+	}
+
+	if _, err := svc.CreateInstanceWithLoader("", "1.21.4", "fabric", "0.16.4"); err == nil {
+		t.Fatal("expected validation error for empty name")
 	}
 }

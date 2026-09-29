@@ -316,5 +316,3 @@ func TestIsCompatibleJavaMajor(t *testing.T) {
 		}
 	}
 }
-
-

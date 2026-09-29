@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha1"
 	"crypto/sha256"
+	"crypto/sha512"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -492,9 +493,12 @@ func (d *Dispatcher) verifyExistingFile(task *DownloadTask) bool {
 	return d.verifyPartChecksum(task.DestPath, task) == nil
 }
 
-// verifyPartChecksum calculates SHA-1 / SHA-256 on a file and compares against expected.
+// verifyPartChecksum hashes the file once with every requested algorithm
+// (SHA-1 / SHA-256 / SHA-512) and compares against the expected digests.
+// Modrinth advertises SHA-1 and SHA-512 per file; the mrpack URL import
+// verifies both so a collision-quality hash is never the only guard.
 func (d *Dispatcher) verifyPartChecksum(path string, task *DownloadTask) error {
-	if task.ExpectedSHA1 == "" && task.ExpectedSHA256 == "" {
+	if task.ExpectedSHA1 == "" && task.ExpectedSHA256 == "" && task.ExpectedSHA512 == "" {
 		return nil
 	}
 
@@ -504,46 +508,42 @@ func (d *Dispatcher) verifyPartChecksum(path string, task *DownloadTask) error {
 	}
 	defer f.Close()
 
-	h1 := sha1.New()
-	h256 := sha256.New()
-	var writer io.Writer
-
-	if task.ExpectedSHA1 != "" && task.ExpectedSHA256 != "" {
-		writer = io.MultiWriter(h1, h256)
-	} else if task.ExpectedSHA1 != "" {
-		writer = h1
-	} else {
-		writer = h256
+	h1, h256, h512 := sha1.New(), sha256.New(), sha512.New()
+	writers := make([]io.Writer, 0, 3)
+	if task.ExpectedSHA1 != "" {
+		writers = append(writers, h1)
 	}
-
-	if _, err := io.Copy(writer, f); err != nil {
+	if task.ExpectedSHA256 != "" {
+		writers = append(writers, h256)
+	}
+	if task.ExpectedSHA512 != "" {
+		writers = append(writers, h512)
+	}
+	if _, err := io.Copy(io.MultiWriter(writers...), f); err != nil {
 		return fmt.Errorf("hash compute error: %w", err)
 	}
 
-	if task.ExpectedSHA1 != "" {
-		actual := hex.EncodeToString(h1.Sum(nil))
-		if actual != task.ExpectedSHA1 {
+	for _, c := range []struct {
+		algorithm, want string
+		sum             []byte
+	}{
+		{"SHA-1", task.ExpectedSHA1, h1.Sum(nil)},
+		{"SHA-256", task.ExpectedSHA256, h256.Sum(nil)},
+		{"SHA-512", task.ExpectedSHA512, h512.Sum(nil)},
+	} {
+		if c.want == "" {
+			continue
+		}
+		actual := hex.EncodeToString(c.sum)
+		if actual != c.want {
 			return &ChecksumMismatchError{
-				Algorithm: "SHA-1",
-				Expected:  task.ExpectedSHA1,
+				Algorithm: c.algorithm,
+				Expected:  c.want,
 				Actual:    actual,
 				FilePath:  path,
 			}
 		}
 	}
-
-	if task.ExpectedSHA256 != "" {
-		actual := hex.EncodeToString(h256.Sum(nil))
-		if actual != task.ExpectedSHA256 {
-			return &ChecksumMismatchError{
-				Algorithm: "SHA-256",
-				Expected:  task.ExpectedSHA256,
-				Actual:    actual,
-				FilePath:  path,
-			}
-		}
-	}
-
 	return nil
 }
 

@@ -31,9 +31,11 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/content/modrinth"
 	"github.com/nord-launcher/launcher/internal/core/discordrpc"
 	"github.com/nord-launcher/launcher/internal/core/domain"
+	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/game"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/loadermeta"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/ports"
@@ -64,7 +66,10 @@ type WailsAdapter struct {
 	db                *sql.DB
 
 	lastCrashes        map[string]*CrashReportDTO
+	gameManifestURL    string
 	modVersionsCache   map[string]modVersionCacheEntry
+	projectTagsCache   map[string]projectTagsCacheEntry
+	mrpackURLProgress  map[string]*MrPackImportStatusDTO
 	modInstallProgress map[string]*ModInstallProgressDTO
 	mrpackImporter     *content.MrPackImporter
 	mrpackExporter     *content.MrPackExporter
@@ -72,6 +77,8 @@ type WailsAdapter struct {
 	importer           *launch.InstanceImporter
 	cfPackImporter     *launch.CurseForgePackImporter
 	discordRPC         *discordrpc.Manager
+	loaderResolver     *loadermeta.Resolver
+	gameManifestCache  *gameManifestCacheEntry
 	integrityVerifier  ports.IntegrityVerifier
 	filePickerFn       func() (string, error)
 	onLogBatch         func(instanceID string, lines []string)
@@ -83,6 +90,16 @@ type modVersionCacheEntry struct {
 	timestamp time.Time
 }
 
+type gameManifestCacheEntry struct {
+	entries   []game.VersionManifestEntry
+	fetchedAt time.Time
+}
+
+type projectTagsCacheEntry struct {
+	tags      []ProjectTagDTO
+	expiresAt time.Time
+}
+
 func (a *WailsAdapter) setInstallProgress(instanceID string, p *ModInstallProgressDTO) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -92,19 +109,19 @@ func (a *WailsAdapter) setInstallProgress(instanceID string, p *ModInstallProgre
 	a.modInstallProgress[instanceID] = p
 }
 
-func (a *WailsAdapter) SetJavaManager(jm *java.JavaManager) {
+func (a *WailsAdapter) setJavaManager(jm *java.JavaManager) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.javaMgr = jm
 }
 
-func (a *WailsAdapter) SetInstalledModsRepo(repo *storage.InstalledModsRepository) {
+func (a *WailsAdapter) setInstalledModsRepo(repo *storage.InstalledModsRepository) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.installedModsRepo = repo
 }
 
-func (a *WailsAdapter) SetDB(db *sql.DB) {
+func (a *WailsAdapter) setDB(db *sql.DB) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.db = db
@@ -113,19 +130,19 @@ func (a *WailsAdapter) SetDB(db *sql.DB) {
 	}
 }
 
-func (a *WailsAdapter) SetMrPackImporter(importer *content.MrPackImporter) {
+func (a *WailsAdapter) setMrPackImporter(importer *content.MrPackImporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.mrpackImporter = importer
 }
 
-func (a *WailsAdapter) SetMrPackExporter(exporter *content.MrPackExporter) {
+func (a *WailsAdapter) setMrPackExporter(exporter *content.MrPackExporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.mrpackExporter = exporter
 }
 
-func (a *WailsAdapter) SetFilePicker(fn func() (string, error)) {
+func (a *WailsAdapter) setFilePicker(fn func() (string, error)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.filePickerFn = fn
@@ -235,23 +252,39 @@ func (a *WailsAdapter) getMrPackExporter() *content.MrPackExporter {
 	return a.mrpackExporter
 }
 
-func NewWailsAdapter(svc *launch.InstanceService) *WailsAdapter {
+// AdapterOption wires the adapter inside the constructor (owner directive
+// 2026-09-28: wiring should be constructor-supplied, not exported surface).
+// The callback receives the never-bound *Host facade, so every wiring setter
+// is expressed at the one call site that builds the adapter and no wiring
+// method ever appears on the bound receiver. NewWailsAdapter applies all
+// options before returning - the adapter can never be observed or bound in a
+// half-wired state by callers that use this form.
+type AdapterOption func(*Host)
+
+func NewWailsAdapter(svc *launch.InstanceService, opts ...AdapterOption) *WailsAdapter {
 	a := &WailsAdapter{
 		svc:                svc,
 		relauncher:         updater.DefaultRelauncher,
 		lastCrashes:        make(map[string]*CrashReportDTO),
 		modVersionsCache:   make(map[string]modVersionCacheEntry),
+		projectTagsCache:   make(map[string]projectTagsCacheEntry),
+		mrpackURLProgress:  make(map[string]*MrPackImportStatusDTO),
 		modInstallProgress: make(map[string]*ModInstallProgressDTO),
 	}
 	if svc != nil {
 		svc.SetOnCrash(func(instanceID string, report *launch.CrashReport) {
-			a.RecordCrash(instanceID, report)
+			a.recordCrash(instanceID, report)
 		})
+	}
+	for _, opt := range opts {
+		if opt != nil { // errcheck:ok tolerated like platform no-op options
+			opt(NewHost(a))
+		}
 	}
 	return a
 }
 
-func (a *WailsAdapter) SetVersion(v string) {
+func (a *WailsAdapter) setVersion(v string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.version = strings.TrimPrefix(v, "v")
@@ -269,43 +302,43 @@ func (a *WailsAdapter) GetCurrentVersion() string {
 	return ""
 }
 
-func (a *WailsAdapter) SetUpdater(u *updater.AutoUpdater) {
+func (a *WailsAdapter) setUpdater(u *updater.AutoUpdater) {
 	a.updater = u
 }
 
-func (a *WailsAdapter) SetRelauncher(fn updater.RelauncherFunc) {
+func (a *WailsAdapter) setRelauncher(fn updater.RelauncherFunc) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.relauncher = fn
 }
 
-func (a *WailsAdapter) SetJavaDetector(jd ports.JavaDetector) {
+func (a *WailsAdapter) setJavaDetector(jd ports.JavaDetector) {
 	a.javaDetector = jd
 }
 
-func (a *WailsAdapter) SetAuth(authSvc *auth.AuthService, accountRepo ports.AccountRepository) {
+func (a *WailsAdapter) setAuth(authSvc *auth.AuthService, accountRepo ports.AccountRepository) {
 	a.authSvc = authSvc
 	a.accountRepo = accountRepo
 }
 
-func (a *WailsAdapter) SetContent(mr *modrinth.Client, cf *curseforge.Client) {
+func (a *WailsAdapter) setContent(mr *modrinth.Client, cf *curseforge.Client) {
 	a.modrinth = mr
 	a.curseforge = cf
 }
 
-func (a *WailsAdapter) SetFileSystem(fs ports.FileSystem, instancesDir string) {
+func (a *WailsAdapter) setFileSystem(fs ports.FileSystem, instancesDir string) {
 	a.fileSys = fs
 	a.instancesDir = instancesDir
 }
 
-func (a *WailsAdapter) SetSettings(repo *storage.SettingsRepository) {
+func (a *WailsAdapter) setSettings(repo *storage.SettingsRepository) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.settingsRepo = repo
 }
 
 // SetIntegrityVerifier wires the Mojang cache integrity checker (D'2).
-func (a *WailsAdapter) SetIntegrityVerifier(v ports.IntegrityVerifier) {
+func (a *WailsAdapter) setIntegrityVerifier(v ports.IntegrityVerifier) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.integrityVerifier = v
@@ -672,7 +705,7 @@ func (a *WailsAdapter) emitLogBatch(instanceID string, lines []string) {
 	}
 }
 
-func (a *WailsAdapter) SetOnLogBatch(fn func(instanceID string, lines []string)) {
+func (a *WailsAdapter) setOnLogBatch(fn func(instanceID string, lines []string)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.onLogBatch = fn
@@ -738,7 +771,21 @@ func (a *WailsAdapter) LoginMicrosoft() (*AccountDTO, error) {
 	}, nil
 }
 
+// OpenExternal hands an http(s) URL to the OS default browser. It exists so
+// the webview never navigates itself (or spawns an embedded popup window) on
+// a link that came from user-authored Modrinth/CurseForge content: the
+// frontend intercepts <a> clicks and routes them here. There is no
+// bypass-to-other-schemes path - validateExternalURL is the same gate the
+// auth flow already uses, so this method cannot reach file:, ms-msdt:, or a
+// custom protocol handler.
+func (a *WailsAdapter) OpenExternal(raw string) error {
+	return openBrowserCrossPlatform(strings.TrimSpace(raw))
+}
+
 func openBrowserCrossPlatform(url string) error {
+	if err := validateExternalURL(url); err != nil {
+		return err
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
@@ -756,7 +803,16 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 		if a.curseforge == nil {
 			return nil, fmt.Errorf("curseforge client not initialized")
 		}
-		items, total, err := a.curseforge.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category)
+		reqProjectType := strings.ToLower(strings.TrimSpace(req.ProjectType))
+		if reqProjectType == "" {
+			reqProjectType = "mod"
+		}
+		if reqProjectType == "datapack" || reqProjectType == "modpack" {
+			// v0.7.2 G4/G5: honest capability gate - the public CF search API
+			// exposes no datapack or modpack classes.
+			return &SearchModsResultDTO{Items: []ModItemDTO{}, TotalCount: 0, Reason: "unsupported_type"}, nil
+		}
+		items, total, err := a.curseforge.SearchMods(context.Background(), req.Query, req.GameVersion, req.Loader, req.Limit, req.Offset, req.Sort, req.Category, reqProjectType)
 		if err != nil {
 			var rateErr *curseforge.RateLimitError
 			if errors.As(err, &rateErr) {
@@ -798,8 +854,23 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 			}
 			return nil, err
 		}
+		// CF search does not accept a category param, so the UISP tag filter
+		// runs client-side against the returned category names (v0.7.2 G4).
 		dtos := make([]ModItemDTO, 0, len(items))
+		wantCategory := strings.ToLower(strings.TrimSpace(req.Category))
 		for _, it := range items {
+			if wantCategory != "" {
+				matched := false
+				for _, c := range it.Categories {
+					if strings.EqualFold(strings.TrimSpace(c), wantCategory) {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					continue
+				}
+			}
 			dtos = append(dtos, ModItemDTO{
 				ID:          it.ID,
 				Slug:        it.Slug,
@@ -810,7 +881,7 @@ func (a *WailsAdapter) SearchMods(req SearchModsRequest) (*SearchModsResultDTO, 
 				IconURL:     it.IconURL,
 				Downloads:   it.Downloads,
 				Categories:  it.Categories,
-				ProjectType: "mod",
+				ProjectType: reqProjectType,
 			})
 		}
 		return &SearchModsResultDTO{
@@ -880,42 +951,502 @@ func (a *WailsAdapter) GetPerformancePreset() (*PerformancePresetDTO, error) {
 	}, nil
 }
 
-// ListOptimizationMods resolves the curated optimization set for a loader
-// family via Modrinth search pinned to the instance game version, so every
-// returned item is installable through the existing version matcher.
-// Missing curated entries are skipped (no fake rows); a loader without a
-// curated set yields an empty result the UI renders as "nothing vetted yet".
-func (a *WailsAdapter) ListOptimizationMods(req ListOptimizationModsRequest) (*SearchModsResultDTO, error) {
-	slugs := launch.CuratedOptimizationSlugs(req.Loader)
-	if len(slugs) == 0 {
-		return &SearchModsResultDTO{Items: []ModItemDTO{}, TotalCount: 0}, nil
+// ---------------------------------------------------------------------------
+// v0.7.2 G10/G5: instance creation wizard + Modrinth modpack storefront.
+// ---------------------------------------------------------------------------
+
+const gameManifestTTL = 6 * time.Hour
+
+// SetGameManifestURL overrides the Mojang manifest endpoint (tests/private mirrors).
+func (a *WailsAdapter) setGameManifestURL(u string) {
+	a.mu.Lock()
+	a.gameManifestURL = strings.TrimSpace(u)
+	a.gameManifestCache = nil
+	a.mu.Unlock()
+}
+
+func (a *WailsAdapter) manifestURL() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.gameManifestURL
+}
+
+// SetLoaderResolver injects an explicit loader metadata resolver (tests).
+func (a *WailsAdapter) setLoaderResolver(r *loadermeta.Resolver) {
+	a.mu.Lock()
+	a.loaderResolver = r
+	a.mu.Unlock()
+}
+
+// loaderTransport adapts *http.Client to the loadermeta transport contract.
+type loaderTransport struct{ client *http.Client }
+
+func (t *loaderTransport) Do(req *http.Request) (*http.Response, error) {
+	return t.client.Do(req)
+}
+
+func (a *WailsAdapter) getLoaderResolver() *loadermeta.Resolver {
+	a.mu.RLock()
+	r := a.loaderResolver
+	a.mu.RUnlock()
+	if r != nil {
+		return r
+	}
+	nr := loadermeta.NewResolver(&loaderTransport{client: a.getHTTPClient()})
+	a.mu.Lock()
+	if a.loaderResolver == nil {
+		a.loaderResolver = nr
+	}
+	held := a.loaderResolver
+	a.mu.Unlock()
+	return held
+}
+
+// getHTTPClientNoLock mirrors getHTTPClient for call sites already holding no
+// lock; taken separately to avoid the a.mu re-entrancy hazard (v0.7.1 lesson).
+// ListMinecraftVersions returns the Mojang version catalog (release/snapshot/
+// all) for the wizard's first step; cached 6h.
+func (a *WailsAdapter) ListMinecraftVersions(req ListMinecraftVersionsRequest) ([]GameVersionDTO, error) {
+	channel := strings.ToLower(strings.TrimSpace(req.Channel))
+	if channel == "" {
+		channel = "release"
+	}
+	entries, err := a.cachedGameManifest()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]GameVersionDTO, 0, len(entries))
+	for _, e := range entries {
+		if channel != "all" && e.Type != channel {
+			continue
+		}
+		out = append(out, GameVersionDTO{ID: e.ID, Type: e.Type, ReleaseTime: e.ReleaseTime.Format(time.RFC3339)})
+	}
+	return out, nil
+}
+
+func (a *WailsAdapter) cachedGameManifest() ([]game.VersionManifestEntry, error) {
+	a.mu.RLock()
+	cache := a.gameManifestCache
+	a.mu.RUnlock()
+	if cache != nil && time.Since(cache.fetchedAt) < gameManifestTTL {
+		return cache.entries, nil
+	}
+	manifest, err := game.FetchVersionManifest(context.Background(), &wailsHTTPClientWrapper{client: a.getHTTPClient()}, a.manifestURL())
+	if err != nil {
+		if cache != nil {
+			return cache.entries, nil // stale cache beats a hard error
+		}
+		return nil, fmt.Errorf("fetch version manifest: %w", err)
+	}
+	a.mu.Lock()
+	a.gameManifestCache = &gameManifestCacheEntry{entries: manifest.Versions, fetchedAt: time.Now()}
+	a.mu.Unlock()
+	return manifest.Versions, nil
+}
+
+// ListLoaderVersions resolves recommended/latest-stable plus the recent option
+// list for one (game version, loader) pair via official metadata services.
+func (a *WailsAdapter) ListLoaderVersions(req ListLoaderVersionsRequest) (*LoaderResolutionDTO, error) {
+	loader := strings.ToLower(strings.TrimSpace(req.Loader))
+	if loader == "" {
+		loader = "vanilla"
+	}
+	switch loader {
+	case "vanilla", "fabric", "quilt", "forge", "neoforge":
+	default:
+		return nil, fmt.Errorf("unsupported loader %q", loader)
+	}
+	opt, err := a.getLoaderResolver().Resolve(context.Background(), loader, strings.TrimSpace(req.GameVersion))
+	dto := &LoaderResolutionDTO{
+		Loader:  opt.Loader,
+		Default: opt.Default,
+		Options: opt.Options,
+		Source:  opt.Source,
+	}
+	if dto.Options == nil {
+		dto.Options = []string{}
+	}
+	if err != nil {
+		dto.Note = "не удалось получить список версий (оффлайн?) — можно продолжить с пустой версией"
+		return dto, nil
+	}
+	return dto, nil
+}
+
+// CreateInstanceWithLoader creates an instance pinned to a loader version.
+// Empty loaderVersion: vanilla, or loader resolution at first launch.
+func (a *WailsAdapter) CreateInstanceWithLoader(req CreateInstanceWithLoaderRequest) (*InstanceDTO, error) {
+	if a.svc == nil {
+		return nil, errors.New("instance service not available")
+	}
+	inst, err := a.svc.CreateInstanceWithLoader(strings.TrimSpace(req.Name), strings.TrimSpace(req.GameVersion), strings.TrimSpace(req.Loader), strings.TrimSpace(req.LoaderVersion))
+	if err != nil {
+		return nil, err
+	}
+	dto := toInstanceDTO(inst)
+	return &dto, nil
+}
+
+// ListMrPackVersions lists files of a Modrinth project and keeps only
+// .mrpack downloads (modpack storefront, v0.7.2 G5).
+func (a *WailsAdapter) ListMrPackVersions(req ListMrPackVersionsRequest) ([]MrPackVersionDTO, error) {
+	slug := strings.TrimSpace(req.ProjectSlug)
+	if slug == "" {
+		return nil, errors.New("project slug or id is required")
 	}
 	if a.modrinth == nil {
 		return nil, fmt.Errorf("modrinth client not initialized")
 	}
-	seen := map[string]bool{}
-	out := make([]ModItemDTO, 0, len(slugs))
-	for _, slug := range slugs {
-		res, err := a.SearchMods(SearchModsRequest{
-			Query:       slug,
-			GameVersion: req.GameVersion,
-			Loader:      req.Loader,
-			Source:      "modrinth",
-			Limit:       10,
-			ProjectType: "mod",
-		})
-		if err != nil {
-			return nil, err
-		}
-		for _, it := range res.Items {
-			if it.Slug == slug && !seen[slug] {
-				seen[slug] = true
-				out = append(out, it)
-				break
+	vers, err := a.modrinth.GetProjectVersions(context.Background(), slug, strings.TrimSpace(req.GameVersion), strings.TrimSpace(req.Loader))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MrPackVersionDTO, 0, len(vers))
+	for _, v := range vers {
+		for _, f := range v.Files {
+			if !strings.HasSuffix(strings.ToLower(f.FileName), ".mrpack") {
+				continue
 			}
+			// Files the importer could never accept are not offered for
+			// download at all (hard cap shared with the .mrpack pipeline).
+			if f.Size > content.MaxMrPackSizeBytes {
+				continue
+			}
+			out = append(out, MrPackVersionDTO{
+				VersionID:   v.ID,
+				Name:        v.Name,
+				VersionType: v.VersionType,
+				GameVersion: firstOr(v.GameVersions, ""),
+				Loaders:     v.Loaders,
+				URL:         f.URL,
+				Filename:    f.FileName,
+				Size:        f.Size,
+				SHA1:        f.SHA1,
+				SHA512:      f.SHA512,
+			})
+			break
 		}
 	}
-	return &SearchModsResultDTO{Items: out, TotalCount: int64(len(out))}, nil
+	return out, nil
+}
+
+func firstOr(list []string, fallback string) string {
+	if len(list) > 0 {
+		return list[0]
+	}
+	return fallback
+}
+
+// ImportMrPackFromURL downloads a .mrpack over HTTPS into a temp dir and runs
+// the standard importer pipeline (same progress/status as file import).
+// mrpack downloads must not trust the webview. The primary path
+// (project_slug + version_id) ignores every client-supplied transport field:
+// Go re-fetches the version record from the Modrinth API and uses that
+// URL/hashes/size. The fallback (a pasted URL with no identifiers) is pinned
+// to the shared download-host allowlist (cdn.modrinth.com et al.; extendable
+// only host-side via SetAllowedHosts) and to https - checked on the initial
+// request AND every redirect hop. Rationale: the webview renders user-authored
+// project descriptions (XSS surface), and url+sha1 used to be taken on faith
+// from JS - a compromised page could point the download at attacker bytes
+// carrying the attacker's hash.
+// resolveMrpackFile returns the authoritative (url, sha1, sha512, size) for a
+// Modrinth version, straight from the API the core itself trusts.
+// The query is deliberately unfiltered (no game_version/loader): those values
+// would come from the untrusted client and are unnecessary - the record is
+// picked by immutable version id.
+func (a *WailsAdapter) resolveMrpackFile(slug, versionID string) (dlURL, sha1sum, sha512sum string, size int64, err error) {
+	vers, err := a.modrinth.GetProjectVersions(context.Background(), slug, "", "")
+	if err != nil {
+		return "", "", "", 0, fmt.Errorf("resolve mrpack version: %w", err)
+	}
+	for _, v := range vers {
+		if v.ID != versionID {
+			continue
+		}
+		for _, f := range v.Files {
+			if !strings.HasSuffix(strings.ToLower(f.FileName), ".mrpack") {
+				continue
+			}
+			return f.URL, strings.ToLower(f.SHA1), strings.ToLower(f.SHA512), f.Size, nil
+		}
+		return "", "", "", 0, errors.New("resolved version has no .mrpack file")
+	}
+	return "", "", "", 0, errors.New("mrpack version not found on Modrinth")
+}
+
+func (a *WailsAdapter) ImportMrPackFromURL(req ImportMrPackURLRequest) (string, error) {
+	name := sanitizeInstanceName(req.InstanceName)
+	if name == "" {
+		return "", errors.New("instance name is required")
+	}
+
+	var dlURL, sha1sum, sha512sum string
+	size := req.Size
+	slug := strings.TrimSpace(req.ProjectSlug)
+	versionID := strings.TrimSpace(req.VersionID)
+	if slug != "" && versionID != "" {
+		// Authoritative mode: everything about the file comes from Go.
+		// Client-provided url/sha1/size are treated as untrusted hints and
+		// must agree - a mismatch is tampering, not a fallback.
+		if a.modrinth == nil {
+			return "", errors.New("modrinth client not initialized")
+		}
+		resolvedURL, rSHA1, rSHA512, rSize, err := a.resolveMrpackFile(slug, versionID)
+		if err != nil {
+			return "", err
+		}
+		if req.SHA1 != "" && !strings.EqualFold(strings.TrimSpace(req.SHA1), rSHA1) {
+			return "", errors.New("mrpack sha1 does not match the Modrinth API record")
+		}
+		if req.Size > 0 && rSize > 0 && req.Size != rSize {
+			return "", errors.New("mrpack size does not match the Modrinth API record")
+		}
+		dlURL, sha1sum, sha512sum, size = resolvedURL, rSHA1, rSHA512, rSize
+	} else {
+		return "", errors.New("mrpack import requires project_slug and version_id (the url+hash pair is never taken from the webview)")
+	}
+	u, err := url.Parse(dlURL)
+	if err != nil || u.Scheme != "https" || !a.isAllowedDownloadHost(u.Hostname()) {
+		return "", errors.New("mrpack download requires an https URL on an allowed download host")
+	}
+	if name == "" {
+		return "", errors.New("instance name is required")
+	}
+	importer := a.getMrPackImporter()
+	if importer == nil {
+		return "", errors.New("mrpack importer not available")
+	}
+
+	// Private 0700 staging dir + os.CreateTemp: predictable names in a shared
+	// /tmp would invite symlink attacks on multi-user systems.
+	tmp, err := os.MkdirTemp("", "nord-mrpack-url-*")
+	if err != nil {
+		return "", fmt.Errorf("temp dir: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(tmp) }() // errcheck:ok staging cleanup
+	path := filepath.Join(tmp, "pack.mrpack")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("stage mrpack: %w", err)
+	}
+	_ = f.Close() // errcheck:ok existence+perms reserved; downloader writes the body
+
+	a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "downloading" })
+	// Streaming download through the core downloader (128 KB io.Copy buffers,
+	// range-resume, .part atomic rename) with sha1 enforcement and a hard
+	// redirect policy that pins the transfer to https end-to-end.
+	dl := downloader.NewDispatcher(downloader.Config{
+		MaxWorkers: 1, MaxConnsPerHost: 1,
+		HTTPTimeout: 15 * time.Minute, MaxRetries: 1,
+		BaseBackoff: 2 * time.Second, BufferSize: 128 * 1024,
+	}, a.mrpackDownloadClient())
+	task := &downloader.DownloadTask{
+		ID: "mrpack-" + name, URL: u.String(), DestPath: path,
+		ExpectedSHA1: sha1sum, ExpectedSHA512: sha512sum, ExpectedSize: size, Priority: 0,
+	}
+	if err := dl.DownloadBatch(context.Background(), []*downloader.DownloadTask{task}, nil); err != nil {
+		a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = err.Error() })
+		return "", fmt.Errorf("download mrpack: %w", err)
+	}
+	if size > 0 {
+		if fi, statErr := os.Stat(path); statErr != nil || fi.Size() != size {
+			a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = "size mismatch" })
+			return "", fmt.Errorf("downloaded mrpack size mismatch: want %d", size)
+		}
+	}
+
+	instID, err := a.ImportMrPack(ImportMrPackRequest{MrPackPath: path, InstanceName: name})
+	if err != nil {
+		a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "failed"; st.Error = err.Error() })
+		return "", err
+	}
+	a.setMrpackURLProgress(name, func(st *MrPackImportStatusDTO) { st.Status = "complete" })
+	return instID, nil
+}
+
+// mrpackDownloadClient copies the adapter client's transport but replaces the
+// redirect policy: every hop must stay on https AND on an allowed origin
+// (redirects are attacker-controllable even when the initial URL was sane).
+func (a *WailsAdapter) mrpackDownloadClient() *http.Client {
+	base := a.getHTTPClient()
+	c := &http.Client{Timeout: base.Timeout, Transport: base.Transport}
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if req.URL.Scheme != "https" {
+			return errors.New("mrpack download redirected away from https")
+		}
+		if !a.isAllowedDownloadHost(req.URL.Hostname()) {
+			return fmt.Errorf("mrpack download redirected to untrusted host %q", req.URL.Hostname())
+		}
+		if len(via) >= 5 {
+			return errors.New("mrpack download: too many redirects")
+		}
+		return nil
+	}
+	return c
+}
+
+// GetMrPackURLImportStatus mirrors the file-import progress for URL imports,
+// keyed by the requested instance name.
+func (a *WailsAdapter) GetMrPackURLImportStatus(req InstanceIDRequest) (*MrPackImportStatusDTO, error) {
+	name := sanitizeInstanceName(req.InstanceID)
+	a.mu.RLock()
+	if st, ok := a.mrpackURLProgress[name]; ok && st != nil {
+		cp := *st
+		a.mu.RUnlock()
+		return &cp, nil
+	}
+	a.mu.RUnlock()
+	if st, err := a.GetMrPackImportStatus(name); err == nil && st != nil {
+		return st, nil
+	}
+	return &MrPackImportStatusDTO{TaskID: name, Status: "idle"}, nil
+}
+
+func (a *WailsAdapter) setMrpackURLProgress(name string, mutate func(*MrPackImportStatusDTO)) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.mrpackURLProgress == nil {
+		a.mrpackURLProgress = make(map[string]*MrPackImportStatusDTO)
+	}
+	st, ok := a.mrpackURLProgress[name]
+	if !ok || st == nil {
+		st = &MrPackImportStatusDTO{TaskID: name}
+		a.mrpackURLProgress[name] = st
+	}
+	mutate(st)
+}
+
+func sanitizeInstanceName(in string) string {
+	in = strings.TrimSpace(in)
+	in = strings.ReplaceAll(in, "\\", "/")
+	if i := strings.LastIndexByte(in, '/'); i >= 0 {
+		in = in[i+1:]
+	}
+	return strings.TrimSpace(in)
+}
+
+// curseforgeUISPTags mirrors the public UISP category tables (the anonymous
+// /v1/categories endpoint is 403 key-gated, so the mapping ships in the
+// binary). Labels double as the client-side filter values matched against
+// categories[].name of search results - honest "reference" tags, not
+// server-side filters.
+var curseforgeUISPTags = map[string][]ProjectTagDTO{
+	"mod": {
+		{ID: "617", Label: "Combat", Searchable: true},
+		{ID: "422", Label: "Utilities", Searchable: true},
+		{ID: "420", Label: "Education", Searchable: true},
+		{ID: "399", Label: "Mods", Searchable: true},
+		{ID: "250", Label: "Adventure and Maps", Searchable: true},
+		{ID: "248", Label: "Game Adaptation", Searchable: true},
+		{ID: "268", Label: "Addons", Searchable: true},
+		{ID: "453", Label: "CraftTweaking", Searchable: true},
+		{ID: "616", Label: "Map and Information", Searchable: true},
+		{ID: "614", Label: "Mechanical", Searchable: true},
+		{ID: "615", Label: "Magic", Searchable: true},
+		{ID: "635", Label: "Storage", Searchable: true},
+		{ID: "613", Label: "Industry", Searchable: true},
+		{ID: "612", Label: "Energy, Fluid and Tech", Searchable: true},
+		{ID: "421", Label: "Redstone", Searchable: true},
+		{ID: "396", Label: "Technical", Searchable: true},
+		{ID: "249", Label: "Buildy", Searchable: true},
+		{ID: "622", Label: "World Gen", Searchable: true},
+		{ID: "623", Label: "Museumark", Searchable: true},
+		{ID: "624", Label: "Decomod", Searchable: true},
+		{ID: "625", Label: "Armor, Tools, and Weapons", Searchable: true},
+		{ID: "626", Label: "Servers", Searchable: true},
+		{ID: "627", Label: "Role Playing", Searchable: true},
+		{ID: "628", Label: "Create", Searchable: true},
+		{ID: "630", Label: "Stability", Searchable: true},
+		{ID: "631", Label: "Performance", Searchable: true},
+		{ID: "632", Label: "QoL", Searchable: true},
+		{ID: "681", Label: "Processing", Searchable: true},
+		{ID: "693", Label: "Information", Searchable: true},
+		{ID: "694", Label: "Thaumcraft", Searchable: true},
+		{ID: "695", Label: "Mob", Searchable: true},
+		{ID: "696", Label: "Biomes", Searchable: true},
+		{ID: "697", Label: "Structure", Searchable: true},
+		{ID: "698", Label: "Library", Searchable: true},
+	},
+	"resourcepack": {
+		{ID: "646", Label: "Resolution", Searchable: true},
+		{ID: "683", Label: "Data Packs", Searchable: true},
+		{ID: "691", Label: "Steampunk", Searchable: true},
+		{ID: "712", Label: "Mod Support", Searchable: true},
+		{ID: "673", Label: "Fairy / Magical", Searchable: true},
+		{ID: "648", Label: "Medieval", Searchable: true},
+		{ID: "678", Label: "Miscellaneous", Searchable: true},
+		{ID: "675", Label: "Modern", Searchable: true},
+		{ID: "677", Label: "Fantasy", Searchable: true},
+		{ID: "674", Label: "Cinematic", Searchable: true},
+		{ID: "655", Label: "Traditional", Searchable: true},
+		{ID: "636", Label: "RTX", Searchable: true},
+		{ID: "640", Label: "Animated", Searchable: true},
+		{ID: "710", Label: "Realistic", Searchable: true},
+	},
+	"shader": {
+		{ID: "651", Label: "Performance", Searchable: true},
+		{ID: "654", Label: "Silders", Searchable: true},
+		{ID: "655", Label: "Complementary", Searchable: true},
+		{ID: "681", Label: "BSL", Searchable: true},
+		{ID: "682", Label: "SEUS", Searchable: true},
+		{ID: "683", Label: "Iris", Searchable: true},
+		{ID: "652", Label: "Variance", Searchable: true},
+		{ID: "653", Label: "Low End", Searchable: true},
+		{ID: "656", Label: "Mid End", Searchable: true},
+		{ID: "657", Label: "High End", Searchable: true},
+		{ID: "684", Label: "Ultra", Searchable: true},
+		{ID: "692", Label: "Realistic", Searchable: true},
+		{ID: "658", Label: "Toon", Searchable: true},
+		{ID: "680", Label: "Shader", Searchable: true},
+	},
+}
+
+// ListProjectTags returns the tag vocabulary for a catalog provider: the live
+// Modrinth category list (cached 24h - the single honest source of the full
+// canonical set) or the mirrored UISP table for CurseForge.
+func (a *WailsAdapter) ListProjectTags(req ListProjectTagsRequest) ([]ProjectTagDTO, error) {
+	provider := strings.ToLower(strings.TrimSpace(req.Provider))
+	projectType := strings.ToLower(strings.TrimSpace(req.ProjectType))
+	if projectType == "" {
+		projectType = "mod"
+	}
+	if provider == "curseforge" {
+		tags := curseforgeUISPTags[projectType]
+		if tags == nil {
+			tags = []ProjectTagDTO{}
+		}
+		out := make([]ProjectTagDTO, len(tags))
+		copy(out, tags)
+		return out, nil
+	}
+	if a.modrinth == nil {
+		return nil, fmt.Errorf("modrinth client not initialized")
+	}
+	cacheKey := "modrinth|" + projectType
+	a.mu.RLock()
+	if entry, ok := a.projectTagsCache[cacheKey]; ok && time.Now().Before(entry.expiresAt) {
+		tags := entry.tags
+		a.mu.RUnlock()
+		return tags, nil
+	}
+	a.mu.RUnlock()
+
+	tags, err := a.modrinth.ListProjectTags(context.Background(), projectType)
+	if err != nil {
+		return nil, err
+	}
+	dtos := make([]ProjectTagDTO, 0, len(tags))
+	for _, t := range tags {
+		dtos = append(dtos, ProjectTagDTO{ID: t.ID, Label: t.Name, Searchable: true})
+	}
+	a.mu.Lock()
+	if a.projectTagsCache == nil {
+		a.projectTagsCache = make(map[string]projectTagsCacheEntry)
+	}
+	a.projectTagsCache[cacheKey] = projectTagsCacheEntry{tags: dtos, expiresAt: time.Now().Add(24 * time.Hour)}
+	a.mu.Unlock()
+	return dtos, nil
 }
 
 func (a *WailsAdapter) ListModVersions(req ListModVersionsRequest) ([]ModFileDTO, error) {
@@ -1346,7 +1877,7 @@ func (a *WailsAdapter) DeleteMod(req DeleteModRequest) error {
 	return nil
 }
 
-func (a *WailsAdapter) RecordCrash(instanceID string, report *launch.CrashReport) {
+func (a *WailsAdapter) recordCrash(instanceID string, report *launch.CrashReport) {
 	if report == nil {
 		return
 	}
@@ -1463,7 +1994,7 @@ func (a *WailsAdapter) RestartApplication() error {
 	return updater.Relaunch()
 }
 
-func (a *WailsAdapter) SetHTTPClient(client *http.Client) {
+func (a *WailsAdapter) setHTTPClient(client *http.Client) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.httpClient = client
@@ -1478,7 +2009,7 @@ func (a *WailsAdapter) getHTTPClient() *http.Client {
 	return &http.Client{Timeout: 60 * time.Second}
 }
 
-func (a *WailsAdapter) SetAllowedHosts(hosts []string) {
+func (a *WailsAdapter) setAllowedHosts(hosts []string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.allowedHosts = hosts
@@ -3117,7 +3648,7 @@ func (a *WailsAdapter) GetScreenshotData(req GetScreenshotDataRequest) (*GetScre
 	return &GetScreenshotDataResponse{DataURL: dataURL}, nil
 }
 
-func (a *WailsAdapter) SetImporter(imp *launch.InstanceImporter) {
+func (a *WailsAdapter) setImporter(imp *launch.InstanceImporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.importer = imp
@@ -3140,7 +3671,7 @@ func (a *WailsAdapter) getCFPackImporter() *launch.CurseForgePackImporter {
 }
 
 // SetCurseForgePackImporter overrides the lazy-built importer (tests/e2e).
-func (a *WailsAdapter) SetCurseForgePackImporter(imp *launch.CurseForgePackImporter) {
+func (a *WailsAdapter) setCurseForgePackImporter(imp *launch.CurseForgePackImporter) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.cfPackImporter = imp
@@ -3737,34 +4268,32 @@ func (a *WailsAdapter) discordManagerIfEnabled() *discordrpc.Manager {
 	m := a.discordRPC
 	a.mu.Unlock()
 
-	enabled, _ := a.discordSettings()
-	if !enabled {
+	if !a.discordSettings() {
 		return nil
 	}
 	return m
 }
 
 func (a *WailsAdapter) newDiscordManagerLocked() *discordrpc.Manager {
-	_, appID := a.discordSettingsWith(a.settingsRepo)
-	return discordrpc.NewManager(appID)
+	return discordrpc.NewManager("") // builtin app id ships in the binary (v0.7.2 G8)
 }
 
-func (a *WailsAdapter) discordSettings() (enabled bool, appID string) {
+func (a *WailsAdapter) discordSettings() bool {
 	a.mu.RLock()
 	repo := a.settingsRepo
 	a.mu.RUnlock()
-	return a.discordSettingsWith(repo)
+	return a.discordEnabledWith(repo)
 }
 
-// discordSettingsWith reads the two D'5 settings from a caller-resolved repo
-// (no lock taken here: callers may already hold a.mu).
-func (a *WailsAdapter) discordSettingsWith(repo *storage.SettingsRepository) (enabled bool, appID string) {
+// discordEnabledWith reads the D'5 opt-in from a caller-resolved repo
+// (no lock taken here: callers may already hold a.mu). The application id is
+// not user-configurable since v0.7.2 — it ships as discordrpc.BuiltinAppID.
+func (a *WailsAdapter) discordEnabledWith(repo *storage.SettingsRepository) bool {
 	if repo == nil {
-		return false, ""
+		return false
 	}
 	rawEnabled, _ := repo.Get(context.Background(), "discord_rpc_enabled") // errcheck:ok unset setting means disabled
-	appID, _ = repo.Get(context.Background(), "discord_app_id")            // errcheck:ok unset app id degrades to idle status
-	return rawEnabled == "true", appID
+	return rawEnabled == "true"
 }
 
 // SetDiscordRpcEnabled toggles presence. The RPC manager only exists while
@@ -3790,8 +4319,7 @@ func (a *WailsAdapter) GetDiscordRpcStatus() (*DiscordRpcStatusDTO, error) {
 	a.mu.RLock()
 	m := a.discordRPC
 	a.mu.RUnlock()
-	enabled, appID := a.discordSettings()
-	dto := &DiscordRpcStatusDTO{Enabled: enabled, AppIDSet: appID != ""}
+	dto := &DiscordRpcStatusDTO{Enabled: a.discordSettings(), AppIDSet: discordrpc.BuiltinAppID != ""}
 	if m != nil {
 		st := m.Status()
 		dto.Connected = st.Connected
@@ -3823,17 +4351,20 @@ func (a *WailsAdapter) GetDiscordRpcPreview(req InstanceIDRequest) (*DiscordRpcP
 	return dto, nil
 }
 
-// SetDiscordAppID stores the Discord application identity used for the IPC
-// handshake (BYO app id; empty = presence stays off with an honest status).
-func (a *WailsAdapter) SetDiscordAppID(req SetSettingRequest) error {
-	if err := a.SetSetting(SetSettingRequest{Key: "discord_app_id", Value: req.Value}); err != nil {
-		return err
+// validateExternalURL gates every URL handed to the OS browser opener
+// (rundll32/xdg-open/open). URLs reaching this point can originate from
+// user-authored Modrinth/CurseForge data (source_url etc.); scheme-only is
+// the whole defence against launching arbitrary protocol handlers.
+func validateExternalURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("open-url: unparseable URL: %w", err)
 	}
-	a.mu.RLock()
-	m := a.discordRPC
-	a.mu.RUnlock()
-	if m != nil {
-		m.SetAppID(req.Value)
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return fmt.Errorf("open-url: refusing scheme %q (only http/https may reach the OS handler)", u.Scheme)
+	}
+	if u.Host == "" {
+		return errors.New("open-url: refusing URL without a host")
 	}
 	return nil
 }

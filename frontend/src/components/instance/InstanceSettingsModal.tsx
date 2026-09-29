@@ -1,10 +1,9 @@
 import { Component, createSignal, createEffect, For, Show } from "solid-js";
-import { X, Settings, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database, Gauge, ChevronDown, ShieldCheck } from "lucide-solid";
+import { X, Cpu, Layers, AlertTriangle, Check, Sliders, Package, Download, FolderOpen, Dices, Database, ShieldCheck } from "lucide-solid";
 import { launcherAPI } from "../../services/api";
 import type { InstanceDTO, UpdateInstanceRequest, JavaInstallationDTO } from "../../bindings/ipc_types";
-import type { IntegrityResultDTO, ModItemDTO, PerformancePresetDTO } from "../../bindings/ipc_types";
+import type { IntegrityResultDTO, PerformancePresetDTO } from "../../bindings/ipc_types";
 import { InstalledModsManager } from "../mods/InstalledModsManager";
-import { ModCatalog } from "../mods/ModCatalog";
 import { DatapackManager } from "./DatapackManager";
 import { PRESET_AVATARS, getRandomAvatar } from "../../assets/avatars";
 
@@ -46,7 +45,7 @@ export function getRecommendedJavaMajor(version: string, manifestMajor?: number)
   return 21;
 }
 
-export type SettingsTab = "general" | "java" | "memory" | "args" | "mods" | "datapacks" | "optimization" | "integrity";
+export type SettingsTab = "general" | "performance" | "mods" | "datapacks" | "integrity";
 
 interface InstanceSettingsModalProps {
   instance: InstanceDTO;
@@ -54,12 +53,12 @@ interface InstanceSettingsModalProps {
   onClose: () => void;
   onSaved: (updated: InstanceDTO) => void;
   onOpenJavaManager?: () => void;
+  onOpenCatalog?: () => void;
   initialTab?: SettingsTab;
 }
 
 export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (props) => {
   const [activeTab, setActiveTab] = createSignal<SettingsTab>(props.initialTab || "general");
-  const [modSubTab, setModSubTab] = createSignal<"installed" | "catalog">("installed");
   const [name, setName] = createSignal("");
   const [group, setGroup] = createSignal("");
   const [iconPath, setIconPath] = createSignal("");
@@ -72,40 +71,38 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
   const [error, setError] = createSignal("");
   const [availableRuntimes, setAvailableRuntimes] = createSignal<JavaInstallationDTO[]>([]);
   const [installingJava, setInstallingJava] = createSignal(false);
-  const [installedJavaToast, setInstalledJavaToast] = createSignal("");
   const [perfPreset, setPerfPreset] = createSignal<PerformancePresetDTO | null>(null);
-  const [optimizationMods, setOptimizationMods] = createSignal<ModItemDTO[]>([]);
-  const [optimizationLoaded, setOptimizationLoaded] = createSignal(false);
-  const [installedOptimizationIds, setInstalledOptimizationIds] = createSignal<Set<string>>(new Set());
-  const [installingOptimizationId, setInstallingOptimizationId] = createSignal("");
+  const [discordEnabled, setDiscordEnabled] = createSignal(false);
+
+  const handleToggleDiscord = async () => {
+    const next = !discordEnabled();
+    try {
+      await launcherAPI.setDiscordRpcEnabled(next);
+      setDiscordEnabled(next);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg || "Не удалось переключить Discord-присутствие");
+    }
+  };
   const [integrityResult, setIntegrityResult] = createSignal<IntegrityResultDTO | null>(null);
   const [integrityBusy, setIntegrityBusy] = createSignal<"check" | "repair" | "">("");
 
+  // v0.7.2: standalone "recommended Java" plate is gone; the unified tab only
+  // offers to install a missing recommended runtime.
   const recommendedJava = () => getRecommendedJavaMajor(props.instance.game_version);
-
-  const matchingInstalledRuntime = () => {
-    const rec = recommendedJava();
-    return availableRuntimes().find((r) => r.major_version === rec);
-  };
-
+  const recommendedMissing = () =>
+    !!props.instance.game_version &&
+    !availableRuntimes().some((r) => r.major_version === recommendedJava());
   const handleInstallRecommendedJava = async () => {
-    const rec = recommendedJava();
     setInstallingJava(true);
-    setError("");
     try {
-      await launcherAPI.downloadJavaRuntime(rec);
-      setInstalledJavaToast(`Загрузка Java ${rec} LTS запущена`);
-      await loadRuntimes();
+      await launcherAPI.downloadJavaRuntime(recommendedJava());
+      setTimeout(() => { loadRuntimes().catch(() => {}); setInstallingJava(false); }, 1500);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      setError(`Ошибка запуска установки Java: ${msg}`);
-    } finally {
+      setError(msg || "Не удалось запустить установку Java");
       setInstallingJava(false);
     }
-  };
-
-  const handleSelectRecommendedJava = (path: string) => {
-    setJavaPath(path);
   };
 
   // Sync state whenever modal opens or instance changes
@@ -121,9 +118,11 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
       setMaxMemoryMb(props.instance.max_ram_mb || 4096);
       setCustomJvmArgs(props.instance.jvm_args ? props.instance.jvm_args.join(" ") : "");
       setError("");
-      setOptimizationMods([]);
-      setOptimizationLoaded(false);
       launcherAPI.getPerformancePreset().then(setPerfPreset).catch(() => setPerfPreset(null));
+      launcherAPI
+        .getDiscordRpcStatus()
+        .then((st) => setDiscordEnabled(st?.enabled ?? false))
+        .catch(() => setDiscordEnabled(false));
 
       // Fetch runtimes for easy selection in Java tab
       loadRuntimes();
@@ -235,39 +234,6 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
     }
   };
 
-  const loadOptimizationMods = async () => {
-    if (optimizationLoaded() || !props.instance?.game_version) return;
-    setOptimizationLoaded(true);
-    try {
-      const res = await launcherAPI.listOptimizationMods({
-        game_version: props.instance.game_version,
-        loader: props.instance.loader,
-      });
-      setOptimizationMods(res.items || []);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || "Не удалось загрузить список оптимизации");
-    }
-  };
-
-  const handleInstallOptimizationMod = async (mod: ModItemDTO) => {
-    setInstallingOptimizationId(mod.id);
-    try {
-      await launcherAPI.installMod(props.instance.id, {
-        id: mod.id,
-        slug: mod.slug,
-        name: mod.name,
-        source: mod.source,
-      });
-      setInstalledOptimizationIds((prev) => new Set([...prev, mod.id]));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg || "Не удалось установить мод");
-    } finally {
-      setInstallingOptimizationId("");
-    }
-  };
-
   const applyMemoryPreset = (min: number, max: number) => {
     setMinMemoryMb(min);
     setMaxMemoryMb(max);
@@ -323,42 +289,16 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("java")}
+              onClick={() => setActiveTab("performance")}
               class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-                activeTab() === "java"
+                activeTab() === "performance"
                   ? "border-nord-cyan text-nord-cyan font-semibold"
                   : "border-transparent text-zinc-400 hover:text-zinc-200"
               }`}
-              data-testid="tab-java"
+              data-testid="tab-performance"
             >
               <Cpu class="w-4 h-4" />
-              <span>Java рантайм</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("memory")}
-              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-                activeTab() === "memory"
-                  ? "border-nord-cyan text-nord-cyan font-semibold"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-              }`}
-              data-testid="tab-memory"
-            >
-              <Settings class="w-4 h-4" />
-              <span>Память RAM</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("args")}
-              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-                activeTab() === "args"
-                  ? "border-nord-cyan text-nord-cyan font-semibold"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-              }`}
-              data-testid="tab-args"
-            >
-              <AlertTriangle class="w-4 h-4" />
-              <span>Аргументы JVM</span>
+              <span>Производительность и Java</span>
             </button>
             <button
               type="button"
@@ -387,19 +327,6 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
               <span>Датапаки</span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab("optimization")}
-              class={`py-3 px-4 flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-                activeTab() === "optimization"
-                  ? "border-nord-cyan text-nord-cyan font-semibold"
-                  : "border-transparent text-zinc-400 hover:text-zinc-200"
-              }`}
-              data-testid="tab-optimization"
-            >
-              <Gauge class="w-4 h-4" />
-              <span>Оптимизация</span>
-            </button>
             <button
               type="button"
               onClick={() => setActiveTab("integrity")}
@@ -528,83 +455,7 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                 </div>
 
                 {/* Java Recommendation Chip */}
-                <div
-                  class="p-3.5 rounded-xl bg-nord-cyan/5 border border-nord-cyan/20 flex items-center justify-between gap-3"
-                  data-testid="recommended-java-chip"
-                >
-                  <div class="flex items-center gap-2.5">
-                    <div class="p-1.5 rounded-lg bg-nord-cyan/10 text-nord-cyan">
-                      <Cpu class="w-4 h-4" />
-                    </div>
-                    <div>
-                      <p class="text-xs font-semibold text-white">
-                        Рекомендуется для Minecraft {props.instance.game_version}: Java {recommendedJava()} LTS
-                      </p>
-                      <p class="text-[11px] text-zinc-400">
-                        <Show
-                          when={matchingInstalledRuntime()}
-                          fallback={"Рантайм не установлен в системе"}
-                        >
-                          <Show
-                            when={javaPath() === matchingInstalledRuntime()!.path || (!javaPath() && matchingInstalledRuntime()?.kind === "managed")}
-                            fallback={`Установлен: ${matchingInstalledRuntime()!.path}`}
-                          >
-                            Рантайм установлен и активен
-                          </Show>
-                        </Show>
-                      </p>
-                    </div>
-                  </div>
 
-                  <div>
-                    <Show
-                      when={matchingInstalledRuntime()}
-                      fallback={
-                        <button
-                          type="button"
-                          onClick={handleInstallRecommendedJava}
-                          disabled={installingJava()}
-                          class="px-3 py-1.5 rounded-lg bg-nord-cyan/20 hover:bg-nord-cyan/30 text-nord-cyan border border-nord-cyan/40 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                          data-testid="install-recommended-java-button"
-                        >
-                          <Download class="w-3.5 h-3.5" />
-                          <span>{installingJava() ? "Установка..." : `Установить Java ${recommendedJava()}`}</span>
-                        </button>
-                      }
-                    >
-                      {(rt) => (
-                        <Show
-                          when={javaPath() === rt().path}
-                          fallback={
-                            <button
-                              type="button"
-                              onClick={() => handleSelectRecommendedJava(rt().path)}
-                              class="px-3 py-1.5 rounded-lg bg-nord-cyan/20 hover:bg-nord-cyan/30 text-nord-cyan border border-nord-cyan/40 font-semibold text-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                              data-testid="select-recommended-java-button"
-                            >
-                              <Check class="w-3.5 h-3.5" />
-                              <span>Выбрать Java {recommendedJava()}</span>
-                            </button>
-                          }
-                        >
-                          <span class="px-2.5 py-1 rounded-md bg-nord-emerald/10 border border-nord-emerald/20 text-nord-emerald text-[11px] font-medium flex items-center gap-1">
-                            <Check class="w-3 h-3" />
-                            Активна
-                          </span>
-                        </Show>
-                      )}
-                    </Show>
-                  </div>
-                </div>
-
-                <Show when={installedJavaToast()}>
-                  <div
-                    class="p-2.5 rounded-lg bg-nord-cyan/10 border border-nord-cyan/20 text-xs text-nord-cyan font-mono"
-                    data-testid="java-action-toast"
-                  >
-                    {installedJavaToast()}
-                  </div>
-                </Show>
 
                 {/* Instance Folder Opener */}
                 <div class="flex items-center justify-between p-3.5 rounded-xl bg-black/20 border border-white/5">
@@ -628,8 +479,9 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
             </Show>
 
             {/* TAB 2: Java */}
-            <Show when={activeTab() === "java"}>
+            <Show when={activeTab() === "performance"}>
               <div class="space-y-4">
+                <p class="text-[11px] text-zinc-500">Единственная вкладка тюнинга: Java, память, флаги JVM и пресеты — всё здесь.</p>
                 <div>
                   <div class="flex items-center justify-between mb-1.5">
                     <label class="text-zinc-300 font-semibold">
@@ -707,6 +559,21 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                   </div>
                 </Show>
 
+                <Show when={recommendedMissing()}>
+                      <Show when={recommendedMissing()}>
+                        <button
+                          type="button"
+                          onClick={handleInstallRecommendedJava}
+                          disabled={installingJava()}
+                          class="w-full py-1.5 rounded-lg bg-nord-cyan/15 hover:bg-nord-cyan/25 border border-nord-cyan/30 text-nord-cyan text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          data-testid="install-recommended-java-button"
+                        >
+                          <Download class="w-3.5 h-3.5" />
+                          <span>{installingJava() ? "Установка..." : `Установить рекомендуемую Java ${recommendedJava()}`}</span>
+                        </button>
+                      </Show>
+                </Show>
+
                 {/* Skip Java check toggle */}
                 <div class="p-3 rounded-xl bg-nord-amber/5 border border-nord-amber/20 space-y-2">
                   <label class="flex items-start gap-3 cursor-pointer">
@@ -727,11 +594,74 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
                     </div>
                   </label>
                 </div>
+
+                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
+                  <div class="flex items-center justify-between">
+                    <span class="text-zinc-200 font-semibold text-sm">Пресеты производительности</span>
+                    <Show when={isAikarPresetActive()}>
+                      <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium" data-testid="aikar-active-badge">
+                        Применён
+                      </span>
+                    </Show>
+                  </div>
+                  <Show when={perfPreset()}>
+                    <p class="text-xs text-zinc-400 leading-relaxed">
+                      Рекомендация по памяти для этого ПК: <span class="font-mono text-nord-cyan">{perfPreset()!.suggested_ram_mb} МБ</span>. Флаги Aikar G1GC — канонический набор настройки сборщика мусора (источник: aikar.co/mcflags); применять только с G1, не совмещать с -XX:+UseZGC.
+                    </p>
+                  </Show>
+                  <div class="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleApplyAikarPreset}
+                      disabled={!perfPreset() || perfPreset()!.aikar_args.length === 0}
+                      class="py-2 px-4 rounded-lg bg-[#00D4B2] text-zinc-950 text-xs font-semibold hover:bg-[#00e6c3] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      data-testid="aikar-apply-btn"
+                    >
+                      Применить Aikar G1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetAikarPreset}
+                      class="py-2 px-4 rounded-lg bg-zinc-800 border border-white/10 text-zinc-300 text-xs font-medium hover:bg-zinc-700 transition-colors cursor-pointer"
+                      data-testid="aikar-reset-btn"
+                    >
+                      Сбросить флаги
+                    </button>
+                  </div>
+                  <p class="text-[10px] text-zinc-500 leading-relaxed">
+                    Флаги добавляются в пользовательские аргументы JVM — итог виден ниже на этой же вкладке и сохраняется кнопкой «Сохранить».
+                  </p>
+                </div>
+
+                <div class="p-3.5 rounded-xl bg-black/20 border border-white/5 flex items-center justify-between gap-3">
+                  <div>
+                    <span class="text-xs font-semibold text-white">Показывать статус в Discord</span>
+                    <p class="text-[11px] text-zinc-400">
+                      Локальный показ статуса игры в Discord (launch-local IPC, без сетевых запросов).
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={discordEnabled()}
+                    onClick={handleToggleDiscord}
+                    class={`relative h-6 w-11 rounded-full transition-colors cursor-pointer ${
+                      discordEnabled() ? "bg-nord-cyan" : "bg-zinc-700"
+                    }`}
+                    data-testid="perf-discord-toggle"
+                  >
+                    <span
+                      class={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all ${
+                        discordEnabled() ? "left-[22px]" : "left-0.5"
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
             </Show>
 
-            {/* TAB 3: Memory */}
-            <Show when={activeTab() === "memory"}>
+            {/* Memory (merged) */}
+            <Show when={activeTab() === "performance"}>
               <div class="space-y-4">
                 {/* Presets */}
                 <div>
@@ -836,8 +766,8 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
               </div>
             </Show>
 
-            {/* TAB 4: Arguments */}
-            <Show when={activeTab() === "args"}>
+            {/* Arguments (merged) */}
+            <Show when={activeTab() === "performance"}>
               <div class="space-y-4">
                 <div>
                   <label class="block text-zinc-300 font-semibold mb-1.5">
@@ -866,145 +796,32 @@ export const InstanceSettingsModal: Component<InstanceSettingsModalProps> = (pro
               </div>
             </Show>
 
-            {/* TAB 5: Mods (Installed vs Catalog) */}
+            {/* TAB 5: Mods - installed manager only (catalog moved to its own page, v0.7.2 G3) */}
             <Show when={activeTab() === "mods"}>
               <div class="space-y-4">
-                {/* Segmented Control */}
-                <div class="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-1 w-fit">
-                  <button
-                    type="button"
-                    onClick={() => setModSubTab("installed")}
-                    class={`px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                      modSubTab() === "installed"
-                        ? "bg-[#00D4B2] text-zinc-950 font-semibold shadow"
-                        : "text-zinc-400 hover:text-zinc-100"
-                    }`}
-                    data-testid="mods-subtab-installed"
-                  >
-                    Установленные
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModSubTab("catalog")}
-                    class={`px-4 py-1.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
-                      modSubTab() === "catalog"
-                        ? "bg-[#00D4B2] text-zinc-950 font-semibold shadow"
-                        : "text-zinc-400 hover:text-zinc-100"
-                    }`}
-                    data-testid="mods-subtab-catalog"
-                  >
-                    Каталог
-                  </button>
+                <div class="flex items-center justify-between">
+                  <span class="text-zinc-200 font-semibold text-sm">Управление установленными модификациями</span>
+                  <Show when={props.onOpenCatalog}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        props.onClose();
+                        props.onOpenCatalog?.();
+                      }}
+                      class="text-[11px] text-nord-cyan hover:underline cursor-pointer"
+                      data-testid="settings-open-catalog-link"
+                    >
+                      Открыть каталог
+                    </button>
+                  </Show>
                 </div>
-
-                <Show when={modSubTab() === "installed"}>
-                  <InstalledModsManager instanceId={props.instance.id} />
-                </Show>
-
-                <Show when={modSubTab() === "catalog"}>
-                  <ModCatalog
-                    activeInstanceId={props.instance.id}
-                    gameVersion={props.instance.game_version}
-                    loader={props.instance.loader}
-                  />
-                </Show>
+                <InstalledModsManager instanceId={props.instance.id} />
               </div>
             </Show>
 
             {/* TAB 6: Datapacks */}
             <Show when={activeTab() === "datapacks"}>
               <DatapackManager instanceId={props.instance.id} />
-            </Show>
-            {/* TAB 7: Optimization (Feature B) */}
-            <Show when={activeTab() === "optimization"}>
-              <div class="space-y-4">
-                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
-                  <div class="flex items-center justify-between">
-                    <span class="text-zinc-200 font-semibold text-sm">Пресеты производительности</span>
-                    <Show when={isAikarPresetActive()}>
-                      <span class="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium" data-testid="aikar-active-badge">
-                        Применён
-                      </span>
-                    </Show>
-                  </div>
-                  <Show when={perfPreset()}>
-                    <p class="text-xs text-zinc-400 leading-relaxed">
-                      Рекомендация по памяти для этого ПК: <span class="font-mono text-nord-cyan">{perfPreset()!.suggested_ram_mb} МБ</span>. Флаги Aikar G1GC — канонический набор настройки сборщика мусора (источник: aikar.co/mcflags); применять только с G1, не совмещать с -XX:+UseZGC.
-                    </p>
-                  </Show>
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleApplyAikarPreset}
-                      disabled={!perfPreset() || perfPreset()!.aikar_args.length === 0}
-                      class="py-2 px-4 rounded-lg bg-[#00D4B2] text-zinc-950 text-xs font-semibold hover:bg-[#00e6c3] disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
-                      data-testid="aikar-apply-btn"
-                    >
-                      Применить Aikar G1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleResetAikarPreset}
-                      class="py-2 px-4 rounded-lg bg-zinc-800 border border-white/10 text-zinc-300 text-xs font-medium hover:bg-zinc-700 transition-colors cursor-pointer"
-                      data-testid="aikar-reset-btn"
-                    >
-                      Сбросить флаги
-                    </button>
-                  </div>
-                  <p class="text-[10px] text-zinc-500 leading-relaxed">
-                    Флаги добавляются в пользовательские аргументы JVM — итог виден на вкладке «Аргументы JVM» и сохраняется кнопкой «Сохранить».
-                  </p>
-                </div>
-
-                <div class="p-4 rounded-xl bg-zinc-900/60 border border-white/10 space-y-3">
-                  <button
-                    type="button"
-                    onClick={loadOptimizationMods}
-                    class="w-full flex items-center justify-between cursor-pointer group"
-                    data-testid="optimization-catalog-toggle"
-                  >
-                    <span class="text-zinc-200 font-semibold text-sm">Каталог оптимизации (проверенный набор)</span>
-                    <ChevronDown class="w-4 h-4 text-zinc-500 group-hover:text-zinc-300 transition-colors" />
-                  </button>
-                  <Show when={optimizationLoaded() && optimizationMods().length === 0}>
-                    <p class="text-xs text-zinc-500 leading-relaxed">
-                      Для {props.instance.loader} {props.instance.game_version} проверенного набора нет — установите нужное вручную через вкладку «Моды» → «Каталог».
-                    </p>
-                  </Show>
-                  <Show when={optimizationMods().length > 0}>
-                    <div class="space-y-2">
-                      <For each={optimizationMods()}>
-                        {(mod) => (
-                          <div class="flex items-center justify-between gap-3 p-2.5 rounded-lg bg-zinc-950/60 border border-white/5">
-                            <div class="min-w-0">
-                              <p class="text-xs font-semibold text-zinc-100 truncate">{mod.name}</p>
-                              <p class="text-[10px] text-zinc-500 truncate">{mod.summary || mod.slug}</p>
-                            </div>
-                            <Show
-                              when={!installedOptimizationIds().has(mod.id)}
-                              fallback={
-                                <span class="shrink-0 text-[11px] px-2 py-1 rounded-md bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium">
-                                  Установлено
-                                </span>
-                              }
-                            >
-                              <button
-                                type="button"
-                                onClick={() => handleInstallOptimizationMod(mod)}
-                                disabled={installingOptimizationId() === mod.id}
-                                class="shrink-0 py-1.5 px-3 rounded-md bg-zinc-800 border border-white/10 text-zinc-200 text-[11px] font-medium hover:bg-zinc-700 disabled:opacity-50 transition-colors cursor-pointer"
-                                data-testid={`optimization-install-${mod.slug}`}
-                              >
-                                {installingOptimizationId() === mod.id ? "Установка..." : "Установить"}
-                              </button>
-                            </Show>
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                  </Show>
-                </div>
-              </div>
             </Show>
             {/* TAB 8: Integrity (D'2) */}
             <Show when={activeTab() === "integrity"}>

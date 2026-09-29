@@ -263,4 +263,74 @@ func TestModrinthClient_SearchMods_ProjectTypes(t *testing.T) {
 	if !strings.Contains(capturedFacets, `["project_type:shader"]`) {
 		t.Fatalf("expected exact lowercase facet [\"project_type:shader\"], got %s", capturedFacets)
 	}
-}
+}
+
+// v0.7.2 coverage margin: curated tag list (UI filters depend on it) and the
+// UA override used by the download-identity fix.
+func TestListProjectTags(t *testing.T) {
+	var gotPath string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"id":"technology","name":"Technology","icon":"i","project_type":"mod"},
+			{"id":"social","name":"Social","icon":"i","project_type":"mod"},
+			{"id":"worldgen","name":"Worldgen","icon":"i","project_type":"plugin"}
+		]`)) // errcheck:ok test fixture
+	}))
+	defer server.Close()
+	client := modrinth.NewClient(server.URL, server.Client())
+
+	// "mod" is the unqualified default type: narrowing applies to other
+	// project types only (mirrors Modrinth's own tag semantics).
+	tags, err := client.ListProjectTags(context.Background(), "mod")
+	if err != nil {
+		t.Fatalf("list tags: %v", err)
+	}
+	if gotPath != "/v2/tag/category" {
+		t.Errorf("unexpected path %q", gotPath)
+	}
+	if len(tags) != 3 {
+		t.Fatalf("mod must not drop unqualified tags, got %d", len(tags))
+	}
+	if tags[0].ID != "technology" || tags[0].Name != "Technology" {
+		t.Errorf("unexpected first tag %+v", tags[0])
+	}
+	plugin, err := client.ListProjectTags(context.Background(), "plugin")
+	if err != nil || len(plugin) != 1 || plugin[0].ID != "worldgen" {
+		t.Fatalf("plugin narrowing: n=%d first=%+v err=%v", len(plugin), plugin, err)
+	}
+
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "boom", http.StatusInternalServerError)
+	}))
+	defer bad.Close()
+	if _, err := (modrinth.NewClient(bad.URL, bad.Client())).ListProjectTags(context.Background(), "mod"); err == nil {
+		t.Fatal("expected HTTP 500 error")
+	}
+}
+
+func TestSetUserAgent(t *testing.T) {
+	var got []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("User-Agent"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"slug":"sodium","title":"Sodium","downloads":1}`)) // errcheck:ok test fixture
+	}))
+	defer server.Close()
+	client := modrinth.NewClient(server.URL, server.Client())
+	client.SetUserAgent("") // must keep the default, not blank it
+	if _, err := client.GetProject(context.Background(), "sodium"); err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if got[0] == "" || got[0] == " " {
+		t.Fatal("default UA must survive an empty override")
+	}
+	client.SetUserAgent("NordTest/1.0")
+	if _, err := client.GetProject(context.Background(), "sodium"); err != nil {
+		t.Fatalf("get project 2: %v", err)
+	}
+	if got[1] != "NordTest/1.0" {
+		t.Fatalf("UA override ignored: %q", got[1])
+	}
+}

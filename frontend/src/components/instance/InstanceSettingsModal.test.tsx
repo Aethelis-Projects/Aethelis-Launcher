@@ -40,43 +40,45 @@ describe("InstanceSettingsModal (J2)", () => {
     expect(screen.getAllByText(/Minecraft 1.21.1/).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("switches across all 5 tabs (General, Java, Memory, Arguments, Mods) and respects initialTab (C5)", async () => {
+  it("shows Java, memory, JVM args and presets on a single performance tab (v0.7.2)", async () => {
     vi.spyOn(launcherAPI, "listInstalledMods").mockResolvedValue([]);
     vi.spyOn(launcherAPI, "searchMods").mockResolvedValue({ items: [], total_count: 0 });
 
+    const onCatalog = vi.fn();
     render(() => (
       <InstanceSettingsModal
         instance={mockInstance}
         isOpen={true}
-        initialTab="mods"
+        initialTab="performance"
+        onOpenCatalog={onCatalog}
         onClose={vi.fn()}
         onSaved={vi.fn()}
       />
     ));
 
-    // Initial tab is mods
-    expect(screen.getByTestId("tab-mods")).toBeTruthy();
-    expect(screen.getByTestId("mods-subtab-installed")).toBeTruthy();
-    expect(screen.getByTestId("mods-subtab-catalog")).toBeTruthy();
+    // The four former tabs are one tab now.
+    expect(screen.getByTestId("tab-performance")).toBeTruthy();
+    expect(screen.queryByTestId("tab-java")).toBeNull();
+    expect(screen.queryByTestId("tab-memory")).toBeNull();
+    expect(screen.queryByTestId("tab-args")).toBeNull();
+    expect(screen.queryByTestId("tab-optimization")).toBeNull();
 
-    // Switch subtabs
-    fireEvent.click(screen.getByTestId("mods-subtab-catalog"));
-    expect(await screen.findByText(/Каталог модификаций/)).toBeTruthy();
-
-    // Java tab
-    fireEvent.click(screen.getByTestId("tab-java"));
+    // Everything visible simultaneously.
     expect(screen.getByTestId("settings-java-path-input")).toBeTruthy();
     expect(screen.getByTestId("settings-skip-java-check-toggle")).toBeTruthy();
-
-    // Memory tab
-    fireEvent.click(screen.getByTestId("tab-memory"));
     expect(screen.getByTestId("settings-min-ram-input")).toBeTruthy();
     expect(screen.getByTestId("settings-max-ram-input")).toBeTruthy();
-
-    // Arguments tab
-    fireEvent.click(screen.getByTestId("tab-args"));
     expect(screen.getByTestId("settings-jvm-args-input")).toBeTruthy();
     expect(screen.getByText(/Предупреждение безопасности/)).toBeTruthy();
+    expect(screen.getByTestId("aikar-apply-btn")).toBeTruthy();
+    expect(screen.getByTestId("perf-discord-toggle")).toBeTruthy();
+
+    // Mods tab = installed manager only; catalog lives on its own page now.
+    fireEvent.click(screen.getByTestId("tab-mods"));
+    expect(screen.queryByTestId("mods-subtab-catalog")).toBeNull();
+    const catLink = screen.getByTestId("settings-open-catalog-link");
+    fireEvent.click(catLink);
+    expect(onCatalog).toHaveBeenCalled();
   });
 
   it("saves updated settings with expanded DTO parameters", async () => {
@@ -105,42 +107,22 @@ describe("InstanceSettingsModal (J2)", () => {
     const nameInput = screen.getByTestId("settings-name-input");
     fireEvent.input(nameInput, { target: { value: "Updated Survival" } });
 
-    // Change Java & skip check
-    fireEvent.click(screen.getByTestId("tab-java"));
-    const skipCheckToggle = screen.getByTestId("settings-skip-java-check-toggle");
-    fireEvent.click(skipCheckToggle);
+    // Java, memory and args all live on the single performance tab now.
+    fireEvent.click(screen.getByTestId("tab-performance"));
+    fireEvent.click(screen.getByTestId("settings-skip-java-check-toggle"));
+    fireEvent.input(screen.getByTestId("settings-min-ram-input"), { target: { value: "3072" } });
+    fireEvent.input(screen.getByTestId("settings-max-ram-input"), { target: { value: "6144" } });
+    fireEvent.input(screen.getByTestId("settings-jvm-args-input"), { target: { value: "-XX:+UseZGC" } });
 
-    // Change Memory
-    fireEvent.click(screen.getByTestId("tab-memory"));
-    const minRamInput = screen.getByTestId("settings-min-ram-input");
-    const maxRamInput = screen.getByTestId("settings-max-ram-input");
-    fireEvent.input(minRamInput, { target: { value: "3072" } });
-    fireEvent.input(maxRamInput, { target: { value: "6144" } });
-
-    // Change Args
-    fireEvent.click(screen.getByTestId("tab-args"));
-    const argsInput = screen.getByTestId("settings-jvm-args-input");
-    fireEvent.input(argsInput, { target: { value: "-XX:+UseZGC" } });
-
-    // Save
-    const saveBtn = screen.getByTestId("settings-save-button");
-    fireEvent.click(saveBtn);
-
-    await vi.waitFor(() => {
-      expect(updateSpy).toHaveBeenCalledWith({
-        id: "inst-modal-1",
-        name: "Updated Survival",
-        group: "",
-        java_path: undefined,
-        clear_java_path: false,
-        skip_java_check: true,
-        min_ram_mb: 3072,
-        max_ram_mb: 6144,
-        jvm_args: ["-XX:+UseZGC"],
-      });
-      expect(onSaved).toHaveBeenCalled();
-      expect(onClose).toHaveBeenCalled();
-    });
+    fireEvent.click(screen.getByTestId("settings-save-button"));
+    await vi.waitFor(() => expect(updateSpy).toHaveBeenCalledTimes(1));
+    const req = updateSpy.mock.calls[0][0];
+    expect(req.min_ram_mb).toBe(3072);
+    expect(req.max_ram_mb).toBe(6144);
+    expect(req.skip_java_check).toBe(true);
+    expect(req.jvm_args).toEqual(["-XX:+UseZGC"]);
+    expect(onSaved).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
   });
 
   it("validates that min memory cannot exceed max memory", async () => {
@@ -153,7 +135,7 @@ describe("InstanceSettingsModal (J2)", () => {
       />
     ));
 
-    fireEvent.click(screen.getByTestId("tab-memory"));
+    fireEvent.click(screen.getByTestId("tab-performance"));
     const minRamInput = screen.getByTestId("settings-min-ram-input");
     const maxRamInput = screen.getByTestId("settings-max-ram-input");
     fireEvent.input(minRamInput, { target: { value: "8192" } });
@@ -166,8 +148,9 @@ describe("InstanceSettingsModal (J2)", () => {
     expect(errorBanner.textContent).toContain("Минимальный объем памяти не может превышать максимальный");
   });
 
-  it("renders Java recommendation chip for MC 26.3 -> Java 25 LTS and triggers download", async () => {
+  it("offers to install the missing recommended runtime (MC 26.3 -> Java 25)", async () => {
     const downloadSpy = vi.spyOn(launcherAPI, "downloadJavaRuntime").mockResolvedValue();
+    vi.spyOn(launcherAPI, "listJavaRuntimes").mockResolvedValue([]);
     const inst26: InstanceDTO = {
       ...mockInstance,
       id: "inst-26",
@@ -183,22 +166,19 @@ describe("InstanceSettingsModal (J2)", () => {
       />
     ));
 
-    const chip = await screen.findByTestId("recommended-java-chip");
-    expect(chip.textContent).toContain("Java 25 LTS");
-
-    const installBtn = screen.getByTestId("install-recommended-java-button");
+    fireEvent.click(await screen.findByTestId("tab-performance"));
+    const installBtn = await screen.findByTestId("install-recommended-java-button");
     expect(installBtn.textContent).toContain("Java 25");
     fireEvent.click(installBtn);
 
     await vi.waitFor(() => {
       expect(downloadSpy).toHaveBeenCalledWith(25);
     });
-
-    const toast = await screen.findByTestId("java-action-toast");
-    expect(toast.textContent).toContain("Загрузка Java 25 LTS запущена");
+    // The old standalone plate is gone (v0.7.2 de-duplication).
+    expect(screen.queryByTestId("recommended-java-chip")).toBeNull();
   });
 
-  it("renders Java recommendation chip for MC 1.20.1 -> Java 17 LTS and allows 1-click selection when installed", async () => {
+  it("picks an installed runtime from the runtimes list with one click", async () => {
     vi.spyOn(launcherAPI, "listJavaRuntimes").mockResolvedValue([
       {
         path: "C:\\Java\\jdk-17\\bin\\java.exe",
@@ -227,15 +207,9 @@ describe("InstanceSettingsModal (J2)", () => {
       />
     ));
 
-    const chip = await screen.findByTestId("recommended-java-chip");
-    expect(chip.textContent).toContain("Java 17 LTS");
-
-    const selectBtn = await screen.findByTestId("select-recommended-java-button");
-    expect(selectBtn.textContent).toContain("Выбрать Java 17");
-    fireEvent.click(selectBtn);
-
-    // Switch to Java tab to verify java_path input has been filled
-    fireEvent.click(screen.getByTestId("tab-java"));
+    fireEvent.click(await screen.findByTestId("tab-performance"));
+    const row = await screen.findByText("C:\\Java\\jdk-17\\bin\\java.exe");
+    fireEvent.click(row.closest("div[class*='cursor-pointer']") as Element);
     const pathInput = screen.getByTestId("settings-java-path-input") as HTMLInputElement;
     expect(pathInput.value).toBe("C:\\Java\\jdk-17\\bin\\java.exe");
   });

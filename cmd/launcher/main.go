@@ -35,7 +35,7 @@ import (
 )
 
 var (
-	version           = "0.6.1"
+	version           = "0.0.0-dev" // replaced via -ldflags "-X main.version=$(cat VERSION)"; never a stale release number
 	MicrosoftClientID = auth.DefaultClientID
 	UpdateChannel     = "stable"
 )
@@ -184,19 +184,22 @@ func main() {
 	autoUpdater := updater.NewAutoUpdater(version, manifestURL, updater.GetDefaultPublicKey(), sharedHTTPClient)
 
 	// 5. Initialize Wails IPC Adapter
-	adapter := wails.NewWailsAdapter(instanceSvc)
-	adapter.SetAuth(authSvc, accRepo)
-	adapter.SetContent(mrClient, cfClient)
-	adapter.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
-	adapter.SetUpdater(autoUpdater)
-	adapter.SetJavaDetector(javaDetector)
-	adapter.SetJavaManager(javaMgr)
-	adapter.SetSettings(settingsRepo)
-	if db != nil {
-		adapter.SetDB(db.DB())
-	}
-	adapter.SetVersion(version)
-	adapter.SetIntegrityVerifier(gameProvisioner)
+	adapter := wails.NewWailsAdapter(instanceSvc,
+		wails.AdapterOption(func(h *wails.Host) {
+			h.SetAuth(authSvc, accRepo)
+			h.SetContent(mrClient, cfClient)
+			h.SetFileSystem(fileSys, filepath.Join(dbDir, "instances"))
+			h.SetUpdater(autoUpdater)
+			h.SetJavaDetector(javaDetector)
+			h.SetJavaManager(javaMgr)
+			h.SetSettings(settingsRepo)
+			if db != nil {
+				h.SetDB(db.DB())
+			}
+			h.SetVersion(version)
+			h.SetIntegrityVerifier(gameProvisioner)
+		}),
+	)
 
 	coreInitDuration := time.Since(startInit)
 
@@ -228,7 +231,8 @@ func main() {
 			application.NewService(adapter),
 		},
 		Assets: application.AssetOptions{
-			Handler: application.AssetFileServerFS(assetsSub),
+			Handler:    application.AssetFileServerFS(assetsSub),
+			Middleware: wails.CSPMiddleware,
 		},
 	})
 

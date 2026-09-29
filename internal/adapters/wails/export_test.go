@@ -8,3 +8,6 @@ func SetOpenPathExecForTesting(fn func(cleanPath string, isDir bool) error) func
 		openPathExec = prev
 	}
 }
+
+// ValidateExternalURLForTest exposes the browser-open scheme gate.
+func ValidateExternalURLForTest(raw string) error { return validateExternalURL(raw) }

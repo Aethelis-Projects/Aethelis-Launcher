@@ -6,14 +6,16 @@ import { renderMarkdownLite } from "../common/MarkdownLite";
 
 interface ModCatalogProps {
   activeInstanceId: string;
-  gameVersion: string;
-  loader: string;
+  gameVersion?: string;
+  loader?: string;
   onModInstalled?: (mod: ModItemDTO) => void;
 }
 
 interface CatalogFiltersState {
   project_type?: ProjectType;
   category?: string;
+  loader?: string;
+  game_version?: string;
   sort?: string;
   search_query?: string;
 }
@@ -75,6 +77,11 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const [hasBuiltinKey, setHasBuiltinKey] = createSignal(false);
   const [totalCount, setTotalCount] = createSignal(0);
 
+  // v0.7.2 G4: catalog owns its filters; instance context only seeds them.
+  const [gvc, setGvc] = createSignal(savedFilters.game_version || props.gameVersion || "");
+  const [loaderFilter, setLoaderFilter] = createSignal(savedFilters.loader || props.loader || "");
+  const [projectTags, setProjectTags] = createSignal<{ id: string; label: string }[]>([]);
+
   // Versions dropdown state
   const [expandedModId, setExpandedModId] = createSignal<string | null>(null);
   const [loadingVersions, setLoadingVersions] = createSignal(false);
@@ -115,10 +122,13 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
   const handleProjectTypeChange = (type: ProjectType) => {
     if (projectType() === type) return;
     setProjectType(type);
-    if (type !== "mod") {
-      switchSource("modrinth");
-    }
     saveFilters({ project_type: type });
+    refreshTags();
+  };
+
+  const handleLoaderFilterChange = (value: string) => {
+    setLoaderFilter(value);
+    saveFilters({ loader: value });
   };
 
   const handleCategoryChange = (catId: string) => {
@@ -157,6 +167,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
       setSelectedSort("relevance");
     }
     setSource(newSource);
+    refreshTags();
   };
 
   onCleanup(() => {
@@ -181,15 +192,35 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
     } catch (_err: unknown) {
       // Safe fallback
     }
+    refreshTags();
   });
+
+  const refreshTags = async () => {
+    try {
+      const tags = await launcherAPI.listProjectTags({
+        provider: source(),
+        project_type: projectType(),
+      });
+      // CF labels are matched client-side by name; Modrinth filters by tag id.
+      setProjectTags(tags.map((t) => ({ id: source() === "curseforge" ? t.label : t.id, label: t.label })));
+    } catch (_err: unknown) {
+      void _err;
+      setProjectTags([]); // offline etc: curated fallback below
+    }
+  };
+
+  const categoryList = () =>
+    projectTags().length > 0
+      ? projectTags().map((t) => ({ id: t.id, label: t.label }))
+      : [{ id: "", label: "Все категории" }, ...CATEGORIES.filter((c) => c.id !== "").map((c) => ({ id: c.id, label: c.label }))];
 
   const [mods, { refetch }] = createResource(
     () => ({
       pt: projectType(),
       q: query(),
       s: source(),
-      gv: props.gameVersion,
-      l: props.loader,
+      gv: gvc(),
+      l: loaderFilter(),
       sort: selectedSort(),
       category: selectedCategory(),
     }),
@@ -201,6 +232,12 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
         countdownTimer = null;
       }
       setRateLimitCountdown(0);
+
+      // Honest gate (v0.7.2 G4): CF public search has no datapack class.
+      if (s === "curseforge" && pt === "datapack") {
+        setTotalCount(0);
+        return [];
+      }
 
       try {
         const res = await launcherAPI.searchMods({
@@ -261,8 +298,8 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
         const files = await launcherAPI.listModVersions({
           mod_id: mod.id,
           source: source(),
-          game_version: props.gameVersion,
-          loader: props.loader,
+          game_version: gvc(),
+          loader: loaderFilter(),
         });
         setModVersions((prev) => ({ ...prev, [mod.id]: files }));
       } catch (_err) {
@@ -414,7 +451,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
             Каталог модификаций
           </h2>
           <p class="text-xs text-zinc-400 mt-0.5">
-            Поиск {projectType() === "resourcepack" ? "ресурспаков" : projectType() === "shader" ? "шейдеров" : projectType() === "datapack" ? "датапаков" : "проверенных модификаций"} для {props.loader} {props.gameVersion}
+            Поиск {projectType() === "resourcepack" ? "ресурспаков" : projectType() === "shader" ? "шейдеров" : projectType() === "datapack" ? "датапаков" : "проверенных модификаций"} для {loaderFilter() || "всех лоадеров"} {gvc() || ""}
             <Show when={totalCount() > 0}>
               <span class="ml-1 text-zinc-500 font-mono">({totalCount()})</span>
             </Show>
@@ -476,7 +513,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
 
           {/* Source Toggle Tabs or Only Modrinth Badge */}
           <Show
-            when={projectType() === "mod"}
+            when={!(projectType() === "datapack" && source() === "curseforge")}
             fallback={
               <div
                 class="flex items-center gap-1.5 px-3 py-1 rounded bg-zinc-900 border border-zinc-800 text-xs font-mono text-[#00D4B2]"
@@ -517,9 +554,61 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
         </div>
       </div>
 
-      {/* Category Chips Bar */}
+      {/* Loader Filter + Category Chips Bar (v0.7.2 G4) */}
+      <div class="flex items-center gap-2 flex-wrap text-xs">
+        <select
+          value={loaderFilter()}
+          onChange={(e) => handleLoaderFilterChange(e.currentTarget.value)}
+          class="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs focus:outline-none focus:border-[#00D4B2] cursor-pointer"
+          data-testid="catalog-loader-filter"
+          title="Фильтр по лоадеру (серверный для Modrinth и CurseForge)"
+        >
+          <option value="">Все лоадеры</option>
+          <option value="forge">Forge</option>
+          <option value="fabric">Fabric</option>
+          <option value="quilt">Quilt</option>
+          <option value="neoforge">NeoForge</option>
+        </select>
+        <input
+          type="text"
+          value={gvc()}
+          onInput={(e) => {
+            setGvc(e.currentTarget.value.trim());
+            saveFilters({ game_version: e.currentTarget.value.trim() });
+          }}
+          placeholder="Версия игры (напр. 1.21.1)"
+          class="px-2 py-1 w-44 rounded-md bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-mono focus:outline-none focus:border-[#00D4B2]"
+          data-testid="catalog-version-filter"
+          title="Фильтр по версии игры (серверный для Modrinth и CurseForge)"
+        />
+        <Show when={source() === "curseforge"}>
+          <span
+            class="px-2 py-1 rounded-md bg-zinc-900/80 border border-zinc-800 text-zinc-500 text-[10px] font-mono"
+            data-testid="catalog-cf-tags-note"
+          >
+            Теги CF — справочные (поиск по имени); фильтры версии/лоадера — серверные
+          </span>
+        </Show>
+        <Show when={source() === "curseforge" && projectType() === "datapack"}>
+          <div
+            class="w-full p-3 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400 flex items-center justify-between gap-3"
+            data-testid="catalog-cf-datapack-gate"
+          >
+            <span>CurseForge не отдаёт датапаки через публичный API поиска — для датапаков доступен Modrinth.</span>
+            <button
+              type="button"
+              onClick={() => switchSource("modrinth")}
+              class="px-3 py-1 rounded-md bg-[#00D4B2]/15 hover:bg-[#00D4B2]/25 border border-[#00D4B2]/40 text-[#00D4B2] text-[11px] font-semibold whitespace-nowrap transition-colors cursor-pointer"
+              data-testid="catalog-cf-datapack-switch"
+            >
+              Искать датапаки на Modrinth
+            </button>
+          </div>
+        </Show>
+      </div>
+
       <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-        <For each={CATEGORIES}>
+        <For each={categoryList()}>
           {(cat) => (
             <button
               type="button"
@@ -835,8 +924,9 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
                     <div class="max-h-60 overflow-y-auto space-y-1.5 divide-y divide-zinc-800/40">
                       <For each={files()}>
                         {(file) => {
-                          const isMatch = file.game_versions.includes(props.gameVersion) &&
-                            file.loaders.some((l) => l.toLowerCase() === props.loader.toLowerCase());
+                          const isMatch =
+                            (!!gvc() && file.game_versions.includes(gvc())) &&
+                            (!!loaderFilter() && file.loaders.some((l) => l.toLowerCase() === loaderFilter().toLowerCase()));
 
                           return (
                             <div class="py-2 border-b border-zinc-800/40 last:border-b-0 space-y-1.5 text-xs">
@@ -870,7 +960,7 @@ export const ModCatalog: Component<ModCatalogProps> = (props) => {
                                       data-testid="fallback-warning-badge"
                                     >
                                       <AlertTriangle class="w-3 h-3 text-amber-400" />
-                                      не проверено под {props.gameVersion}
+                                      не проверено под {gvc() || "эту версию"}
                                     </span>
                                   </Show>
                                 </div>

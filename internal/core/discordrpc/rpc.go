@@ -18,7 +18,6 @@ import (
 	"io"
 	"net"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 )
@@ -35,6 +34,10 @@ const (
 // maxFrameLen guards against absurd frames from a misbehaving pipe peer.
 const maxFrameLen = 1 << 20
 
+// BuiltinAppID is the launcher's registered Discord application identity
+// (owner decision v0.7.2: shipped in the binary, not user-configurable).
+const BuiltinAppID = "1545829310563360840"
+
 // Activity is the presence payload Discord renders. Zero account fields by
 // construction — the struct simply does not carry any.
 type Activity struct {
@@ -43,24 +46,12 @@ type Activity struct {
 	StartUnix int64  `json:"start,omitempty"`
 }
 
+// pipeNamePrefix is shared by both transports: AF_UNIX files
+// $XDG_RUNTIME_DIR/discord-ipc-N (Unix) and \\.\pipe\discord-ipc-N (Windows).
+const pipeNamePrefix = "discord-ipc-"
+
 // ErrNotConnected is returned when no live Discord pipe is attached.
 var ErrNotConnected = errors.New("discord ipc not connected")
-
-func socketCandidates() []string {
-	var out []string
-	base := os.Getenv("XDG_RUNTIME_DIR")
-	if base == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			base = filepath.Join(home, ".cache")
-		}
-	}
-	if base != "" {
-		for i := 0; i < 10; i++ {
-			out = append(out, filepath.Join(base, fmt.Sprintf("discord-ipc-%d", i)))
-		}
-	}
-	return out
-}
 
 func writeFrame(w io.Writer, op int, payload []byte) error {
 	var hdr [8]byte
@@ -139,6 +130,20 @@ func WithClock(now func() time.Time) Option {
 	return func(m *Manager) { m.nowFn = now }
 }
 
+// SetDialerForTest rebinds the transport dialer after construction. It exists
+// solely so the Windows test fake (which binds an e2e-named pipe instead of
+// discord-ipc-0..9 to avoid clashing with a developer's real Discord) can hand
+// the manager its address; nil restores the platform default. Production code
+// never calls it.
+func (m *Manager) SetDialerForTest(d func(ctx context.Context, candidates []string) (net.Conn, error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if d == nil {
+		d = platformDialer()
+	}
+	m.dialer = d
+}
+
 func NewManager(appID string, opts ...Option) *Manager {
 	m := &Manager{
 		appID:       appID,
@@ -147,24 +152,12 @@ func NewManager(appID string, opts ...Option) *Manager {
 		backoffMax:  30 * time.Second,
 	}
 	for _, o := range opts {
-		o(m)
+		if o != nil { // platform test hooks may resolve to a no-op
+			o(m)
+		}
 	}
 	if m.dialer == nil {
-		m.dialer = func(ctx context.Context, candidates []string) (net.Conn, error) {
-			var lastErr error
-			for _, p := range candidates {
-				var d net.Dialer
-				conn, err := d.DialContext(ctx, "unix", p)
-				if err == nil {
-					return conn, nil
-				}
-				lastErr = err
-			}
-			if lastErr == nil {
-				lastErr = errors.New("no discord ipc candidates")
-			}
-			return nil, lastErr
-		}
+		m.dialer = platformDialer()
 	}
 	return m
 }
@@ -240,7 +233,7 @@ func (m *Manager) loop(stop <-chan struct{}, done chan struct{}) {
 		conn, err := m.dialer(ctx, socketCandidates())
 		cancel()
 		if err != nil {
-			m.recordFailure("discord pipe unavailable")
+			m.recordFailure(dialUnavailableText)
 			if !sleepOr(stop, backoff) {
 				break
 			}
@@ -312,6 +305,9 @@ func (m *Manager) handshake(conn net.Conn) error {
 	m.mu.Lock()
 	appID := m.appID
 	m.mu.Unlock()
+	if appID == "" {
+		appID = BuiltinAppID // shipped identity: RPC works out of the box
+	}
 	if appID == "" {
 		return errors.New("discord application id not configured")
 	}

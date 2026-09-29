@@ -136,4 +136,4 @@ done:
 	if ok {
 		t.Fatal("expected channel to be closed after unsubscribe")
 	}
-}
+}

@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -35,6 +36,7 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/domain"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/loadermeta"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/ports"
 	"github.com/nord-launcher/launcher/internal/core/storage"
@@ -136,8 +138,8 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
 
 	adapter := wails.NewWailsAdapter(svc)
-	adapter.SetAuth(authSvc, accRepo)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetAuth(authSvc, accRepo)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 
 	// 1. Offline login
 	accDTO, err := adapter.LoginOffline("Tester")
@@ -204,8 +206,11 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 		t.Fatalf("expected 0 mods after delete, got %d", len(installedAfterDelete))
 	}
 
-	// 4. Crash report recording
-	adapter.RecordCrash(instanceID, &launch.CrashReport{
+	// 4. Crash report recording - through the real production path (the
+	// InstanceService crash hook that NewWailsAdapter installs; recordCrash
+	// itself is unexported now, the webview must never be able to fake a crash).
+	svc.SetOnCrash(func(id string, rep *launch.CrashReport) { wails.NewHost(adapter).RecordCrash(id, rep) })
+	svc.FireCrashForTest(instanceID, &launch.CrashReport{
 		Category: launch.CrashCategoryOOM,
 		Summary:  "Out of Memory",
 		Remedy:   "Increase RAM",
@@ -218,7 +223,7 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 
 	// 5. RestartApplication with mock relauncher
 	relaunchCalled := false
-	adapter.SetRelauncher(func() error {
+	wails.NewHost(adapter).SetRelauncher(func() error {
 		relaunchCalled = true
 		return nil
 	})
@@ -230,7 +235,7 @@ func TestWailsAdapter_AccountsAndMods(t *testing.T) {
 	}
 
 	// Error propagation
-	adapter.SetRelauncher(func() error {
+	wails.NewHost(adapter).SetRelauncher(func() error {
 		return errors.New("mock relaunch failure")
 	})
 	if err := adapter.RestartApplication(); err == nil || err.Error() != "mock relaunch failure" {
@@ -294,7 +299,7 @@ func TestWailsAdapter_Updater(t *testing.T) {
 	manifest.Platforms[platKey] = asset
 
 	u := updater.NewAutoUpdater("0.1.2", manifestServer.URL, pubKey, manifestServer.Client())
-	adapter.SetUpdater(u)
+	wails.NewHost(adapter).SetUpdater(u)
 
 	// 3. Check for updates -> update available
 	info, err := adapter.CheckForUpdates()
@@ -327,7 +332,7 @@ func TestWailsAdapter_Updater(t *testing.T) {
 	defer serverUpToDate.Close()
 
 	uSame := updater.NewAutoUpdater("0.1.2", serverUpToDate.URL, pubKey, serverUpToDate.Client())
-	adapter.SetUpdater(uSame)
+	wails.NewHost(adapter).SetUpdater(uSame)
 
 	infoSame, err := adapter.CheckForUpdates()
 	if err != nil {
@@ -362,6 +367,16 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 	}
 
 	expectedMethods := []string{
+		// v0.7.2 review: methods invoked from frontend/src/services/api.ts that
+		// were historically missing from the list; the reverse reflect check
+		// keeps this set exactly equal to the webview-facing surface.
+		"OpenExternal", // v0.7.2 round-5: links must leave the webview for the system browser
+		"GetGameLogs",
+		"SaveGameLog",
+		"ScanOfficialMinecraft",
+		"ImportOfficialMinecraft",
+		"ScanPrismInstance",
+		"ImportPrismInstance",
 		"CheckForUpdates",
 		"ApplyUpdate",
 		"RestartApplication",
@@ -390,6 +405,13 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"RemoveJavaRuntime",
 		"AddJavaRuntime",
 		"ListModVersions",
+		"ListProjectTags",
+		"ListMinecraftVersions",
+		"ListLoaderVersions",
+		"CreateInstanceWithLoader",
+		"ListMrPackVersions",
+		"ImportMrPackFromURL",
+		"GetMrPackURLImportStatus",
 		"GetModInstallStatus",
 		"CheckModUpdates",
 		"GetDiagnosticReport",
@@ -409,7 +431,6 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetInstanceGroup",
 		"EnsureInstanceDir",
 		"GetPerformancePreset",
-		"ListOptimizationMods",
 		"CheckInstanceFiles",
 		"RepairInstanceFiles",
 		"ScanCurseForgePackZip",
@@ -417,7 +438,6 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"SetDiscordRpcEnabled",
 		"GetDiscordRpcStatus",
 		"GetDiscordRpcPreview",
-		"SetDiscordAppID",
 		"ListInstanceWorlds",
 		"ListWorldDatapacks",
 		"SetDatapackEnabled",
@@ -425,13 +445,13 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"InstallDatapack",
 	}
 
-	// Architectural Decision (T-Gates Scope):
-	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
-	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
-	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (61 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 61 {
-		t.Fatalf("expected exactly 61 Wails methods, got %d", len(expectedMethods))
+	// v0.7.2 round-5: the hard-coded count was itself the drift risk the owner
+	// flagged ("counters from my own list"). The bound surface is now pinned to
+	// reflection instead: expectedMethods must be exactly the exported methods
+	// of *WailsAdapter, no magic number involved (the dedicated reverse check
+	// test asserts the same equality per-name, plus Host-absence).
+	if n := reflect.TypeOf(&wails.WailsAdapter{}).NumMethod(); len(expectedMethods) != n {
+		t.Fatalf("bound-surface list has %d names but *WailsAdapter exports %d methods - update the list deliberately, never by hand-tuning a count", len(expectedMethods), n)
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."
@@ -444,6 +464,58 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		if method == nil {
 			t.Errorf("Method %s was not registered in Wails v3 bindings (expected FQN: %s)", methodName, fqn)
 		}
+	}
+
+	// Reverse check (v0.7.2 review, hardened): Wails beta.20 reflects EVERY
+	// exported method on the bound receiver into the webview bridge (no
+	// //wails:ignore exists in this version), so the declared registry must
+	// equal the FULL exported method set - zero allowlist. Host-only wiring
+	// setters (manifest URL, HTTP client, *sql.DB, service pointers, funcs)
+	// were unexported onto wails.Host precisely so this assertion can be
+	// absolute: a compromised webview must have no path to swap the Mojang
+	// manifest (-> attacker JARs) or rebind infrastructure.
+	rt := reflect.TypeOf(adapter)
+	expected := make(map[string]bool, len(expectedMethods))
+	for _, m := range expectedMethods {
+		expected[m] = true
+	}
+	exported := make(map[string]bool)
+	for i := 0; i < rt.NumMethod(); i++ {
+		m := rt.Method(i)
+		if !m.IsExported() || strings.HasSuffix(m.Name, "Wrapper") {
+			continue
+		}
+		exported[m.Name] = true
+	}
+	for m := range exported {
+		if !expected[m] {
+			t.Errorf("exported adapter method %q reaches the webview but is not declared in expectedMethods (unlisted IPC surface)", m)
+		}
+	}
+	for m := range expected {
+		if _, ok := rt.MethodByName(m); !ok {
+			t.Errorf("expectedMethods declares %q but *WailsAdapter has no such exported method", m)
+			continue
+		}
+		if !exported[m] {
+			t.Errorf("registry declares %q but it is not an exported adapter method", m)
+		}
+	}
+	if len(expected) != len(exported) {
+		t.Errorf("registry size %d != exported webview-facing method set size %d", len(expected), len(exported))
+	}
+	// Every method on the wiring facade must be ABSENT from the bound
+	// receiver, asserted off the facade's own reflection (self-maintaining:
+	// adding a wiring method to Host auto-adds it to this prohibition).
+	hostRT := reflect.TypeOf(&wails.Host{})
+	for i := 0; i < hostRT.NumMethod(); i++ {
+		name := hostRT.Method(i).Name
+		if _, ok := rt.MethodByName(name); ok {
+			t.Errorf("%s is exported on the bound WailsAdapter AND on wails.Host - wiring leaked back into the webview surface", name)
+		}
+	}
+	if n := hostRT.NumMethod(); n < 23 {
+		t.Errorf("wails.Host exposes only %d wiring methods; the v0.7.2 audit moved 22 setters + RecordCrash off the adapter - check for silently dropped facades", n)
 	}
 }
 
@@ -468,7 +540,7 @@ func TestWailsAdapter_WailsV3BindingCall_CheckForUpdates(t *testing.T) {
 
 	u := updater.NewAutoUpdater("0.1.3", server.URL, updater.GetDefaultPublicKey(), server.Client())
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetUpdater(u)
+	wails.NewHost(adapter).SetUpdater(u)
 
 	bindings := application.NewBindings(nil, nil)
 	_ = bindings.Add(application.NewService(adapter))
@@ -496,7 +568,7 @@ func TestWailsAdapter_WailsV3BindingCall_CheckForUpdates(t *testing.T) {
 
 func TestWailsAdapter_GetCurrentVersion(t *testing.T) {
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetVersion("v0.1.6")
+	wails.NewHost(adapter).SetVersion("v0.1.6")
 
 	if ver := adapter.GetCurrentVersion(); ver != "0.1.6" {
 		t.Fatalf("expected version 0.1.6, got %q", ver)
@@ -579,10 +651,10 @@ func TestWailsAdapter_Settings_CurseForgeKey(t *testing.T) {
 
 	settingsRepo := storage.NewSettingsRepository(db)
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetSettings(settingsRepo)
+	wails.NewHost(adapter).SetSettings(settingsRepo)
 
 	cf := curseforge.NewClient("http://127.0.0.1:0", "", nil)
-	adapter.SetContent(nil, cf)
+	wails.NewHost(adapter).SetContent(nil, cf)
 
 	// 1. Initial settings empty
 	initSettings, err := adapter.GetSettings()
@@ -676,12 +748,12 @@ func TestWailsAdapter_InstallMod_Modrinth_Success(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(mr, nil)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	res, err := adapter.InstallMod(wails.InstallModRequest{
 		InstanceID: "inst-test",
@@ -753,12 +825,12 @@ func TestWailsAdapter_InstallMod_CurseForge_Success(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	cf := curseforge.NewClient(ts.URL, "dummy-cf-key", ts.Client())
-	adapter.SetContent(nil, cf)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(nil, cf)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	res, err := adapter.InstallMod(wails.InstallModRequest{
 		InstanceID: "inst-test",
@@ -828,12 +900,12 @@ func TestWailsAdapter_InstallMod_ChecksumMismatch_Cleanup(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(mr, nil)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	res, err := adapter.InstallMod(wails.InstallModRequest{
 		InstanceID: "inst-test",
@@ -894,12 +966,12 @@ func TestWailsAdapter_InstallMod_Idempotent(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(mr, nil)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	res, err := adapter.InstallMod(wails.InstallModRequest{
 		InstanceID: "inst-test",
@@ -981,7 +1053,7 @@ func TestWailsAdapter_InstallMod_NonAllowlistedHost(t *testing.T) {
 	tempDir := t.TempDir()
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -1004,7 +1076,7 @@ func TestWailsAdapter_InstallMod_NonAllowlistedHost(t *testing.T) {
 	defer ts.Close()
 
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
+	wails.NewHost(adapter).SetContent(mr, nil)
 
 	_, err := adapter.InstallMod(wails.InstallModRequest{
 		InstanceID: "inst-test",
@@ -1023,7 +1095,7 @@ func TestWailsAdapter_InstallMod_RedirectToUnauthorizedHost(t *testing.T) {
 	tempDir := t.TempDir()
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/v2/project/redirect-mod/version") {
@@ -1055,11 +1127,11 @@ func TestWailsAdapter_InstallMod_RedirectToUnauthorizedHost(t *testing.T) {
 	defer ts.Close()
 
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
+	wails.NewHost(adapter).SetContent(mr, nil)
 
 	_, err := adapter.InstallMod(wails.InstallModRequest{
 		InstanceID: "inst-test",
@@ -1138,12 +1210,12 @@ func TestWailsAdapter_UpdateMod_AtomicReplacement(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(mr, nil)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	res, err := adapter.UpdateMod(wails.UpdateModRequest{
 		InstanceID:      "inst-test",
@@ -1254,12 +1326,12 @@ func TestWailsAdapter_UpdateMod_RollbackOnCorruptedDownload(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(mr, nil)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	_, err := adapter.UpdateMod(wails.UpdateModRequest{
 		InstanceID:      "inst-test",
@@ -1349,12 +1421,12 @@ func TestWailsAdapter_UpdateMod_Idempotent(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(mr, nil)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	res, err := adapter.UpdateMod(wails.UpdateModRequest{
 		InstanceID:      "inst-test",
@@ -1407,7 +1479,7 @@ func TestWailsAdapter_ReconcileWithDisk_DuplicateSelfHeal(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 
 	mods, err := adapter.ListInstalledMods("inst-test")
 	if err != nil {
@@ -1486,12 +1558,12 @@ func TestWailsAdapter_CheckModUpdates_RegressionH2(t *testing.T) {
 
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, tempDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, tempDir)
 	u, _ := url.Parse(ts.URL)
-	adapter.SetAllowedHosts([]string{u.Hostname()})
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname()})
 	mr := modrinth.NewClient(ts.URL, ts.Client())
-	adapter.SetContent(mr, nil)
-	adapter.SetHTTPClient(ts.Client())
+	wails.NewHost(adapter).SetContent(mr, nil)
+	wails.NewHost(adapter).SetHTTPClient(ts.Client())
 
 	// Step 1: Pre-install v1
 	oldPath := filepath.Join(modsDir, "test-mod-1.0.0.jar")
@@ -1714,7 +1786,7 @@ IMPLEMENTOR="Eclipse Adoptium"
 	_ = os.WriteFile(filepath.Join(customDir, "release"), []byte(releaseContent), 0644)
 
 	jm := java.NewJavaManager(managedDir, nil, nil, nil)
-	adapter.SetJavaManager(jm)
+	wails.NewHost(adapter).SetJavaManager(jm)
 
 	// Test AddJavaRuntime
 	addedDTO, err := adapter.AddJavaRuntime(customDir)
@@ -1791,7 +1863,7 @@ func TestWailsAdapter_SearchMods(t *testing.T) {
 	adapter := wails.NewWailsAdapter(nil)
 	mrClient := modrinth.NewClient(mrServer.URL, mrServer.Client())
 	cfClient := curseforge.NewClient(cfServer.URL, "dummy-cf-key", cfServer.Client())
-	adapter.SetContent(mrClient, cfClient)
+	wails.NewHost(adapter).SetContent(mrClient, cfClient)
 
 	// Test Modrinth search
 	mrRes, err := adapter.SearchMods(wails.SearchModsRequest{
@@ -1847,7 +1919,7 @@ func TestWailsAdapter_SearchMods_ErrorClassification(t *testing.T) {
 
 	cfClientRL := curseforge.NewClient(rlServer.URL, "test-key", rlServer.Client())
 	adapterRL := wails.NewWailsAdapter(nil)
-	adapterRL.SetContent(nil, cfClientRL)
+	wails.NewHost(adapterRL).SetContent(nil, cfClientRL)
 
 	resRL, err := adapterRL.SearchMods(wails.SearchModsRequest{
 		Query:  "test",
@@ -1872,7 +1944,7 @@ func TestWailsAdapter_SearchMods_ErrorClassification(t *testing.T) {
 
 	cfClientKey := curseforge.NewClient(keyServer.URL, "bad-key", keyServer.Client())
 	adapterKey := wails.NewWailsAdapter(nil)
-	adapterKey.SetContent(nil, cfClientKey)
+	wails.NewHost(adapterKey).SetContent(nil, cfClientKey)
 
 	resKey, err := adapterKey.SearchMods(wails.SearchModsRequest{
 		Query:  "test",
@@ -1888,7 +1960,7 @@ func TestWailsAdapter_SearchMods_ErrorClassification(t *testing.T) {
 	// 3. Test Unreachable Server classification
 	cfClientUnreachable := curseforge.NewClient("http://127.0.0.1:59999", "test-key", &http.Client{Timeout: 50 * time.Millisecond})
 	adapterUnreachable := wails.NewWailsAdapter(nil)
-	adapterUnreachable.SetContent(nil, cfClientUnreachable)
+	wails.NewHost(adapterUnreachable).SetContent(nil, cfClientUnreachable)
 
 	resUnreachable, err := adapterUnreachable.SearchMods(wails.SearchModsRequest{
 		Query:  "test",
@@ -1955,7 +2027,7 @@ func TestWailsAdapter_ListModVersions(t *testing.T) {
 	adapter := wails.NewWailsAdapter(nil)
 	mrClient := modrinth.NewClient(mrServer.URL, mrServer.Client())
 	cfClient := curseforge.NewClient(cfServer.URL, "cf-key", cfServer.Client())
-	adapter.SetContent(mrClient, cfClient)
+	wails.NewHost(adapter).SetContent(mrClient, cfClient)
 
 	// Test Modrinth ListModVersions + 10-minute cache
 	mrReq := wails.ListModVersionsRequest{
@@ -2088,11 +2160,11 @@ func TestWailsAdapter_InstallMod_DeterministicAndProgress(t *testing.T) {
 
 	u, _ := url.Parse(mrServer.URL)
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetAllowedHosts([]string{u.Hostname(), u.Host})
-	adapter.SetFileSystem(fs.NewOSFileSystem(), tempDir)
+	wails.NewHost(adapter).SetAllowedHosts([]string{u.Hostname(), u.Host})
+	wails.NewHost(adapter).SetFileSystem(fs.NewOSFileSystem(), tempDir)
 
 	mrClient := modrinth.NewClient(mrServer.URL, mrServer.Client())
-	adapter.SetContent(mrClient, nil)
+	wails.NewHost(adapter).SetContent(mrClient, nil)
 
 	// Check initial install status is idle
 	initialStatus, err := adapter.GetModInstallStatus("inst-test")
@@ -2165,8 +2237,8 @@ func TestWailsAdapter_ManifestReconcileAndDualFileDelete(t *testing.T) {
 	}
 
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(nil, instDir)
-	adapter.SetDB(db.DB())
+	wails.NewHost(adapter).SetFileSystem(nil, instDir)
+	wails.NewHost(adapter).SetDB(db.DB())
 
 	// 1. Drop two untracked files on disk
 	fileA := filepath.Join(modsDir, "mod-alpha.jar")
@@ -2259,7 +2331,7 @@ func TestWailsAdapter_CheckModUpdates(t *testing.T) {
 		t.Fatalf("failed to create mods dir: %v", err)
 	}
 
-	adapter.SetFileSystem(fs.NewOSFileSystem(), instDir)
+	wails.NewHost(adapter).SetFileSystem(fs.NewOSFileSystem(), instDir)
 
 	// Mock server for Modrinth versions
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2291,7 +2363,7 @@ func TestWailsAdapter_CheckModUpdates(t *testing.T) {
 	defer server.Close()
 
 	mrClient := modrinth.NewClient(server.URL, server.Client())
-	adapter.SetContent(mrClient, nil)
+	wails.NewHost(adapter).SetContent(mrClient, nil)
 
 	// Case 1: Empty mods directory -> 0 updates
 	updates, err := adapter.CheckModUpdates(instID)
@@ -2338,7 +2410,7 @@ func TestWailsAdapter_CheckModUpdates(t *testing.T) {
 
 func TestWailsAdapter_GetDiagnosticReport(t *testing.T) {
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetVersion("0.6.1")
+	wails.NewHost(adapter).SetVersion("0.6.1")
 
 	tmpDir := t.TempDir()
 	instDir := filepath.Join(tmpDir, "instances")
@@ -2347,7 +2419,7 @@ func TestWailsAdapter_GetDiagnosticReport(t *testing.T) {
 	if err := os.MkdirAll(modsDir, 0755); err != nil {
 		t.Fatalf("failed to create mods dir: %v", err)
 	}
-	adapter.SetFileSystem(fs.NewOSFileSystem(), instDir)
+	wails.NewHost(adapter).SetFileSystem(fs.NewOSFileSystem(), instDir)
 
 	dbPath := filepath.Join(tmpDir, "test_settings.db")
 	db, err := storage.OpenDatabase(dbPath)
@@ -2362,7 +2434,7 @@ func TestWailsAdapter_GetDiagnosticReport(t *testing.T) {
 	settingsRepo := storage.NewSettingsRepository(db)
 	_ = settingsRepo.Set(context.Background(), "curseforge_api_key", "secret-cf-api-key-12345")
 	_ = settingsRepo.Set(context.Background(), "theme", "nord-dark")
-	adapter.SetSettings(settingsRepo)
+	wails.NewHost(adapter).SetSettings(settingsRepo)
 
 	report, err := adapter.GetDiagnosticReport(instID)
 	if err != nil {
@@ -2434,7 +2506,7 @@ func TestWailsAdapter_MrPackMethods(t *testing.T) {
 
 	// 1. PickMrPackFile with custom picker hook
 	expectedPath := filepath.Join(tempDir, "test.mrpack")
-	adapter.SetFilePicker(func() (string, error) {
+	wails.NewHost(adapter).SetFilePicker(func() (string, error) {
 		return expectedPath, nil
 	})
 	picked, err := adapter.PickMrPackFile()
@@ -2509,7 +2581,7 @@ func TestWailsAdapter_JavaRuntimeUpdates(t *testing.T) {
 	managedDir := filepath.Join(tempDir, "runtimes")
 	_ = os.MkdirAll(managedDir, 0755)
 	jm := java.NewJavaManager(managedDir, nil, nil, nil)
-	adapter.SetJavaManager(jm)
+	wails.NewHost(adapter).SetJavaManager(jm)
 
 	status, err := adapter.UpgradeJavaRuntime(21)
 	if err != nil {
@@ -2573,7 +2645,7 @@ func TestWailsAdapter_OpenPath(t *testing.T) {
 
 	// 5. Screenshots path under instancesDir that does not exist yet fails with OpenPath
 	instancesDir := filepath.Join(tempDir, "instances")
-	adapter.SetFileSystem(nil, instancesDir)
+	wails.NewHost(adapter).SetFileSystem(nil, instancesDir)
 	if err := adapter.OpenPath("inst-new/screenshots"); err == nil {
 		t.Error("expected error opening non-existent instance dir with OpenPath, got nil")
 	}
@@ -2627,7 +2699,7 @@ func TestWailsAdapter_Screenshots(t *testing.T) {
 	}
 
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(nil, instancesDir)
+	wails.NewHost(adapter).SetFileSystem(nil, instancesDir)
 
 	// 1. Initially empty directory
 	list, err := adapter.ListScreenshots(instID)
@@ -2733,7 +2805,7 @@ func TestWailsAdapter_GameLogsAndStreaming(t *testing.T) {
 	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
 
 	adapter := wails.NewWailsAdapter(svc)
-	adapter.SetFileSystem(fileSys, instancesDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, instancesDir)
 
 	logs, err := adapter.GetGameLogs(instID)
 	if err != nil {
@@ -2779,7 +2851,7 @@ func TestWailsAdapter_GameLogsAndStreaming(t *testing.T) {
 
 	// 4. Test log streaming & onLogBatch hook
 	receivedBatches := make(chan []string, 5)
-	adapter.SetOnLogBatch(func(id string, lines []string) {
+	wails.NewHost(adapter).SetOnLogBatch(func(id string, lines []string) {
 		if id == instID {
 			receivedBatches <- lines
 		}
@@ -2823,8 +2895,8 @@ func TestWailsAdapter_AddonsResourcePacksAndShaders(t *testing.T) {
 	instID := "addons-instance"
 	fileSys := fs.NewOSFileSystem()
 	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetFileSystem(fileSys, instancesDir)
-	adapter.SetAllowedHosts([]string{allowedHost, u.Hostname()})
+	wails.NewHost(adapter).SetFileSystem(fileSys, instancesDir)
+	wails.NewHost(adapter).SetAllowedHosts([]string{allowedHost, u.Hostname()})
 
 	// 1. Install resource pack directly by simulating downloaded file in resourcepacks folder
 	rpDir := filepath.Join(instancesDir, instID, "resourcepacks")
@@ -2918,7 +2990,7 @@ func TestWailsAdapter_ImportOfficialAndPrism(t *testing.T) {
 	}
 
 	adapter := wails.NewWailsAdapter(svc)
-	adapter.SetFileSystem(fileSys, instancesDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, instancesDir)
 
 	// 1. Setup mock official .minecraft folder
 	mcDir := filepath.Join(tempDir, "official_minecraft")
@@ -3023,7 +3095,7 @@ func TestWailsAdapter_Datapacks_PerWorldManagement(t *testing.T) {
 	kr := keyring.NewMemoryKeyring()
 	svc := launch.NewInstanceService(nil, fileSys, procMgr, kr, clk)
 	adapter := wails.NewWailsAdapter(svc)
-	adapter.SetFileSystem(fileSys, instancesDir)
+	wails.NewHost(adapter).SetFileSystem(fileSys, instancesDir)
 
 	instDTO, err := adapter.CreateInstance(wails.CreateInstanceRequest{
 		Name:        "DatapackInstance",
@@ -3213,85 +3285,6 @@ func TestWailsAdapter_GetPerformancePreset(t *testing.T) {
 	}
 }
 
-func TestWailsAdapter_ListOptimizationMods(t *testing.T) {
-	hits := map[string]string{
-		"sodium":       "Sodium",
-		"lithium":      "Lithium",
-		"ferrite-core": "FerriteCore",
-	}
-	var mu sync.Mutex
-	var seenQueries []string
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query().Get("query")
-		mu.Lock()
-		seenQueries = append(seenQueries, query)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "application/json")
-		if title, ok := hits[query]; ok {
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"hits": []map[string]interface{}{
-					{
-						"project_id":   "proj-" + query,
-						"slug":         query,
-						"title":        title,
-						"description":  "curated optimization entry",
-						"author":       "curated-author",
-						"downloads":    1000,
-						"categories":   []string{"fabric", "performance"},
-						"project_type": "mod",
-					},
-					{
-						"project_id":   "noise-" + query,
-						"slug":         query + "-unofficial-fork",
-						"title":        "Noise Fork",
-						"downloads":    5,
-						"project_type": "mod",
-					},
-				},
-				"total_hits": 2,
-			})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{"hits": []interface{}{}, "total_hits": 0})
-	}))
-	defer ts.Close()
-
-	adapter := wails.NewWailsAdapter(nil)
-	adapter.SetContent(modrinth.NewClient(ts.URL, ts.Client()), nil)
-
-	res, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "fabric"})
-	if err != nil {
-		t.Fatalf("ListOptimizationMods failed: %v", err)
-	}
-	if len(res.Items) != len(hits) {
-		t.Fatalf("expected %d curated items (modernfix has no hit -> skipped), got %d: %+v", len(hits), len(res.Items), res.Items)
-	}
-	for _, it := range res.Items {
-		if _, ok := hits[it.Slug]; !ok {
-			t.Errorf("unexpected slug returned: %q", it.Slug)
-		}
-	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(seenQueries) != 4 {
-		t.Errorf("expected one lookup per curated slug (4), got %d: %v", len(seenQueries), seenQueries)
-	}
-
-	empty, err := adapter.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "vanilla"})
-	if err != nil {
-		t.Fatalf("vanilla must not error: %v", err)
-	}
-	if len(empty.Items) != 0 {
-		t.Fatalf("vanilla must return empty curated set, got %d", len(empty.Items))
-	}
-
-	// A loader with a curated set but no content client must fail loudly, not fake data.
-	bare := wails.NewWailsAdapter(nil)
-	if _, err := bare.ListOptimizationMods(wails.ListOptimizationModsRequest{GameVersion: "1.21", Loader: "forge"}); err == nil {
-		t.Fatal("expected error when modrinth client is not initialized")
-	}
-}
-
 type stubIntegrityVerifier struct {
 	checkCalls int
 	fixCalls   int
@@ -3317,7 +3310,7 @@ func TestWailsAdapter_IntegrityWiring(t *testing.T) {
 	stub := &stubIntegrityVerifier{}
 	svc := launch.NewInstanceService(nil, nil, nil, nil, nil)
 	adapter := wails.NewWailsAdapter(svc)
-	adapter.SetIntegrityVerifier(stub)
+	wails.NewHost(adapter).SetIntegrityVerifier(stub)
 
 	if _, err := adapter.CheckInstanceFiles(wails.InstanceIDRequest{InstanceID: "missing-inst"}); err == nil || !strings.Contains(err.Error(), "instance not found") {
 		t.Fatalf("expected 'instance not found' error, got %v", err)
@@ -3327,5 +3320,240 @@ func TestWailsAdapter_IntegrityWiring(t *testing.T) {
 	bare := wails.NewWailsAdapter(svc)
 	if _, err := bare.CheckInstanceFiles(wails.InstanceIDRequest{InstanceID: "missing-inst"}); err == nil || !strings.Contains(err.Error(), "integrity verifier not initialized") {
 		t.Fatalf("expected 'verifier not initialized' error, got %v", err)
+	}
+}
+
+// v0.7.2 G4: catalog provider semantics at the adapter boundary.
+func TestWailsAdapter_CatalogProvidersV072(t *testing.T) {
+	var mu sync.Mutex
+	var seenClassIDs []string
+
+	mrServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/v2/tag/category") {
+			_ = json.NewEncoder(w).Encode([]map[string]any{ // errcheck:ok test server best effort
+				{"id": "optimization", "name": "Optimization", "project_type": ""},
+				{"id": "shaders", "name": "Shaders", "project_type": "resourcepack"},
+				{"id": "fabric", "name": "Fabric", "project_type": ""},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{ // errcheck:ok test server best effort
+			"hits":       []map[string]any{},
+			"total_hits": 0,
+		})
+	}))
+	defer mrServer.Close()
+
+	cfServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seenClassIDs = append(seenClassIDs, r.URL.Query().Get("classId"))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{ // errcheck:ok test server best effort
+			"data": []map[string]any{
+				{
+					"id":         999,
+					"slug":       "cf-item",
+					"name":       "CF Item",
+					"categories": []map[string]string{{"name": "Performance"}},
+				},
+			},
+			"pagination": map[string]any{"totalCount": 1},
+		})
+	}))
+	defer cfServer.Close()
+
+	adapter := wails.NewWailsAdapter(nil)
+	wails.NewHost(adapter).SetContent(modrinth.NewClient(mrServer.URL, mrServer.Client()), curseforge.NewClient(cfServer.URL, "dummy-cf-key", cfServer.Client()))
+
+	// CF datapack/modpack: honest capability gate, endpoint never queried.
+	for _, pt := range []string{"datapack", "modpack"} {
+		res, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", ProjectType: pt, Limit: 20})
+		if err != nil {
+			t.Fatalf("SearchMods(%s) err: %v", pt, err)
+		}
+		if res.Reason != "unsupported_type" || len(res.Items) != 0 {
+			t.Fatalf("expected unsupported_type for CF %s, got %+v", pt, res)
+		}
+	}
+
+	// CF resourcepacks ride class 12, shaders class 65536, mods class 6.
+	type cfCase struct {
+		pt   string
+		want string
+	}
+	for _, c := range []cfCase{{"resourcepack", "12"}, {"shader", "65536"}, {"", "6"}} {
+		res, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", ProjectType: c.pt, Limit: 20})
+		if err != nil {
+			t.Fatalf("SearchMods(cf %s): %v", c.pt, err)
+		}
+		mu.Lock()
+		got := seenClassIDs[len(seenClassIDs)-1]
+		mu.Unlock()
+		if got != c.want {
+			t.Fatalf("CF classId for %q = %s, want %s", c.pt, got, c.want)
+		}
+		wantPT := c.pt
+		if wantPT == "" {
+			wantPT = "mod"
+		}
+		if res.Items[0].ProjectType != wantPT {
+			t.Fatalf("item ProjectType = %q, want %q", res.Items[0].ProjectType, wantPT)
+		}
+	}
+
+	// CF client-side tag filter drops non-matching categories.
+	dropped, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", Category: "Magic", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped.Items) != 0 {
+		t.Fatalf("client-side category filter must drop non-matching items, got %+v", dropped.Items)
+	}
+	kept, err := adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", Category: "performance", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept.Items) != 1 {
+		t.Fatalf("case-insensitive name match should keep the item, got %d", len(kept.Items))
+	}
+
+	// ListProjectTags: CF = mirrored UISP table, Modrinth = live curated feed.
+	cfTags, err := adapter.ListProjectTags(wails.ListProjectTagsRequest{Provider: "curseforge", ProjectType: "mod"})
+	if err != nil {
+		t.Fatalf("ListProjectTags(cf): %v", err)
+	}
+	if len(cfTags) == 0 || cfTags[0].Label != "Combat" {
+		t.Fatalf("unexpected CF tag table: %+v", cfTags)
+	}
+	mrTags, err := adapter.ListProjectTags(wails.ListProjectTagsRequest{ProjectType: "resourcepack"})
+	if err != nil {
+		t.Fatalf("ListProjectTags(modrinth): %v", err)
+	}
+	// project_type narrowing: only tags explicitly qualified for the type
+	// apply to non-mod catalogues (unqualified Modrinth tags are mod-only).
+	if len(mrTags) != 1 || mrTags[0].ID != "shaders" {
+		t.Fatalf("expected 2 resourcepack-relevant tags, got %+v", mrTags)
+	}
+	if _, err := adapter.ListProjectTags(wails.ListProjectTagsRequest{ProjectType: "mod"}); err != nil {
+		t.Fatalf("ListProjectTags(mod): %v", err)
+	}
+}
+
+func newV072TestResolver(srv *httptest.Server) *loadermeta.Resolver {
+	r := loadermeta.NewResolver(srv.Client())
+	r.FabricURL = srv.URL + "/fabric/"
+	r.QuiltURL = srv.URL + "/quilt/"
+	r.ForgeURL = srv.URL + "/forge"
+	r.NeoURL = srv.URL + "/neo"
+	return r
+}
+
+// TestWailsAdapter_WizardAndModpacksV072 covers the v0.7.2 G10 wizard data
+// methods and the G5 .mrpack storefront plumbing with local fixtures.
+func TestWailsAdapter_WizardAndModpacksV072(t *testing.T) {
+	manifestSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"latest":{"release":"26.3","snapshot":"26.3-rc1"},"versions":[
+			{"id":"26.3","type":"release","url":"u","releaseTime":"2026-09-01T00:00:00+00:00"},
+			{"id":"26.3-rc1","type":"snapshot","url":"u","releaseTime":"2026-08-20T00:00:00+00:00"},
+			{"id":"1.21.4","type":"release","url":"u","releaseTime":"2024-12-03T00:00:00+00:00"}
+		]}`))
+	}))
+	defer manifestSrv.Close()
+
+	versionSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ListMrPackVersions queries filtered (game_versions+loaders); the
+		// Go-side import resolution queries UNfiltered (version id decides).
+		if strings.Contains(r.URL.RawQuery, "game_versions") && !strings.Contains(r.URL.RawQuery, "1.21.4") {
+			t.Errorf("unexpected version query: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[
+			{"id":"v1","name":"Fabric Pack 1.21.4","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],
+			 "files":[{"filename":"fabricskyblocks-2.6.0.mrpack","url":"https://cdn.modrinth.test/a.mrpack","size":10,"hashes":{"sha1":"aa"}}]},
+			{"id":"v2","name":"Fabric Pack jar only","version_type":"beta","game_versions":["1.21.4"],"loaders":["fabric"],
+			 "files":[{"filename":"pack.jar","url":"https://cdn.modrinth.test/b.jar","size":5}]}
+		]`))
+	}))
+	defer versionSrv.Close()
+
+	adapter := wails.NewWailsAdapter(nil)
+	wails.NewHost(adapter).SetGameManifestURL(manifestSrv.URL)
+	wails.NewHost(adapter).SetContent(modrinth.NewClient(versionSrv.URL, versionSrv.Client()), nil)
+
+	// --- ListMinecraftVersions -------------------------------------------
+	rels, err := adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{})
+	if err != nil {
+		t.Fatalf("ListMinecraftVersions: %v", err)
+	}
+	if len(rels) != 2 || rels[0].ID != "26.3" || rels[0].Type != "release" {
+		t.Fatalf("release channel = %+v", rels)
+	}
+	all, err := adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{Channel: "all"})
+	if err != nil || len(all) != 3 {
+		t.Fatalf("all channel = %+v err=%v", all, err)
+	}
+
+	// --- ListLoaderVersions ------------------------------------------------
+	fabricSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/1.21.4") {
+			t.Errorf("fabric path = %s, want trailing game version", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"loader":{"version":"0.16.9","stable":false}},{"loader":{"version":"0.16.4","stable":true}}]`))
+	}))
+	defer fabricSrv.Close()
+	wails.NewHost(adapter).SetLoaderResolver(&loadermeta.Resolver{}) // zero value: refuses to reach the network
+	res, err := adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "FABRIC "})
+	if err != nil {
+		t.Fatalf("ListLoaderVersions: %v", err)
+	}
+	if res == nil || res.Options == nil {
+		t.Fatalf("loader resolution = %+v, want non-nil options slice", res)
+	}
+	if !strings.Contains(res.Note, "оффлайн") {
+		t.Fatalf("expected degradation note on transport error, got %q", res.Note)
+	}
+	wails.NewHost(adapter).SetLoaderResolver(newV072TestResolver(fabricSrv))
+	res2, err := adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "fabric"})
+	if err != nil {
+		t.Fatalf("ListLoaderVersions (fixture): %v", err)
+	}
+	if res2.Default != "0.16.4" || len(res2.Options) != 2 || res2.Note != "" {
+		t.Fatalf("fixture resolution = %+v", res2)
+	}
+	if _, err := adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "sponge"}); err == nil {
+		t.Fatal("expected unsupported loader error")
+	}
+
+	// --- ListMrPackVersions ------------------------------------------------
+	packs, err := adapter.ListMrPackVersions(wails.ListMrPackVersionsRequest{ProjectSlug: "project", GameVersion: "1.21.4", Loader: "fabric"})
+	if err != nil {
+		t.Fatalf("ListMrPackVersions: %v", err)
+	}
+	if len(packs) != 1 {
+		t.Fatalf("mrpack filter = %+v, want only the .mrpack file", packs)
+	}
+	if packs[0].VersionID != "v1" || packs[0].Filename != "fabricskyblocks-2.6.0.mrpack" || packs[0].SHA1 != "aa" {
+		t.Fatalf("pack entry = %+v", packs[0])
+	}
+	if _, err := adapter.ListMrPackVersions(wails.ListMrPackVersionsRequest{}); err == nil {
+		t.Fatal("expected error for empty slug")
+	}
+
+	// --- ImportMrPackFromURL validation ------------------------------------
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: "x"}); err == nil {
+		t.Fatal("expected identifiers-required rejection (no url fallback exists anymore)")
+	}
+	if _, err := adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: " ../../etc ", ProjectSlug: "p", VersionID: "v"}); err == nil {
+		t.Fatal("expected name validation error after path-traversal sanitize")
+	}
+
+	// --- GetMrPackURLImportStatus ------------------------------------------
+	st, err := adapter.GetMrPackURLImportStatus(wails.InstanceIDRequest{InstanceID: "never-imported"})
+	if err != nil || st == nil || st.Status != "idle" {
+		t.Fatalf("status = %+v err=%v, want idle", st, err)
 	}
 }

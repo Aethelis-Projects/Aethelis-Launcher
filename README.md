@@ -33,18 +33,9 @@
 
 ## Why Nord Launcher
 
-Most Minecraft launchers are Electron appliances: megabytes of overhead, background noise, and opaque update pipelines. Nord Launcher is built the other way around — a pure Go core, a ~28 KB embedded UI, and a small native shell. Every update is cryptographically signed, every secret lives in the OS credential manager, and nothing is phoned home.
+Most Minecraft launchers are Electron appliances: megabytes of overhead, background noise, and opaque update pipelines. Nord Launcher is built the other way around — a pure Go core, an ~81 KB gzipped embedded UI, and a small native shell. Every update is cryptographically signed, every secret lives in the OS credential manager, and nothing is phoned home.
 
-**Measured in CI (release v0.1.2):**
-
-| Metric | Result | Budget |
-|---|---|---|
-| Cold start | ~1.03 s | < 2.0 s |
-| Idle RAM | ~82 MB | < 150 MB |
-| IPC dispatch (p95) | 297 ns | ≤ 5,000 ns |
-| Frontend bundle (gzip) | 27.7 KB | ≤ 250 KB |
-| Windows binary | 17.5 MB | < 40 MB |
-| Core test coverage | 80.9% | ≥ 80% |
+**Performance metrics are produced by CI on the release build only** (never by ad-hoc sandbox runs): the `publish-release` job compiles `metrics.json` — frontend-bundle gzip (Linux job), stripped binary + installer sizes (from the actual published assets), core coverage (quality job) — and attaches it to every release. The README quotes that file; CI additionally enforces `gofmt -l internal cmd ipc scripts` clean and the ≥80% core-coverage gate. IPC dispatch latency is intentionally not advertised: nanoseconds per dispatch are an internal benchmark number, not something a user can feel. Idle RAM and cold start of the full GUI are measured on hardware during acceptance (checklist items), budget < 150 MB / < 2.0 s.
 
 ---
 
@@ -116,7 +107,7 @@ Strict Hexagonal Architecture (Ports & Adapters):
 ## Requirements
 
 - **Windows**: Windows 10 (1809+ / Build 17763 or newer) and Windows 11, 64-bit x64. Older Windows is explicitly rejected at the installer level.
-- **Linux**: Ubuntu 22.04 LTS or newer (x64) with GTK4 and WebKitGTK 6.0.
+- **Linux**: Ubuntu 22.04 LTS or newer (x64) with GTK4 and WebKitGTK 6.0. (the default build backend - CI and release builds compile it with no build tags; `-tags gtk3` is the optional webkit2gtk-4.1 variant for distros without WebKitGTK 6.0).
 - **macOS**: planned for a future milestone.
 
 ## Java Runtime Matrix
@@ -162,8 +153,8 @@ Every push and pull request must pass the CI Quality Gate:
 - **Bundle budget** — frontend ≤ 250 KB gzip.
 - **Binary budget** — release binary ≤ 40 MB.
 - **Latency SLA** — in-process IPC dispatch p95 ≤ 5,000 ns.
-- **Wails binding registry** — forward registration parity enforced for all 61 IPC methods (reverse exhaustive check out-of-scope; Wails reflects all public receivers by design).
-- **Discord Rich Presence (opt-in)** — `SetDiscordRpcEnabled`/`GetDiscordRpcStatus`/`GetDiscordRpcPreview` drive a local-only IPC client (AF_UNIX / named pipe, never a network socket) with zero account identifiers in the payload, an explicit Application ID field, a live "what others will see" preview, silent degradation when Discord is closed, and auto-resync when Discord restarts.
+- **Wails binding registry** — registry of all 73 webview-facing IPC methods enforced bidirectionally (forward registration parity + a reverse `reflect` exhaustive check; the list length is itself compared against `reflect` on the bound receiver, so no hand-tuned count can drift; host-only `Set*` wiring lives on the never-bound `wails.Host` facade).
+- **Discord Rich Presence (opt-in)** — `SetDiscordRpcEnabled`/`GetDiscordRpcStatus`/`GetDiscordRpcPreview` drive a local-only IPC client (AF_UNIX sockets on Linux, named pipes on Windows — never a network socket) with zero account identifiers in the payload, the built-in Application ID (no configuration needed), a live "what others will see" preview, silent degradation when Discord is closed, and auto-resync when Discord restarts.
 - **CurseForge modpack import (`.zip`)** — `ScanCurseForgePackZip`/`ImportCurseForgePackZip` read `manifest.json` (fallback: official-launcher `modlist.html`, which is honestly reported as manual-install-only), resolve each `projectID/fileID` through the CurseForge API (exact-file lookup, never a substitute build; stale files surface as errors), download with SHA-1 verification, and extract `overrides/` through the shared credential blocklist with zip-slip containment. Unresolvable files abort required downloads loudly and are listed for manual install — never silently skipped.
 - **File integrity** — `Check/Repair Instance Files` verifies the Mojang cache (version JSON, client jar, libraries, natives, asset index, asset objects) against official SHA-1 and re-downloads only the broken entries via the atomic downloader; loader-side libraries and mods keep their own self-heal and are outside this scope.
 - **Optimization set** — curated per-loader list (Fabric: sodium/lithium/ferrite-core/modernfix; Quilt: sodium/ferrite-core; Forge/NeoForge: oculus/ferrite-core/modernfix). Entries are resolved live against the instance game version; anything unvetted (e.g. Forge sodium ports, which are not on Modrinth) is intentionally omitted rather than guessed. Aikar flags follow the canonical G1GC set (aikar.co/mcflags); the preset never mixes with ZGC and never overrides -Xms/-Xmx (instance RAM fields own those).

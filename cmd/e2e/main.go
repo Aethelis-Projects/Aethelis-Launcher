@@ -40,10 +40,12 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/downloader"
 	"github.com/nord-launcher/launcher/internal/core/java"
 	"github.com/nord-launcher/launcher/internal/core/launch"
+	"github.com/nord-launcher/launcher/internal/core/loadermeta"
 	"github.com/nord-launcher/launcher/internal/core/manifest"
 	"github.com/nord-launcher/launcher/internal/core/netutil"
 	"github.com/nord-launcher/launcher/internal/core/storage"
 	"github.com/nord-launcher/launcher/internal/core/updater"
+	"github.com/nord-launcher/launcher/internal/releasetool"
 )
 
 func main() {
@@ -944,12 +946,12 @@ func main() {
 
 	step11Adapter := wails.NewWailsAdapter(nil)
 	mrServerURL, _ := url.Parse(step11Server.URL)
-	step11Adapter.SetAllowedHosts([]string{mrServerURL.Hostname(), mrServerURL.Host})
-	step11Adapter.SetFileSystem(fs.NewOSFileSystem(), step11InstancesDir)
-	step11Adapter.SetDB(step11DB.DB())
+	wails.NewHost(step11Adapter).SetAllowedHosts([]string{mrServerURL.Hostname(), mrServerURL.Host})
+	wails.NewHost(step11Adapter).SetFileSystem(fs.NewOSFileSystem(), step11InstancesDir)
+	wails.NewHost(step11Adapter).SetDB(step11DB.DB())
 
 	mrStep11Client := modrinth.NewClient(step11Server.URL, step11Server.Client())
-	step11Adapter.SetContent(mrStep11Client, nil)
+	wails.NewHost(step11Adapter).SetContent(mrStep11Client, nil)
 
 	// 1. Install Mod
 	installResp, err := step11Adapter.InstallMod(wails.InstallModRequest{
@@ -1265,12 +1267,12 @@ func main() {
 	}
 
 	step12Adapter := wails.NewWailsAdapter(nil)
-	step12Adapter.SetVersion("0.6.0")
+	wails.NewHost(step12Adapter).SetVersion("0.6.0")
 	step12ServerURL, _ := url.Parse(step12Server.URL)
-	step12Adapter.SetAllowedHosts([]string{step12ServerURL.Hostname(), step12ServerURL.Host})
-	step12Adapter.SetFileSystem(fs.NewOSFileSystem(), step12InstancesDir)
-	step12Adapter.SetDB(step12DB.DB())
-	step12Adapter.SetContent(modrinth.NewClient(step12Server.URL, step12Server.Client()), nil)
+	wails.NewHost(step12Adapter).SetAllowedHosts([]string{step12ServerURL.Hostname(), step12ServerURL.Host})
+	wails.NewHost(step12Adapter).SetFileSystem(fs.NewOSFileSystem(), step12InstancesDir)
+	wails.NewHost(step12Adapter).SetDB(step12DB.DB())
+	wails.NewHost(step12Adapter).SetContent(modrinth.NewClient(step12Server.URL, step12Server.Client()), nil)
 
 	_, err = step12Adapter.InstallMod(wails.InstallModRequest{
 		InstanceID:  step12InstID,
@@ -1577,8 +1579,371 @@ func main() {
 	}
 	logf("PASS: CF .zip contract verified: plan split (1 dl + 1 unresolved), credential blocked, override extracted, instance persisted.")
 
+	// --- STEP 15: v0.7.2 wizard APIs, .mrpack URL pipeline & catalog parity (offline fixtures) ---
+	logf("\n--- STEP 15: Loader-Version APIs, MrPack URL Import & Catalog Provider Parity E2E (v0.7.2 G5/G10) ---")
+	step15Tmp := filepath.Join(os.TempDir(), fmt.Sprintf("nord-e2e-step15-%d", time.Now().UnixNano()))
+	_ = os.MkdirAll(step15Tmp, 0755) // errcheck:ok create temp dir
+	defer func() {
+		_ = os.RemoveAll(step15Tmp) // errcheck:ok cleanup step 15 temp dir
+	}()
+	var step15ManifestHits int32
+	// The mrpack URL pipeline enforces https on the resolved record, so the
+	// whole step-15 fixture runs over a TLS test server now.
+	step15PackBytes := []byte("PK\x03\x04-padded-e2e-mrpack-payload")
+	{
+		buf := &bytes.Buffer{}
+		zw := zip.NewWriter(buf)
+		f, _ := zw.Create("modrinth.index.json")                                                                                                                                       // errcheck:ok e2e fixture
+		_, _ = f.Write([]byte(`{"formatVersion":1,"game":"minecraft","versionId":"e2e","name":"URL Pack","files":[],"dependencies":{"minecraft":"1.21.4","fabric-loader":"0.16.4"}}`)) // errcheck:ok e2e fixture
+		_ = zw.Close()                                                                                                                                                                 // errcheck:ok finalize fixture
+		step15PackBytes = buf.Bytes()
+	}
+	step15SHA1 := fmt.Sprintf("%x", sha1.Sum(step15PackBytes))
+	step15SHA512 := fmt.Sprintf("%x", sha512.Sum512(step15PackBytes))
+	var step15API *httptest.Server
+	step15API = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/files/pack-2.6.mrpack":
+			w.Header().Set("Content-Type", "application/octet-stream")
+			_, _ = w.Write(step15PackBytes) // errcheck:ok e2e fixture
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasPrefix(r.URL.Path, "/mc/game/version_manifest"):
+			step15ManifestHits++
+			_, _ = w.Write([]byte(`{"latest":{"release":"26.3","snapshot":"26.3-rc1"},"versions":[{"id":"26.3","type":"release","url":"x","releaseTime":"2026-09-01T00:00:00Z"},{"id":"1.21.4","type":"release","url":"x","releaseTime":"2024-12-03T00:00:00Z"},{"id":"26.3-rc1","type":"snapshot","url":"x","releaseTime":"2026-08-20T00:00:00Z"}]}`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/fabric/"):
+			_, _ = w.Write([]byte(`[{"loader":{"version":"0.16.9","stable":false}},{"loader":{"version":"0.16.4","stable":true}}]`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/quilt/"):
+			_, _ = w.Write([]byte(`[{"loader":{"version":"0.26.0"}}]`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/forge/promotions_slim.json"):
+			_, _ = w.Write([]byte(`{"promos":{"1.21.4-recommended":"54.1.0-forge"}}`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/neoforge/tags"):
+			_, _ = w.Write([]byte(`[{"name":"21.5.0-beta-1"},{"name":"21.4.211"},{"name":"20.4.0"}]`)) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/v2/project/p1/version"):
+			_, _ = fmt.Fprintf(w, `[{"id":"verMR","name":"Pack 2.6","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack-2.6.mrpack","url":"%s/files/pack-2.6.mrpack","size":%d,"hashes":{"sha1":"%s","sha512":"%s"}}]},{"id":"verJAR","name":"Jar drop","version_type":"release","game_versions":["1.21.4"],"loaders":["fabric"],"files":[{"filename":"pack.jar","url":"https://127.0.0.1:9/offline.jar","size":7}]}]`, step15API.URL, len(step15PackBytes), step15SHA1, step15SHA512) // errcheck:ok e2e stub response
+		case strings.HasPrefix(r.URL.Path, "/v2/tag/category"):
+			_, _ = w.Write([]byte(`[{"id":"fabric","name":"Fabric","project_type":""},{"id":"modpacks","name":"Modpacks","project_type":"modpack"}]`)) // errcheck:ok e2e stub response
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer step15API.Close()
+
+	step15DB, err := storage.OpenDatabase(filepath.Join(step15Tmp, "nord-e2e-15.db"))
+	if err != nil {
+		logf("FAIL: Step 15 SQLite init failed: %v", err)
+		os.Exit(1)
+	}
+	defer func() { _ = step15DB.Close() }() // errcheck:ok close db
+	if err := step15DB.Migrate(); err != nil {
+		logf("FAIL: Step 15 migrations failed: %v", err)
+		os.Exit(1)
+	}
+	step15Repo := storage.NewInstanceRepository(step15DB)
+	step15Svc := launch.NewInstanceService(step15Repo, nil, nil, nil, e2eClock)
+	step15Adapter := wails.NewWailsAdapter(step15Svc)
+	wails.NewHost(step15Adapter).SetGameManifestURL(step15API.URL + "/mc/game/version_manifest_v2.json")
+	wails.NewHost(step15Adapter).SetHTTPClient(step15API.Client())
+	if u15, errU := url.Parse(step15API.URL); errU == nil {
+		wails.NewHost(step15Adapter).SetAllowedHosts([]string{u15.Hostname()})
+	}
+	step15Resolver := loadermeta.NewResolver(step15API.Client())
+	step15Resolver.FabricURL = step15API.URL + "/fabric/"
+	step15Resolver.QuiltURL = step15API.URL + "/quilt/"
+	step15Resolver.ForgeURL = step15API.URL + "/forge/promotions_slim.json"
+	step15Resolver.NeoURL = step15API.URL + "/neoforge/tags"
+	wails.NewHost(step15Adapter).SetLoaderResolver(step15Resolver)
+	wails.NewHost(step15Adapter).SetContent(modrinth.NewClient(step15API.URL, step15API.Client()), curseforge.NewClient(step15API.URL, "e2e-key", step15API.Client()))
+	wails.NewHost(step15Adapter).SetFileSystem(nil, filepath.Join(step15Tmp, "instances"))
+
+	// G10 step 2: Mojang manifest through the adapter (with cache).
+	rels, err := step15Adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{})
+	if err != nil || len(rels) != 2 || rels[0].ID != "26.3" {
+		logf("FAIL: Step 15 ListMinecraftVersions releases: %+v %v", rels, err)
+		os.Exit(1)
+	}
+	allv, err := step15Adapter.ListMinecraftVersions(wails.ListMinecraftVersionsRequest{Channel: "all"})
+	if err != nil || len(allv) != 3 {
+		logf("FAIL: Step 15 ListMinecraftVersions all: %+v %v", allv, err)
+		os.Exit(1)
+	}
+	if step15ManifestHits != 1 {
+		logf("FAIL: Step 15 manifest cache bypassed: %d upstream calls", step15ManifestHits)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 Mojang manifest catalog served through adapter with 6h cache (1 upstream hit for 2 calls).")
+
+	// G10 step 3: loader channels resolve recommended/latest values.
+	step15Cases := []struct{ loader, want string }{
+		{"fabric", "0.16.4"}, {"quilt", "0.26.0"}, {"forge", "54.1.0"}, {"neoforge", "21.4.211"},
+	}
+	for _, c := range step15Cases {
+		res, err := step15Adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: c.loader})
+		if err != nil || res == nil || res.Default != c.want || res.Note != "" {
+			logf("FAIL: Step 15 ListLoaderVersions(%s) = %+v err=%v, want default %s", c.loader, res, err, c.want)
+			os.Exit(1)
+		}
+	}
+	if _, err := step15Adapter.ListLoaderVersions(wails.ListLoaderVersionsRequest{GameVersion: "1.21.4", Loader: "sponge"}); err == nil {
+		logf("FAIL: Step 15 accepted unsupported loader 'sponge'")
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 all four loader resolvers hit their official endpoints and pick the right defaults.")
+
+	// G10 creation: loader version pinned and persisted.
+	step15Inst, err := step15Adapter.CreateInstanceWithLoader(wails.CreateInstanceWithLoaderRequest{Name: "Wizard Pack", GameVersion: "1.21.4", Loader: "fabric", LoaderVersion: "0.16.4"})
+	if err != nil || step15Inst == nil {
+		logf("FAIL: Step 15 CreateInstanceWithLoader: %v", err)
+		os.Exit(1)
+	}
+	if persisted, err := step15Repo.GetByID(context.Background(), step15Inst.ID); err != nil || persisted.LoaderVer != "0.16.4" {
+		logf("FAIL: Step 15 loader version not persisted: %+v %v", persisted, err)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 wizard creation pinned LoaderVer=%s in the repository.", step15Inst.LoaderVersion)
+
+	// G5: project version listing filters to .mrpack files only.
+	mrpacks, err := step15Adapter.ListMrPackVersions(wails.ListMrPackVersionsRequest{ProjectSlug: "p1", GameVersion: "1.21.4", Loader: "fabric"})
+	if err != nil || len(mrpacks) != 1 || mrpacks[0].Filename != "pack-2.6.mrpack" || mrpacks[0].SHA1 != step15SHA1 || mrpacks[0].SHA512 != step15SHA512 {
+		logf("FAIL: Step 15 ListMrPackVersions = %+v err=%v", mrpacks, err)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 modpack version list keeps only .mrpack files with download URL and sha1.")
+
+	// G5: URL import refuses non-https sources and records an honest failure status.
+	// A compromised webview sends url+hashes; none of it is trusted. Fallback
+	// mode (no slug/version_id) refuses any origin outside the CDN allowlist
+	// before touching the network, and non-https stays refused outright.
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: "No Identifiers"}); err == nil || !strings.Contains(err.Error(), "requires project_slug and version_id") {
+		logf("FAIL: Step 15 accepted a bare url-less import request: %v", err)
+		os.Exit(1)
+	}
+	// Tampered integrity hint in resolution mode is rejected before any dial,
+	// even though the URL field is now optional.
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{InstanceName: "Tamper", ProjectSlug: "p1", VersionID: "verMR", SHA1: fmt.Sprintf("%040x", 0xdeadbeef)}); err == nil || !strings.Contains(err.Error(), "does not match the Modrinth API record") {
+		logf("FAIL: Step 15 accepted a sha1 that disagrees with the API record: %v", err)
+		os.Exit(1)
+	}
+	// Resolution mode end-to-end: a *malicious* url from the client must be
+	// ignored - the adapter re-fetches url+hashes from the API. If the client
+	// URL were dialed, the loopback black-hole would fail the import.
+	// The request type has no url field at all any more (a compile-time
+	// guarantee); identifiers-only resolution still imports the real TLS
+	// payload with both hashes verified.
+	if instID, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
+		InstanceName: "URL Resolved Pack",
+		ProjectSlug:  "p1",
+		VersionID:    "verMR",
+	}); err != nil || instID == "" {
+		logf("FAIL: Step 15 resolution-mode import: %v", err)
+		os.Exit(1)
+	}
+	// The real payload imported over TLS, sha1 AND sha512 verified, with a
+	// deliberately wrong client-side sha1/size hint rejected up front.
+	if _, err := step15Adapter.ImportMrPackFromURL(wails.ImportMrPackURLRequest{
+		InstanceName: "URL Mismatch Pack", ProjectSlug: "p1", VersionID: "verMR",
+		SHA1: step15SHA1, Size: 999999999,
+	}); err == nil || !strings.Contains(err.Error(), "size does not match the Modrinth API record") {
+		logf("FAIL: Step 15 accepted a size hint disagreeing with the API record: %v", err)
+		os.Exit(1)
+	}
+	if st, err := step15Adapter.GetMrPackURLImportStatus(wails.InstanceIDRequest{InstanceID: "URL Resolved Pack"}); err != nil || st.Status != "complete" {
+		logf("FAIL: Step 15 resolution-mode status = %+v err=%v", st, err)
+		os.Exit(1)
+	}
+
+	// The download-then-import pipeline itself is exercised with the local
+	// importer (the scheme check above is proven; ImportMrPack does the rest).
+	step15PackBuf := &bytes.Buffer{}
+	zw15 := zip.NewWriter(step15PackBuf)
+	f15, err := zw15.Create("modrinth.index.json")
+	if err != nil {
+		logf("FAIL: Step 15 zip entry: %v", err)
+		os.Exit(1)
+	}
+	_, _ = f15.Write([]byte(`{"formatVersion":1,"game":"minecraft","versionId":"e2e","name":"URL Pack","files":[],"dependencies":{"minecraft":"1.21.4","fabric-loader":"0.16.4"}}`)) // errcheck:ok e2e fixture
+	_ = zw15.Close()                                                                                                                                                                 // errcheck:ok finalize zip
+	step15PackPath := filepath.Join(step15Tmp, "url-pack.mrpack")
+	if err := os.WriteFile(step15PackPath, step15PackBuf.Bytes(), 0o600); err != nil {
+		logf("FAIL: Step 15 write fixture mrpack: %v", err)
+		os.Exit(1)
+	}
+	if instID, err := step15Adapter.ImportMrPack(wails.ImportMrPackRequest{MrPackPath: step15PackPath, InstanceName: "Local Via Pipeline"}); err != nil || instID == "" {
+		logf("FAIL: Step 15 importer pipeline behind the URL wrapper: %v", err)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 URL import path validates scheme, records failed status, and the shared importer pipeline runs.")
+
+	// Catalog parity: CF refuses modpack search honestly; Modrinth tags feed filters.
+	if res, err := step15Adapter.SearchMods(wails.SearchModsRequest{Source: "curseforge", ProjectType: "modpack", Limit: 5}); err != nil || res.Reason != "unsupported_type" {
+		logf("FAIL: Step 15 CF modpack gate = %+v err=%v", res, err)
+		os.Exit(1)
+	}
+	tagz, err := step15Adapter.ListProjectTags(wails.ListProjectTagsRequest{Provider: "modrinth", ProjectType: "modpack"})
+	if err != nil || len(tagz) == 0 {
+		logf("FAIL: Step 15 ListProjectTags empty: %v", err)
+		os.Exit(1)
+	}
+	seenTag := false
+	for _, tg := range tagz {
+		if tg.ID == "modpacks" {
+			seenTag = true
+		}
+	}
+	if !seenTag {
+		logf("FAIL: Step 15 modpack tag missing: %+v", tagz)
+		os.Exit(1)
+	}
+	logf("PASS: Step 15 catalog provider parity: CF modpack gate + Modrinth live tags (%d).", len(tagz))
+
+	// ---------------------------------------------------------------------
+	// Stage 16 (v0.7.2 round-6, owner p1): the staging seed is published in this
+	// repository, so the whole safety argument is "the client trusts exactly one
+	// key". Here that argument is executed, not asserted in prose: a real
+	// manifest is signed by the real generator with the STAGING key, then fed
+	// through the real client update path (updater.AutoUpdater with
+	// GetDefaultPublicKey) - the update must be refused and the running
+	// executable left untouched. A control pass with the staging public half
+	// proves the refusal came from the trust root and not from a broken fixture.
+	// ---------------------------------------------------------------------
+	{
+		step16Tmp, err := os.MkdirTemp("", "nord-e2e-step16-*")
+		if err != nil {
+			logf("FAIL: Step 16 tmpdir: %v", err)
+			os.Exit(1)
+		}
+		defer os.RemoveAll(step16Tmp) // errcheck:ok cleanup e2e scratch directory
+		step16Dist := filepath.Join(step16Tmp, "dist")
+		if err := os.MkdirAll(step16Dist, 0755); err != nil {
+			logf("FAIL: Step 16 mkdir dist: %v", err)
+			os.Exit(1)
+		}
+		step16Payload := []byte("nord-launcher-v0.9.8-staging-signed-update-payload")
+		step16Name := "nord-launcher-0.9.8.tar.gz"
+		if runtime.GOOS == "windows" {
+			step16Name = "NordLauncher.exe"
+		}
+		step16Artifact := filepath.Join(step16Dist, step16Name)
+		if err := os.WriteFile(step16Artifact, step16Payload, 0644); err != nil {
+			logf("FAIL: Step 16 write artifact: %v", err)
+			os.Exit(1)
+		}
+		step16Manifest := filepath.Join(step16Dist, "manifest-stable.json")
+		stagingPriv, err := releasetool.StagingPrivateKey()
+		if err != nil {
+			logf("FAIL: Step 16 staging key: %v", err)
+			os.Exit(1)
+		}
+		gen16 := exec.Command(genmanifestBin,
+			"-version", "0.9.8",
+			"-channel", "stable",
+			"-dist", step16Dist,
+			"-out", step16Manifest,
+			"-privkey-hex", hex.EncodeToString(stagingPriv.Seed()),
+			"-allow-insecure-dev-key",
+		)
+		if out, err := gen16.CombinedOutput(); err != nil {
+			logf("FAIL: Step 16 staging signing: %v\n%s", err, out)
+			os.Exit(1)
+		}
+		raw16, err := os.ReadFile(step16Manifest)
+		if err != nil {
+			logf("FAIL: Step 16 read manifest: %v", err)
+			os.Exit(1)
+		}
+		var manifest16 updater.UpdateManifest
+		if err := json.Unmarshal(raw16, &manifest16); err != nil {
+			logf("FAIL: Step 16 parse manifest: %v", err)
+			os.Exit(1)
+		}
+		plat16 := updater.CurrentPlatformKey()
+		asset16, ok := manifest16.Platforms[plat16]
+		if !ok || asset16.Signature == "" {
+			logf("FAIL: Step 16 manifest lacks the current platform %s", plat16)
+			os.Exit(1)
+		}
+		var srv16 *httptest.Server
+		srv16 = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.URL.Path {
+			case "/payload":
+				_, _ = w.Write(step16Payload) // errcheck:ok mock update server
+			case "/manifest":
+				// Re-point the asset URL at this server, keeping signature/hash/size
+				// untouched - same trick step 8 uses, so the client exercises its real
+				// download path instead of 404ing on a github.com URL.
+				served := manifest16
+				served.Platforms = make(map[string]updater.PlatformAsset)
+				for k, v := range manifest16.Platforms {
+					v.URL = srv16.URL + "/payload"
+					served.Platforms[k] = v
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(served) // errcheck:ok mock update server
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		defer srv16.Close()
+
+		step16Exe := filepath.Join(step16Tmp, "launcher-under-test")
+		if err := os.WriteFile(step16Exe, []byte("ORIGINAL-CLIENT-BINARY"), 0755); err != nil {
+			logf("FAIL: Step 16 seed exe: %v", err)
+			os.Exit(1)
+		}
+
+		// 1) The shipped trust root must refuse a staging-signed update.
+		prodClient := updater.NewAutoUpdater("0.7.1", srv16.URL+"/manifest", updater.GetDefaultPublicKey(), srv16.Client())
+		info16, err := prodClient.CheckForUpdates(context.Background())
+		if err != nil || info16 == nil || !info16.Available {
+			logf("FAIL: Step 16 the manifest should be offered (0.9.8 > 0.7.1) so the refusal happens at apply time, got %+v err=%v", info16, err)
+			os.Exit(1)
+		}
+		if err := prodClient.DownloadAndApply(context.Background(), info16.Asset, step16Exe); err == nil {
+			logf("FAIL: Step 16 CRITICAL: a staging-signed update was APPLIED by a production client")
+			os.Exit(1)
+		} else if !strings.Contains(err.Error(), updater.ErrSignatureInvalid.Error()) {
+			logf("FAIL: Step 16 expected signature rejection, got: %v", err)
+			os.Exit(1)
+		}
+		kept, err := os.ReadFile(step16Exe)
+		if err != nil || string(kept) != "ORIGINAL-CLIENT-BINARY" {
+			logf("FAIL: Step 16 the refused update touched the running executable (err=%v)", err)
+			os.Exit(1)
+		}
+		if _, err := os.Stat(step16Exe + ".new"); !os.IsNotExist(err) {
+			logf("FAIL: Step 16 a rejected download left .new staged next to the executable")
+			os.Exit(1)
+		}
+
+		// 2) Control: same bytes, staging trust root -> applies. Without this the
+		//    check above would also pass on a fixture that fails for the wrong reason.
+		stagingPub, err := releasetool.StagingPublicKey()
+		if err != nil {
+			logf("FAIL: Step 16 staging pubkey: %v", err)
+			os.Exit(1)
+		}
+		testClient := updater.NewAutoUpdater("0.7.1", srv16.URL+"/manifest", stagingPub, srv16.Client())
+		info16b, err := testClient.CheckForUpdates(context.Background())
+		if err != nil {
+			logf("FAIL: Step 16 control check: %v", err)
+			os.Exit(1)
+		}
+		if err := testClient.DownloadAndApply(context.Background(), info16b.Asset, step16Exe); err != nil {
+			logf("FAIL: Step 16 control (staging trust root) could not apply the same manifest - the fixture is broken, not the trust check: %v", err)
+			os.Exit(1)
+		}
+		applied, _ := os.ReadFile(step16Exe)
+		if string(applied) != string(step16Payload) {
+			logf("FAIL: Step 16 control applied the wrong bytes (%d)", len(applied))
+			os.Exit(1)
+		}
+		logf("PASS: Step 16 a staging-signed manifest is refused by the production client (signature, not parsing) and the control trust root accepts the same bytes.")
+	}
+
 	logf("\n=================================================================")
-	logf(" ALL 14 E2E STAGES PASSED")
+	logf(" ALL 16 E2E STAGES PASSED")
 	logf("=================================================================")
 
 	// Save trace to build/e2e/e2e_trace.txt

@@ -1,21 +1,22 @@
 import { Component, createSignal, createEffect, onCleanup, onMount, Show, For } from "solid-js";
-import { LayoutGrid, Package, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Download, Upload, Image, FolderDown } from "lucide-solid";
+import { LayoutGrid, Package, Library, User, Settings, AlertTriangle, AlertCircle, Cpu, Sliders, Clock, Terminal, Activity, Upload, Image, FolderDown, Plus } from "lucide-solid";
 import { LaunchButton, LaunchButtonState } from "./components/common/LaunchButton";
 import { ModSearchInput } from "./components/common/ModSearchInput";
+import { ModpacksView } from "./components/mods/ModpacksView";
+import { CreateInstanceModal } from "./components/instance/CreateInstanceModal";
 import { InstanceCard } from "./components/instance/InstanceCard";
 import { InstanceSettingsModal, SettingsTab } from "./components/instance/InstanceSettingsModal";
 import { ScreenshotGalleryModal } from "./components/instance/ScreenshotGalleryModal";
-import { MrPackImportModal } from "./components/instance/MrPackImportModal";
 import { MrPackExportModal } from "./components/instance/MrPackExportModal";
 import { ImportInstanceModal } from "./components/instance/ImportInstanceModal";
 import { JavaManager } from "./components/java/JavaManager";
 import { AccountManager } from "./components/accounts/AccountManager";
+import { ModCatalog } from "./components/mods/ModCatalog";
 import { CrashModal } from "./components/console/CrashModal";
 import { GameConsoleModal } from "./components/console/GameConsoleModal";
 import { UpdatePanel, formatVersion } from "./components/updater/UpdatePanel";
 import { StartupUpdateModal } from "./components/updater/StartupUpdateModal";
 import { CurseForgeKeyCard } from "./components/settings/CurseForgeKeyCard";
-import { DiscordPresenceCard } from "./components/settings/DiscordPresenceCard";
 import { launcherAPI } from "./services/api";
 import type { InstanceDTO, CrashReportDTO, UpdateInfoDTO } from "./bindings/ipc_types";
 
@@ -28,7 +29,7 @@ export type UpdateBadgeState =
   | "snoozed-visible"
   | "unknown";
 
-type NavTab = "instances" | "accounts" | "settings" | "java_manager";
+type NavTab = "instances" | "modpacks" | "catalog" | "accounts" | "settings" | "java_manager";
 
 export const App: Component = () => {
   // Navigation
@@ -48,8 +49,9 @@ export const App: Component = () => {
   const [systemError, setSystemError] = createSignal<string>("");
   const [isSettingsOpen, setIsSettingsOpen] = createSignal(false);
   const [settingsInitialTab, setSettingsInitialTab] = createSignal<SettingsTab>("general");
-  const [isImportModalOpen, setIsImportModalOpen] = createSignal(false);
   const [isInstanceImportOpen, setIsInstanceImportOpen] = createSignal(false);
+  const [unifiedImportTab, setUnifiedImportTab] = createSignal<"mrpack" | "curseforge" | "minecraft" | "prism">("mrpack");
+  const [isCreateWizardOpen, setIsCreateWizardOpen] = createSignal(false);
   const [isExportModalOpen, setIsExportModalOpen] = createSignal(false);
   const [isScreenshotsOpen, setIsScreenshotsOpen] = createSignal(false);
   const [isConsoleOpen, setIsConsoleOpen] = createSignal(false);
@@ -289,8 +291,6 @@ export const App: Component = () => {
     }
   };
 
-  const [customJavaPath, setCustomJavaPath] = createSignal("");
-
   const loadModsCount = async (instId: string) => {
     if (!instId) return;
     try {
@@ -313,7 +313,6 @@ export const App: Component = () => {
 
   createEffect(() => {
     const inst = activeInstance();
-    setCustomJavaPath(inst.java_path || "");
     if (inst.id) {
       loadModsCount(inst.id);
       launcherAPI
@@ -322,22 +321,6 @@ export const App: Component = () => {
         .catch(() => {});
     }
   });
-
-  const saveInstanceJavaPath = async () => {
-    const targetId = activeInstance().id;
-    if (!targetId) return;
-    try {
-      const updated = await launcherAPI.updateInstance({
-        id: targetId,
-        java_path: customJavaPath().trim(),
-      });
-      setInstances((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
-    } catch (err: unknown) {
-      console.error("Failed to update instance Java path:", err);
-      const msg = err instanceof Error ? err.message : String(err);
-      setSystemError(`Ошибка обновления параметров инстанса: ${msg}`);
-    }
-  };
 
   const handleLaunch = async () => {
     const inst = activeInstance();
@@ -418,6 +401,34 @@ export const App: Component = () => {
               data-testid="nav-instances"
             >
               <LayoutGrid class="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrentNav("catalog")}
+              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                currentNav() === "catalog"
+                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+              title="Каталог (моды, ресурспаки, шейдеры, датапаки)"
+              data-testid="nav-catalog"
+            >
+              <Library class="w-5 h-5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setCurrentNav("modpacks")}
+              class={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${
+                currentNav() === "modpacks"
+                  ? "bg-nord-cyan text-nord-dark shadow-[0_0_10px_rgba(0,212,178,0.2)] font-semibold"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              }`}
+              title="Модпаки (сборки Modrinth, импорт .mrpack)"
+              data-testid="nav-modpacks"
+            >
+              <Package class="w-5 h-5" />
             </button>
 
             <button
@@ -512,6 +523,7 @@ export const App: Component = () => {
           <div class="flex items-center gap-4">
             <div class="w-80">
               <ModSearchInput
+                placeholder="Фильтр сборок…"
                 value={searchQuery()}
                 matchCount={filteredInstances().length}
                 onSearch={setSearchQuery}
@@ -531,23 +543,25 @@ export const App: Component = () => {
               </button>
             </Show>
 
+            {/* v0.7.2 G10: creation wizard */}
             <button
               type="button"
-              onClick={() => setIsImportModalOpen(true)}
-              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium transition-colors cursor-pointer"
-              title="Импортировать сборку формата Modrinth .mrpack"
-              data-testid="import-mrpack-btn"
+              onClick={() => setIsCreateWizardOpen(true)}
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-nord-cyan/10 hover:bg-nord-cyan/20 text-nord-cyan border border-nord-cyan/20 text-xs font-semibold transition-colors cursor-pointer"
+              title="Создать новую сборку"
+              data-testid="create-instance-btn"
             >
-              <Download class="w-3.5 h-3.5 text-nord-cyan" />
-              <span>Импорт .mrpack</span>
+              <Plus class="w-3.5 h-3.5" />
+              <span>Создать</span>
             </button>
 
+            {/* v0.7.2 G6: one import entry point; all sources live in its tabs */}
             <button
               type="button"
               onClick={() => setIsInstanceImportOpen(true)}
               class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-300 hover:text-white border border-white/10 text-xs font-medium transition-colors cursor-pointer"
-              title="Импортировать из .minecraft или Prism / MultiMC"
-              data-testid="import-instance-btn"
+              title="Импорт: .mrpack, CurseForge .zip, .minecraft, Prism / MultiMC"
+              data-testid="import-btn"
             >
               <FolderDown class="w-3.5 h-3.5 text-nord-cyan" />
               <span>Импорт</span>
@@ -720,37 +734,6 @@ export const App: Component = () => {
                     </div>
                   </div>
 
-                  {/* Java Runtime Path Control (S3: preserved for backward compat & test coverage) */}
-                  <div class="p-3.5 rounded-xl bg-black/20 border border-white/5 flex flex-col gap-2">
-                    <div class="flex items-center justify-between">
-                      <span class="text-xs font-semibold text-zinc-300">Среда выполнения Java (JavaPath)</span>
-                      <span class="text-[11px] font-mono text-zinc-500">
-                        {activeInstance().java_path ? "Пользовательский путь" : "Авто (Java 25 / 21 / 17 / 16 / 11 / 8)"}
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={customJavaPath()}
-                        placeholder="Авто-определение или путь к java.exe"
-                        onInput={(e) => setCustomJavaPath(e.currentTarget.value)}
-                        class="flex-1 px-3 py-1.5 rounded-lg bg-zinc-900 border border-white/10 text-xs font-mono text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-nord-cyan"
-                        data-testid="instance-java-path-input"
-                      />
-                      <button
-                        type="button"
-                        onClick={saveInstanceJavaPath}
-                        class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-medium text-white transition-colors cursor-pointer"
-                        data-testid="save-java-path-button"
-                      >
-                        Сохранить
-                      </button>
-                    </div>
-                    <p class="text-[11px] text-zinc-500">
-                      При запуске выполняется строгая проверка соответствия мажорной версии Java (fail-closed).
-                    </p>
-                  </div>
-
                   {/* Live Console Log Tail (J3) */}
                   <div
                     class="p-3.5 rounded-xl bg-black/30 border border-white/5 flex flex-col gap-2"
@@ -884,7 +867,49 @@ export const App: Component = () => {
             </div>
           </Show>
 
+          {/* v0.7.2 G5: modpack storefront (Modrinth .mrpack) */}
+          <Show when={currentNav() === "modpacks"}>
+            <ModpacksView
+              onOpenUnifiedImport={(tab) => {
+                setUnifiedImportTab(tab ?? "curseforge");
+                setIsInstanceImportOpen(true);
+              }}
+              onImported={() => {
+                void (async () => {
+                  try {
+                    setInstances(await launcherAPI.listInstances());
+                  } catch (_e) {
+                    void _e;
+                  }
+                })();
+              }}
+            />
+          </Show>
+
           {/* VIEW 2: Accounts Management */}
+          <Show when={currentNav() === "catalog"}>
+            <div class="max-w-6xl mx-auto">
+              <Show
+                when={activeInstance().id}
+                fallback={
+                  <div
+                    class="p-6 rounded-2xl bg-nord-surface border border-white/10 text-sm text-zinc-400"
+                    data-testid="catalog-no-instance"
+                  >
+                    Каталог устанавливает файлы только в конкретную сборку — выберите сборку на
+                    главной, затем повторите. Витрина доступна и сейчас: поиск, теги и фильтры работают.
+                  </div>
+                }
+              >
+                <ModCatalog
+                  activeInstanceId={activeInstance().id}
+                  gameVersion={activeInstance().game_version}
+                  loader={activeInstance().loader}
+                />
+              </Show>
+            </div>
+          </Show>
+
           <Show when={currentNav() === "accounts"}>
             <div class="max-w-3xl mx-auto">
               <AccountManager />
@@ -895,7 +920,6 @@ export const App: Component = () => {
           <Show when={currentNav() === "settings"}>
             <div class="max-w-3xl mx-auto space-y-6">
               <CurseForgeKeyCard />
-              <DiscordPresenceCard />
               <UpdatePanel
                 channel="stable"
                 onUpdateAvailable={(info) => setAvailableUpdate(info)}
@@ -930,27 +954,32 @@ export const App: Component = () => {
           );
         }}
         onOpenJavaManager={() => setCurrentNav("java_manager")}
+        onOpenCatalog={() => {
+          setIsSettingsOpen(false);
+          setCurrentNav("catalog");
+        }}
       />
 
-      {/* MrPack Import Modal (v0.6.0) */}
-      <MrPackImportModal
-        isOpen={isImportModalOpen()}
-        onClose={() => setIsImportModalOpen(false)}
-        onImported={async (newInst) => {
-          setIsImportModalOpen(false);
+      {/* v0.7.2 G10: instance creation wizard */}
+      <CreateInstanceModal
+        isOpen={isCreateWizardOpen()}
+        onClose={() => setIsCreateWizardOpen(false)}
+        onCreated={async (inst) => {
           try {
             const list = await launcherAPI.listInstances();
             setInstances(list);
-            setSelectedInstanceId(newInst.id);
+            setSelectedInstanceId(inst.id);
           } catch (_err) {
-            // non-fatal
+            void _err;
           }
         }}
+        existingGroups={[...new Set(instances().map((i) => (i.group || "").trim()).filter(Boolean))]}
       />
 
       {/* 1-Click Instance Import Modal (v0.7.0 Feature D'4a) */}
       <ImportInstanceModal
         isOpen={isInstanceImportOpen()}
+        initialSource={unifiedImportTab()}
         onClose={() => setIsInstanceImportOpen(false)}
         onImported={async (newInst) => {
           setIsInstanceImportOpen(false);

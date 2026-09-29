@@ -4,7 +4,7 @@ export type LoaderType = "vanilla" | "fabric" | "quilt" | "forge" | "neoforge";
 export type InstanceState = "idle" | "downloading" | "launching" | "running" | "crashed";
 export type AccountType = "microsoft" | "offline";
 export type ModSource = "modrinth" | "curseforge";
-export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack";
+export type ProjectType = "mod" | "resourcepack" | "shader" | "datapack" | "modpack";
 
 
 export interface InstanceDTO {
@@ -115,6 +115,74 @@ export interface SearchModsRequest {
   sort?: string;
   category?: string;
   project_type?: ProjectType;
+}
+
+export interface GameVersionDTO {
+  id: string;
+  type: string;
+  release_time: string;
+}
+
+export interface ListMinecraftVersionsRequest {
+  channel?: string;
+}
+
+export interface ListLoaderVersionsRequest {
+  game_version: string;
+  loader: string;
+}
+
+export interface LoaderResolutionDTO {
+  loader: string;
+  default: string;
+  options: string[];
+  source: string;
+  note?: string;
+}
+
+export interface CreateInstanceWithLoaderRequest {
+  name: string;
+  game_version: string;
+  loader: string;
+  loader_version?: string;
+}
+
+export interface ListMrPackVersionsRequest {
+  project_slug: string;
+  game_version?: string;
+  loader?: string;
+}
+
+export interface MrPackVersionDTO {
+  version_id: string;
+  name: string;
+  version_type: string;
+  game_version: string;
+  loaders: string[];
+  url: string;
+  filename: string;
+  size: number;
+  sha1?: string;
+  sha512?: string;
+}
+
+export interface ImportMrPackURLRequest {
+  instance_name: string;
+  project_slug: string;
+  version_id: string;
+  sha1?: string;
+  size?: number;
+}
+
+export interface ProjectTagDTO {
+  id: string;
+  label: string;
+  searchable: boolean;
+}
+
+export interface ListProjectTagsRequest {
+  provider?: string;
+  project_type?: string;
 }
 
 export interface SearchModsResultDTO {
@@ -459,11 +527,6 @@ export interface DeleteDatapackRequest {
 export interface PerformancePresetDTO {
   suggested_ram_mb: number;
   aikar_args: string[];
-}
-
-export interface ListOptimizationModsRequest {
-  game_version: string;
-  loader: string;
 }
 
 export interface InstanceIDRequest {

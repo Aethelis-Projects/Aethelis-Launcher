@@ -1,7 +1,9 @@
 package discordrpc
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -30,10 +32,46 @@ func waitFor(t *testing.T, cond func() bool, within time.Duration, what string) 
 type fakeDiscord struct {
 	t        *testing.T
 	ln       net.Listener
+	dialAddr string
 	framesCh chan string
 
 	mu         sync.Mutex
 	activeConn net.Conn
+}
+
+// shortTmpBase gives the AF_UNIX socket a path that stays under the 107 byte
+// sockaddr_un limit on Windows runners (t.TempDir nests the test name and
+// overflows there); cleaned up via t.Cleanup.
+func shortTmpBase(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(os.TempDir(), "nrd")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	base := filepath.Join(dir, t.Name())
+	if len(base) > 64 {
+		base = filepath.Join(dir, "t")
+	}
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) }) // errcheck:ok test cleanup
+	return base
+}
+
+// dialerFor hands the manager the transport that reaches this specific fake.
+// On Unix the fake lives under XDG_RUNTIME_DIR and the default dialer finds
+// it (nil is a no-op); on Windows it is an e2e-named pipe and must be dialed
+// explicitly - the same DialPipeContext production uses, just with the test
+// address.
+func dialerFor(f *fakeDiscord) func(ctx context.Context, candidates []string) (net.Conn, error) {
+	opt := fakeDialer(f.t, f.dialAddr)
+	if opt == nil {
+		return nil
+	}
+	m := &Manager{appID: f.t.Name()}
+	opt(m)
+	return m.dialer
 }
 
 func newFakeDiscord(t *testing.T, runtimeDir, name string) *fakeDiscord {
@@ -41,13 +79,11 @@ func newFakeDiscord(t *testing.T, runtimeDir, name string) *fakeDiscord {
 	if err := os.MkdirAll(runtimeDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(runtimeDir, name)
-	_ = os.Remove(path) // errcheck:ok stale socket cleanup, if any
-	ln, err := net.Listen("unix", path)
+	ln, addr, err := listenFakeDiscord(t, runtimeDir, name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeDiscord{t: t, ln: ln, framesCh: make(chan string, 64)}
+	f := &fakeDiscord{t: t, ln: ln, dialAddr: addr, framesCh: make(chan string, 64)}
 	go f.acceptLoop()
 	t.Cleanup(func() { _ = ln.Close() }) // errcheck:ok test cleanup
 	return f
@@ -74,8 +110,14 @@ func (f *fakeDiscord) serve(conn net.Conn) {
 		}
 		switch op {
 		case opHandshake:
+			if strings.Contains(string(payload), BuiltinAppID) {
+				select {
+				case f.framesCh <- string(payload):
+				default: // errcheck:ok drop if not observed
+				}
+			}
 			ack, _ := encodeJSON(map[string]interface{}{"evt": "READY", "data": map[string]interface{}{"client_id": "cid"}}) // errcheck:ok static test payload
-			_ = writeFrame(conn, opFrame, ack)                                                                                   // errcheck:ok test pipe
+			_ = writeFrame(conn, opFrame, ack)                                                                               // errcheck:ok test pipe
 		case opFrame:
 			select {
 			case f.framesCh <- string(payload):
@@ -105,11 +147,12 @@ func (f *fakeDiscord) dropLive() {
 }
 
 func TestRPC_FullLifecycle_WithFakeDiscord(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
 	m := NewManager("1234567890")
+	m.SetDialerForTest(dialerFor(fake))
 	if m.Status().Enabled {
 		t.Fatal("must start disabled (opt-in default off)")
 	}
@@ -183,11 +226,12 @@ func TestRPC_FullLifecycle_WithFakeDiscord(t *testing.T) {
 }
 
 func TestRPC_ReconnectAfterDiscordRestart(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
 	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
 	m := NewManager("app-id")
+	m.SetDialerForTest(dialerFor(fake))
 	m.SetEnabled(true)
 	waitFor(t, func() bool { return m.Status().Connected }, 3*time.Second, "first handshake")
 
@@ -214,7 +258,7 @@ func TestRPC_ReconnectAfterDiscordRestart(t *testing.T) {
 }
 
 func TestRPC_NoDiscord_SilentDegradation(t *testing.T) {
-	dir := t.TempDir()
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir) // no listener anywhere
 
 	m := NewManager("app-id")
@@ -231,16 +275,33 @@ func TestRPC_NoDiscord_SilentDegradation(t *testing.T) {
 	m.SetEnabled(false)
 }
 
-func TestRPC_MissingAppID_ExplicitStatus(t *testing.T) {
-	dir := t.TempDir()
+func TestRPC_EmptyAppID_FallsBackToBuiltinIdentity(t *testing.T) {
+	// v0.7.2 G8: the shipped constant is the identity; users can no longer
+	// (and never had to) configure it. An empty constructor value must not
+	// block the handshake.
+	dir := shortTmpBase(t)
 	t.Setenv("XDG_RUNTIME_DIR", dir)
-	newFakeDiscord(t, dir, "discord-ipc-0")
+	fake := newFakeDiscord(t, dir, "discord-ipc-0")
 
-	m := NewManager("") // no application id configured
+	m := NewManager("")
+	m.SetDialerForTest(dialerFor(fake))
 	m.SetEnabled(true)
-	waitFor(t, func() bool { return strings.Contains(m.Status().LastError, "application id") }, 3*time.Second, "explicit config error")
-	if m.Status().Connected {
-		t.Fatal("must not be connected without handshake identity")
+	waitFor(t, func() bool { return m.Status().Connected }, 3*time.Second, "handshake with builtin id")
+
+	observed := false
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && !observed {
+		select {
+		case raw := <-fake.framesCh:
+			if strings.Contains(raw, BuiltinAppID) {
+				observed = true
+			}
+		default:
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	if !observed {
+		t.Fatal("handshake must carry the builtin application id")
 	}
 	m.SetEnabled(false)
 }
@@ -305,4 +366,42 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	n := copy(p, r.b[r.i:])
 	r.i += n
 	return n, nil
+}
+
+func TestManagerOptionsAndAppIDSwap(t *testing.T) {
+	clocked := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m := NewManager("appid-1",
+		WithClock(func() time.Time { return clocked }),
+		WithDialer(func(ctx context.Context, candidates []string) (net.Conn, error) {
+			return nil, errors.New("no discord")
+		}),
+	)
+	if m.nowFn() != clocked {
+		t.Error("WithClock not applied")
+	}
+	if m.dialer == nil {
+		t.Fatal("WithDialer not applied")
+	}
+	m.SetEnabled(true)
+	if err := m.SetActivity(&Activity{Details: "Playing"}); !errors.Is(err, ErrNotConnected) {
+		t.Errorf("enabled manager without a connection must report ErrNotConnected, got %v", err)
+	}
+	st := m.Status()
+	if !st.Enabled || !st.AppIDSet {
+		t.Errorf("status after wiring: %+v", st)
+	}
+	m.SetAppID("appid-2")
+	m.mu.Lock()
+	got := m.appID
+	m.mu.Unlock()
+	if got != "appid-2" {
+		t.Errorf("SetAppID: %s", got)
+	}
+	m.SetAppID("appid-3") // nil conn: must drop nothing and not panic
+	m.mu.Lock()
+	got = m.appID
+	m.mu.Unlock()
+	if got != "appid-3" {
+		t.Errorf("SetAppID(nil-conn): %s", got)
+	}
 }

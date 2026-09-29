@@ -305,10 +305,10 @@ func TestCFPack_NotAPack(t *testing.T) {
 
 func TestCFPack_CredentialBlocklist_UppercaseVariant(t *testing.T) {
 	zipPath := writeCFPackZip(t, map[string]string{
-		"manifest.json":               cfManifestJSON(false),
-		"overrides/LAUNCHER_ACCOUNTS.JSON": "{\"accessToken\":\"leak\"}",
+		"manifest.json":                        cfManifestJSON(false),
+		"overrides/LAUNCHER_ACCOUNTS.JSON":     "{\"accessToken\":\"leak\"}",
 		"overrides/Config/MSA_Credentials.BIN": "x",
-		"overrides/MyPack.TOKEN":       "tok",
+		"overrides/MyPack.TOKEN":               "tok",
 	})
 	imp, instancesDir := setupCFPackImporter(t, nil, "")
 	plan, err := imp.ScanCurseForgeZip(context.Background(), zipPath)
@@ -336,7 +336,7 @@ func TestCFPack_CredentialBlocklist_UppercaseVariant(t *testing.T) {
 
 func TestCFPack_Traversal_NestedDotDotRejected(t *testing.T) {
 	zipPath := writeCFPackZip(t, map[string]string{
-		"manifest.json":            cfManifestJSON(false),
+		"manifest.json":                     cfManifestJSON(false),
 		"overrides/config/../../escape.txt": "outside",
 		"overrides/./relative-ok.txt":       "inside",
 	})
@@ -367,9 +367,9 @@ func TestCFPack_TamperedZipAfterScan_SkipsInjectedCredential(t *testing.T) {
 		t.Fatal(err)
 	}
 	tampered := writeCFPackZipAt(t, filepath.Dir(zipPath), "pack.zip", map[string]string{
-		"manifest.json":                    cfManifestJSON(false),
-		"overrides/options.txt":            "fov:90.0\n",
-		"overrides/usercache.json":         "{\"evil\":1}",
+		"manifest.json":            cfManifestJSON(false),
+		"overrides/options.txt":    "fov:90.0\n",
+		"overrides/usercache.json": "{\"evil\":1}",
 	})
 	plan.ZipPath = tampered
 	res, err := imp.ImportCurseForgeZip(context.Background(), plan)

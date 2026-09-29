@@ -7,6 +7,9 @@ on:
     branches: [ master, main ]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   core-and-frontend:
     name: Build & Test (${{ matrix.os }})
@@ -18,10 +21,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned (mutable tags are the workflow-injection vector)
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 pinned (mutable tags are the workflow-injection vector)
         with:
           go-version: "1.26"
           cache: true
@@ -33,14 +36,110 @@ jobs:
           sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev libsoup-3.0-dev pkg-config
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           node-version: "22"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           version: "12"
+
+      - name: Version Consistency Gate (VERSION is the single source)
+        # The exact command the release job runs with its tag; CI rehearses
+        # it with the matching tag plus a deliberate mismatch, so the
+        # tag==VERSION gate can never first-fire on an actual release push.
+        run: |
+          node scripts/check_version_consistency.js "v$(cat VERSION)"
+          if node scripts/check_version_consistency.js v9.9.9 2>/dev/null; then
+            echo "CRITICAL: version gate accepted a tag that does not match VERSION"
+            exit 1
+          fi
+          if ! grep -q "^## \[$(cat VERSION)\]" CHANGELOG.md; then
+            echo "CRITICAL: CHANGELOG has no section for VERSION"
+            exit 1
+          fi
+          echo "PASS: release-gate path rehearsed (positive + negative + changelog grep)."
+        shell: bash
+
+      - name: Verify Workflow Files (actionlint)
+        # A workflow that fails to parse schedules ZERO jobs - invisible from
+        # a green PR check. v0.7.2 actually shipped that failure mode once, so
+        # the linter is now part of the gate. Hard failures = syntax-check and
+        # expression errors (the zero-jobs class); shellcheck-style advisories
+        # on pre-existing scripts are printed but do not fail the build yet.
+        # Linux-only: the pinned artifact is a Linux binary and the Windows
+        # runner cannot exec it (observed: exit 126 on the first CI run).
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p "$RUNNER_TEMP/al"
+          curl -fsSL -o "$RUNNER_TEMP/al/al.tgz" https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz
+          # pinned version + digest: fetch-and-exec of a mutable release asset is runner RCE
+          echo "023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757  $RUNNER_TEMP/al/al.tgz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/al/al.tgz" -C "$RUNNER_TEMP/al" actionlint
+          set +e
+          "$RUNNER_TEMP/al/actionlint" .github/workflows/ci.yml .github/workflows/release.yml > actionlint.log 2>&1
+          ALRC=$?
+          set -e
+          cat actionlint.log
+          ERRS=$(grep -cE "\[(syntax-check|expression|runner-env)\]" actionlint.log || true)
+          if [ "$ERRS" -gt 0 ]; then
+            echo "actionlint reported $ERRS hard workflow error(s) - such files schedule ZERO jobs"
+            exit 1
+          fi
+          if [ "$ALRC" -ne 0 ] && [ "$ERRS" -eq 0 ]; then
+            echo "actionlint advisory-only output (shellcheck class); not gating"
+          fi
+          echo "PASS: no workflow parse/expression errors."
+        shell: bash
+
+      - name: Release Signing Material Stays Out of the Client Binary
+        # v0.7.2 round-6 (owner p1): internal/releasetool holds the published
+        # staging SEED (a private key). It is only safe while the client cannot
+        # see it, so the gate greps the actual binaries - and carries a positive
+        # control (the generator must contain the seed) so a broken grep, a wrong
+        # path or a silent build failure cannot fake a pass.
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          # Derived from the single source of truth (internal/releasetool), never
+          # copied here: a duplicated literal is how a gate ends up grepping for a
+          # value that no longer exists and passing vacuously. If the constant is
+          # renamed or reformatted, this fails loudly instead.
+          SEED=$(sed -n 's/.*StagingPrivateKeyHex = "\([0-9a-f]\{64\}\)".*/\1/p' internal/releasetool/stagingkey.go | head -1)
+          if [ -z "$SEED" ]; then
+            echo "ERROR: could not read StagingPrivateKeyHex from internal/releasetool - this gate would be blind."
+            exit 1
+          fi
+          mkdir -p /tmp/ci-bins
+          go build -o /tmp/ci-bins/launcher ./cmd/launcher
+          go build -o /tmp/ci-bins/genmanifest ./scripts/generate_manifest.go
+          if go list -deps ./cmd/launcher | grep -q "internal/releasetool"; then
+            echo "ERROR: cmd/launcher transitively imports internal/releasetool"
+            exit 1
+          fi
+          if grep -aq "$SEED" /tmp/ci-bins/launcher; then
+            echo "ERROR: the staging private seed is embedded in the shipped client binary"
+            exit 1
+          fi
+          if ! grep -aq "$SEED" /tmp/ci-bins/genmanifest; then
+            echo "ERROR: positive control failed - the generator does not contain the seed, so the client grep proves nothing"
+            exit 1
+          fi
+          echo "PASS: client binary free of signing material (positive control on the generator binary verified)."
+        shell: bash
+
+      - name: Verify gofmt (CI-measured, keeps the README claim honest)
+        # Command substitution is not portable: Git Bash on Windows execs
+        # real gofmt but /usr/bin/bash for `$(...)`, so capture the list via
+        # an output env var instead of inlining it in a test -z.
+        run: gofmt -l internal cmd ipc scripts
+        id: gofmtlist
+      - name: Verify gofmt (list must be empty)
+        run: test -z "${{ env.UNFORMATTED }}" || { echo "Unformatted files:"; echo "$GOFMT_LIST"; exit 1; }
+        env:
+          UNFORMATTED: ${{ steps.gofmtlist.outputs.stdout }}
+          GOFMT_LIST: ${{ steps.gofmtlist.outputs.stdout }}
 
       - name: Verify IPC Codegen Parity
         run: |
@@ -58,13 +157,22 @@ jobs:
         shell: bash
 
       - name: Run Core Go Tests & Coverage Gate (>= 80%)
+        id: covgate
         run: |
           go test -v -race ./internal/...
           go test -coverprofile=coverage.out ./internal/core/...
           node scripts/check_coverage.js coverage.out
+          TOTAL=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}' | tr -d '%')
+          mkdir -p coverage && echo "$TOTAL" > coverage/coverage.txt
+          echo "total=${TOTAL}" >> "$GITHUB_OUTPUT"
+          echo "core coverage total: ${TOTAL}%"
         shell: bash
 
       - name: Run E2E Integration Runner
+        # Default Linux backend (GTK4/WebKitGTK-6.0, the README promise):
+        # NO build tags. Local sandbox runs often use -tags gtk3 only because
+        # the distro image lacks libwebkitgtk-6.0-dev - CI/release MUST match
+        # this command, not the sandbox one (v0.7.2 round-4 review).
         run: |
           go run ./cmd/e2e/main.go
         shell: bash
@@ -137,7 +245,7 @@ jobs:
           if [[ "$RUNNER_OS" == "Windows" ]]; then
             BIN_PATH="build/nord-launcher.exe"
           fi
-          go build -ldflags="-s -w" -o "$BIN_PATH" cmd/launcher/main.go
+          go build -ldflags="-s -w -X main.version=$(cat VERSION)" -o "$BIN_PATH" cmd/launcher/main.go
           node -e '
             const fs = require("fs");
             const binPath = process.platform === "win32" ? "build/nord-launcher.exe" : "build/nord-launcher";
