@@ -5,6 +5,9 @@ The format is based on Keep a Changelog, and this project adheres to Semantic Ve
 
 ## [Unreleased]
 
+### Fixed
+- **Wails IPC Bridge CSP Regression**: Fixed regression introduced in v0.7.2 where `script-src 'self'` in `wails.CSPMiddleware` and `frontend/index.html` `<meta>` blocked inline script execution and dynamic imports needed to bootstrap `window.wails`, completely breaking IPC communication between the webview and the Go desktop runtime. Relaxed `script-src` to include `'unsafe-inline'` and `wails:` while strictly preserving `default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, and keeping `'unsafe-eval'` forbidden. Updated dynamic imports in `frontend/index.html` and `frontend/src/services/api.ts` to use native dynamic import before `new Function`, avoiding `EvalError`. Added regression tests for CSP script permissions and IPC connection failure handling.
+
 ## [0.7.2] - 2026-09-28
 
 SemVer note: this ships new `core/` APIs and 12 IPC methods, which would make it 0.8.0 under the project's own rules; the release is numbered 0.7.2 by explicit owner decision (same deviation as 0.7.1). Kept as a record, not a rename proposal.

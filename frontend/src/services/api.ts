@@ -212,8 +212,14 @@ export async function getWailsCall(): Promise<WailsRuntimeCall | null> {
   if (!wailsCallPromise) {
     wailsCallPromise = (async () => {
       try {
-        const dynamicImport = new Function("u", "return import(u)");
-        const mod = await dynamicImport("/wails/runtime.js");
+        let mod: { Call?: WailsRuntimeCall } | null = null;
+        try {
+          const runtimeUrl = "/wails/runtime.js";
+          mod = await import(/* @vite-ignore */ runtimeUrl);
+        } catch {
+          const dynamicImport = new Function("u", "return import(u)");
+          mod = await dynamicImport("/wails/runtime.js");
+        }
         if (mod?.Call?.ByName) {
           window.wails = { ...window.wails, ...mod };
           return mod.Call;
@@ -225,6 +231,10 @@ export async function getWailsCall(): Promise<WailsRuntimeCall | null> {
     })();
   }
   return await wailsCallPromise;
+}
+
+export function resetWailsCallPromiseForTesting(): void {
+  wailsCallPromise = null;
 }
 
 /**
@@ -239,7 +249,7 @@ function isDevEnvironment(): boolean {
   );
 }
 
-async function invokeWails<T>(
+export async function invokeWails<T>(
   methodName: string,
   fallback: () => Promise<T> | T,
   ...args: unknown[]
