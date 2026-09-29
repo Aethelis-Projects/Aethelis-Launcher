@@ -344,3 +344,29 @@ func TestCheckForUpdates_DevVersionIsSilent(t *testing.T) {
 		t.Fatal("IsDevVersion misclassified")
 	}
 }
+
+// v0.7.2 round-5: CI dispatch rehearsals sign with the staging key and verify
+// with StagingPublicKey(), while shipped clients only trust GetDefaultPublicKey.
+// If those two ever coincide, a rehearsal artifact becomes a production-valid
+// signature - this test is the tripwire. It also proves the sign/verify circle
+// (same construction as scripts/generate_manifest.go) is internally sound.
+func TestStagingKeyIsIsolatedFromProduction(t *testing.T) {
+	staging := StagingPublicKey()
+	prod := GetDefaultPublicKey()
+	if staging.Equal(ed25519.PublicKey(prod)) {
+		t.Fatal("staging key must never equal the production key")
+	}
+	seed, err := hex.DecodeString(StagingPrivateKeyHex)
+	if err != nil || len(seed) != ed25519.SeedSize {
+		t.Fatalf("staging constant must be a 32-byte seed, got len=%d err=%v", len(seed), err)
+	}
+	priv := ed25519.NewKeyFromSeed(seed)
+	payload := []byte("nord-launcher-rehearsal-payload")
+	sig := SignPayload(priv, payload)
+	if !VerifyPayload(staging, payload, sig) {
+		t.Fatal("signer and verifier disagree on the staging key")
+	}
+	if VerifyPayload(prod, payload, sig) {
+		t.Fatal("staging signature must not verify against the production key")
+	}
+}

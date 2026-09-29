@@ -370,6 +370,7 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		// v0.7.2 review: methods invoked from frontend/src/services/api.ts that
 		// were historically missing from the list; the reverse reflect check
 		// keeps this set exactly equal to the webview-facing surface.
+		"OpenExternal", // v0.7.2 round-5: links must leave the webview for the system browser
 		"GetGameLogs",
 		"SaveGameLog",
 		"ScanOfficialMinecraft",
@@ -444,13 +445,13 @@ func TestWailsAdapter_WailsV3BindingsRegistration(t *testing.T) {
 		"InstallDatapack",
 	}
 
-	// Architectural Decision (T-Gates Scope):
-	// Reverse exhaustive verification (asserting no unlisted methods are exposed on WailsAdapter)
-	// is explicitly out of scope for contract unit tests because Wails v3 Service binding
-	// registration reflects all exported receiver methods by design. Forward registration
-	// parity is strictly enforced via expectedMethods (72 methods) and CI IPC codegen check.
-	if len(expectedMethods) != 72 {
-		t.Fatalf("expected exactly 72 Wails methods, got %d", len(expectedMethods))
+	// v0.7.2 round-5: the hard-coded count was itself the drift risk the owner
+	// flagged ("counters from my own list"). The bound surface is now pinned to
+	// reflection instead: expectedMethods must be exactly the exported methods
+	// of *WailsAdapter, no magic number involved (the dedicated reverse check
+	// test asserts the same equality per-name, plus Host-absence).
+	if n := reflect.TypeOf(&wails.WailsAdapter{}).NumMethod(); len(expectedMethods) != n {
+		t.Fatalf("bound-surface list has %d names but *WailsAdapter exports %d methods - update the list deliberately, never by hand-tuning a count", len(expectedMethods), n)
 	}
 
 	const prefix = "github.com/nord-launcher/launcher/internal/adapters/wails.WailsAdapter."

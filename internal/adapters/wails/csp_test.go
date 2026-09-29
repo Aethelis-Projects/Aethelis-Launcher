@@ -61,6 +61,34 @@ func TestCSPPolicyImageSources(t *testing.T) {
 	if !strings.Contains(p, "style-src 'self' 'unsafe-inline'") {
 		t.Error("style-src must allow inline (Solid style attributes)")
 	}
+	if !strings.Contains(p, "frame-ancestors 'none'") {
+		t.Error("header policy must pin frame-ancestors")
+	}
+}
+
+// v0.7.2 round-5 (owner p3): frame-ancestors/sandbox/report-* are IGNORED in a
+// <meta> and the browser logs a warning for each - which would fail the
+// "console must be clean" acceptance item. The meta twin therefore carries the
+// policy minus exactly those directives.
+func TestCSPPolicyForMetaDropsHeaderOnlyDirectives(t *testing.T) {
+	full := wails.CSPPolicy()
+	meta := wails.CSPPolicyForMeta()
+	for _, d := range []string{"frame-ancestors", "sandbox", "report-uri", "report-to", "trusted-types"} {
+		if strings.Contains(meta, d) {
+			t.Errorf("meta policy must not carry %q (ignored via <meta> + console warning)", d)
+		}
+	}
+	for _, d := range []string{"default-src 'self'", "script-src 'self'", "img-src", "connect-src 'self'", "object-src 'none'"} {
+		if !strings.Contains(meta, d) {
+			t.Errorf("meta policy lost %q", d)
+		}
+	}
+	if strings.Contains(full, "frame-ancestors") == strings.Contains(meta, "frame-ancestors") {
+		t.Error("meta variant must differ from the header only by the dropped directives")
+	}
+	if strings.Count(meta, "; ")+1 >= strings.Count(full, "; ")+1 {
+		t.Errorf("meta must be strictly shorter than the header policy (dropped %d directives)", 0)
+	}
 }
 
 // The <meta> fallback in the Vite template must stay byte-equivalent to the
@@ -72,7 +100,7 @@ func TestIndexHTMLMetaMatchesPolicy(t *testing.T) {
 	if err != nil {
 		t.Skipf("frontend/index.html unavailable: %v", err)
 	}
-	want := wails.CSPPolicy()
+	want := wails.CSPPolicyForMeta()
 	if !strings.Contains(string(data), `http-equiv="Content-Security-Policy"`) {
 		t.Fatal("frontend/index.html must carry the CSP <meta> fallback")
 	}

@@ -17,7 +17,7 @@ on:
         default: true
 
 permissions:
-  contents: write
+  contents: read   # only publish-release escalates (owner p5-4: least privilege)
 
 jobs:
   build-windows:
@@ -25,23 +25,23 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           ref: ${{ github.event.inputs.tag || github.sha }}
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 pinned (mutable tags are the workflow-injection vector)
         with:
           go-version: "1.26"
           cache: true
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           node-version: "22"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           version: "12"
 
@@ -160,7 +160,7 @@ jobs:
           Write-Host "PASS: Created dist/windows/$zipName"
 
       - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           name: nord-launcher-windows
           path: |
@@ -177,28 +177,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           ref: ${{ github.event.inputs.tag || github.sha }}
 
-      - name: Resolve Release Tag
+      - name: Resolve Release Tag (real tag on push, v$(cat VERSION) on dispatch)
         id: tag
-        run: echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(cat VERSION)" >> "$GITHUB_OUTPUT"
+          fi
         shell: bash
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 pinned (mutable tags are the workflow-injection vector)
         with:
           go-version: "1.26"
           cache: true
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           node-version: "22"
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           version: "12"
 
@@ -269,7 +274,7 @@ jobs:
         shell: bash
 
       - name: Upload Linux Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           name: nord-launcher-linux
           path: dist/linux/nord-launcher-v*.tar.gz
@@ -282,16 +287,18 @@ jobs:
     # already ran against the tag's code) and stops before publication - this
     # is the dry-run coverage for installer/SHA256SUMS/Ed25519 the owner asked
     # for, and it can only exist because dispatch sits BESIDE on: push: tags.
+    permissions:
+      contents: write   # THE ONLY job with write scope (release creation)
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     env:
-      # Tag pushes: the real tag. Dispatch (dry-run/rehearsal, incl. before any
-      # tag exists): v$(cat VERSION) from the checked-out commit - the version
-      # gates below are tag-push-only, so the rehearsal never dies on a
-      # pseudo-tag; metrics.json is still stamped with the VERSION it builds.
-      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      # Owner p5-1: dry-run must exercise signature/checksums, so the version
+      # gates need a valid version on dispatch too: tag pushes use the real
+      # tag, dispatch uses v$(cat VERSION) of the checked-out commit.
+      RELEASE_TAG: ${{ github.event.inputs.tag || needs.build-linux.outputs.release_tag }}
+      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           ref: ${{ github.event.inputs.tag || github.sha }}
           # merge-base --is-ancestor in the placement gate needs real history;
@@ -299,19 +306,19 @@ jobs:
           fetch-depth: ${{ startsWith(github.ref, 'refs/tags/') && 0 || 50 }}
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5 pinned (mutable tags are the workflow-injection vector)
         with:
           go-version: "1.26"
           cache: true
 
       - name: Download Windows Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           name: nord-launcher-windows
           path: release-assets/
 
       - name: Download Linux Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4 pinned (mutable tags are the workflow-injection vector)
         with:
           name: nord-launcher-linux
           path: release-assets/
@@ -365,8 +372,7 @@ jobs:
           fi
         shell: bash
 
-      - name: Release Placement Gate (tag must be reachable from master)
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+      - name: Release Placement Gate (release commit must be reachable from master)
         # Mechanically enforces docs/RELEASE.md: tags belong on the merged
         # default-branch commit (a tag on a branch head differs from the
         # squash-merge result and silently escapes master).
@@ -404,13 +410,21 @@ jobs:
         run: node scripts/check_version_consistency.js "${{ env.RELEASE_TAG }}"
         shell: bash
 
-      - name: Validate Ed25519 Secret Guard
-        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
+      - name: Ed25519 Key Selection (hard-fail on tag pushes, staging key for rehearsal)
+        id: key
+        env:
+          SECRET: ${{ secrets.ED25519_PRIVATE_KEY }}
         run: |
-          if [ -z "${{ secrets.ED25519_PRIVATE_KEY }}" ]; then
-            echo "CRITICAL ERROR: ED25519_PRIVATE_KEY repository secret is not configured!"
-            echo "Official releases cannot be signed without a secure cryptographic key."
-            exit 1
+          if [ -z "$SECRET" ]; then
+            if [ "$IS_TAG" = "true" ]; then
+              echo "CRITICAL ERROR: ED25519_PRIVATE_KEY repository secret is not configured!"
+              echo "Official releases cannot be signed without a secure cryptographic key."
+              exit 1
+            fi
+            echo "REHEARSAL: signing with the repo staging key so the signature path is exercised; the verify step checks the matching public half."
+            echo "staging=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "staging=false" >> "$GITHUB_OUTPUT"
           fi
         shell: bash
 
@@ -419,18 +433,31 @@ jobs:
         env:
           ED25519_PRIVATE_KEY: ${{ secrets.ED25519_PRIVATE_KEY }}
         run: |
+          EXTRA=""
+          if [ "${{ steps.key.outputs.staging }}" = "true" ]; then EXTRA="--allow-insecure-dev-key"; fi
           go run scripts/generate_manifest.go \
             -version "${{ env.RELEASE_TAG }}" \
             -channel "${{ steps.meta.outputs.channel }}" \
             -dist release-assets \
             -strict-changelog \
+            $EXTRA \
             -out "release-assets/manifest-${{ steps.meta.outputs.channel }}.json"
 
       - name: Generate Checksums
-        if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
         working-directory: release-assets
         run: |
           sha256sum * > SHA256SUMS.txt
+
+      - name: Verify Manifest With the Updater's Own Code (sign + verify in one circle)
+        # Owner p5-1: the same ed25519 code path the shipped client uses
+        # (internal/core/updater.VerifyPayload) validates the freshly signed
+        # manifest and every listed artifact - so a bad key/format fails the
+        # rehearsal, not the release.
+        run: |
+          FLAG=""
+          if [ "${{ steps.key.outputs.staging }}" = "true" ]; then FLAG="--staging-pubkey"; fi
+          go run ./scripts/verify_manifest_sig.go --dist release-assets --channel "${{ steps.meta.outputs.channel }}" $FLAG
+        shell: bash
 
       - name: Generate Release Body with Complete 6-Row Artifact Table (DEFECT-2 Fix)
         run: |
@@ -498,9 +525,18 @@ jobs:
           cat release-assets/metrics.json
         shell: bash
 
+      - name: Upload Rehearsal Assets (manifest, sums, metrics - nothing is published)
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4 pinned
+        with:
+          name: rehearsal-release-assets
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Create GitHub Release
         if: ${{ startsWith(github.ref, 'refs/tags/') && github.event.inputs.publish != 'false' }}
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2 pinned (mutable tags are the workflow-injection vector)
         with:
           files: release-assets/*
           draft: false

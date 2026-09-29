@@ -541,6 +541,24 @@ let mockJavaRuntimeUpdates: JavaRuntimeUpdateDTO[] = [
   },
 ];
 
+/**
+ * Routes a link click to the OS browser. The Go side re-validates the scheme
+ * (http/https only); we pre-filter here so `javascript:`/relative hrefs never
+ * even leave the renderer.
+ */
+export async function openExternal(url: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url, window.location.href);
+  } catch {
+    return;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    return;
+  }
+  await invokeWails<void>("OpenExternal", async () => undefined, parsed.href);
+}
+
 export const launcherAPI = {
   setMockUpdateInfo(info: UpdateInfoDTO): void {
     mockUpdateInfo = { ...info };

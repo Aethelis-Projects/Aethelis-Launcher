@@ -1,6 +1,9 @@
 package wails
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // CSPMiddleware pins the webview to the app's own assets plus the exact
 // remote image hosts the UI actually renders (Modrinth/CurseForge CDN icons -
@@ -17,10 +20,7 @@ func CSPMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// CSPPolicy is the single source of truth; frontend/index.html keeps a
-// byte-equivalent <meta http-equiv> fallback for webview backends that do not
-// surface asset-server response headers (notably some webkit2gtk
-// custom-scheme paths). The byte-equality is unit-tested (csp_test.go).
+// CSPPolicy is the full header policy (single source of truth).
 func CSPPolicy() string {
 	return "default-src 'self'; " +
 		"script-src 'self'; " +
@@ -32,4 +32,31 @@ func CSPPolicy() string {
 		"base-uri 'none'; " +
 		"form-action 'none'; " +
 		"frame-ancestors 'none'"
+}
+
+// MetaOnlyDirectives are ignored when delivered via <meta http-equiv> per the
+// CSP spec, and browsers log "Ignored via <meta>: 'frame-ancestors'" - which
+// would break the "clean console" acceptance item. They are therefore header-
+// only, and the meta twin uses CSPPolicyForMeta().
+func metaUnsafeDirectives() []string {
+	return []string{"frame-ancestors", "sandbox", "report-uri", "report-to", "require-trusted-types-for", "trusted-types"}
+}
+
+// CSPPolicyForMeta is CSPPolicy() minus the directives a <meta> cannot carry.
+func CSPPolicyForMeta() string {
+	keep := make([]string, 0, 16)
+	for _, part := range strings.Split(CSPPolicy(), "; ") {
+		directive := part[:strings.Index(part, " ")]
+		drop := false
+		for _, bad := range metaUnsafeDirectives() {
+			if directive == bad {
+				drop = true
+				break
+			}
+		}
+		if !drop {
+			keep = append(keep, part)
+		}
+	}
+	return strings.Join(keep, "; ")
 }

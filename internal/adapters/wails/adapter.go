@@ -771,6 +771,17 @@ func (a *WailsAdapter) LoginMicrosoft() (*AccountDTO, error) {
 	}, nil
 }
 
+// OpenExternal hands an http(s) URL to the OS default browser. It exists so
+// the webview never navigates itself (or spawns an embedded popup window) on
+// a link that came from user-authored Modrinth/CurseForge content: the
+// frontend intercepts <a> clicks and routes them here. There is no
+// bypass-to-other-schemes path - validateExternalURL is the same gate the
+// auth flow already uses, so this method cannot reach file:, ms-msdt:, or a
+// custom protocol handler.
+func (a *WailsAdapter) OpenExternal(raw string) error {
+	return openBrowserCrossPlatform(strings.TrimSpace(raw))
+}
+
 func openBrowserCrossPlatform(url string) error {
 	if err := validateExternalURL(url); err != nil {
 		return err

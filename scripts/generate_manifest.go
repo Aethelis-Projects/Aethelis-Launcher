@@ -17,8 +17,9 @@ import (
 	"github.com/nord-launcher/launcher/internal/core/updater"
 )
 
-// DefaultStagingPrivateKeyHex is used for local builds/tests when ED25519_PRIVATE_KEY is not set.
-const DefaultStagingPrivateKeyHex = "88ec59f652844aded5ef72635fd0621042ffff0b75ec7c0e20185255b374f9af"
+// DefaultStagingPrivateKeyHex is declared once, in the updater package, next to
+// the verifier's trust root (v0.7.2 round-5: signer and verifier cannot drift).
+const DefaultStagingPrivateKeyHex = updater.StagingPrivateKeyHex
 
 func main() {
 	var (
