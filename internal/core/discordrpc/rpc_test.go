@@ -262,6 +262,9 @@ func TestRPC_NoDiscord_SilentDegradation(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", dir) // no listener anywhere
 
 	m := NewManager("app-id")
+	m.SetDialerForTest(func(ctx context.Context, _ []string) (net.Conn, error) {
+		return nil, errors.New("no listener")
+	})
 	m.SetEnabled(true)
 	time.Sleep(120 * time.Millisecond)
 	st := m.Status()

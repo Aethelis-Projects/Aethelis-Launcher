@@ -21,9 +21,16 @@ func CSPMiddleware(next http.Handler) http.Handler {
 }
 
 // CSPPolicy is the full header policy (single source of truth).
+//
+// Incident v0.7.2 regression fix: Wails v3 injects its JS IPC bridge inline
+// into the served document (and loads /wails/runtime.js via wails: on Linux).
+// Without 'unsafe-inline' and 'wails:', the webview blocks the bridge script,
+// rendering window.wails undefined and killing all IPC.
+// Other directives (default-src 'self', object-src 'none', frame-ancestors 'none', connect-src 'self')
+// remain strict to prevent external XSS.
 func CSPPolicy() string {
 	return "default-src 'self'; " +
-		"script-src 'self'; " +
+		"script-src 'self' 'unsafe-inline' wails:; " +
 		"style-src 'self' 'unsafe-inline'; " +
 		"img-src 'self' data: blob: https://cdn.modrinth.com https://*.modrinth.com https://mediafiles.forgecdn.net https://*.forgecdn.net; " +
 		"font-src 'self' data:; " +
